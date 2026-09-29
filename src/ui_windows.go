@@ -11,6 +11,9 @@ import (
 	. "github.com/lxn/walk/declarative"
 )
 
+// rsrc assigns ID 1 to the manifest and ID 2 to assets/parsec.ico.
+const applicationIconResourceID = 2
+
 func createSettingsWindow(root string, current Settings, currentSecret string) (*walk.MainWindow, *bool, error) {
 	var mw *walk.MainWindow
 	var provider *walk.ComboBox
@@ -60,6 +63,7 @@ func createSettingsWindow(root string, current Settings, currentSecret string) (
 
 	err := (MainWindow{
 		AssignTo: &mw, Title: "ParsecWebTurn - Connection Settings", SuspendedUntilRun: true,
+		Icon: applicationIconResourceID,
 		Font: Font{Family: "Segoe UI", PointSize: 10}, Background: SolidColorBrush{Color: background},
 		MinSize: Size{Width: 700, Height: 600}, Size: Size{Width: 760, Height: 650},
 		Layout: VBox{Margins: Margins{Left: 28, Top: 24, Right: 28, Bottom: 24}, Spacing: 18},

@@ -50,6 +50,12 @@ func TestNativeSettingsWindow(t *testing.T) {
 	if window.Title() != "ParsecWebTurn - Connection Settings" {
 		t.Fatal("unexpected window title")
 	}
+	// WM_GETICON checks the native title-bar and taskbar icons.
+	for _, size := range []uintptr{0, 1} {
+		if window.SendMessage(0x007f, size, 0) == 0 {
+			t.Fatalf("missing native window icon (size %d)", size)
+		}
+	}
 	provider := settingsWidget(window, "provider").(*walk.ComboBox)
 	for _, index := range []int{1, 0} {
 		if err := provider.SetCurrentIndex(index); err != nil {
