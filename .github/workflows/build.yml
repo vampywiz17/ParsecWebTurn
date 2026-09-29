@@ -27,11 +27,24 @@ jobs:
       - name: Prepare Parsec icon resource
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           New-Item -ItemType Directory -Force -Path assets | Out-Null
-          Invoke-WebRequest "https://www.svgrepo.com/download/504721/parsec.svg" -OutFile "assets/parsec.svg"
 
-          choco install imagemagick -y --no-progress
-          magick "assets/parsec.svg" -background none -define icon:auto-resize=256,128,64,48,32,16 "assets/parsec.ico"
+          $haveSvg = $false
+          try {
+            Invoke-WebRequest "https://www.svgrepo.com/show/331528/parsec.svg" -OutFile "assets/parsec.svg" -Headers @{ "User-Agent" = "Mozilla/5.0" }
+            $head = Get-Content "assets/parsec.svg" -Raw
+            if ($head -match "<svg") { $haveSvg = $true }
+          } catch {
+            Write-Host "SVG Repo download failed, using official Parsec favicon fallback."
+          }
+
+          if ($haveSvg) {
+            choco install imagemagick -y --no-progress
+            magick "assets/parsec.svg" -background none -define icon:auto-resize=256,128,64,48,32,16 "assets/parsec.ico"
+          } else {
+            Invoke-WebRequest "https://parsec.app/favicon.ico" -OutFile "assets/parsec.ico"
+          }
 
           go install github.com/akavel/rsrc@latest
           & "$(go env GOPATH)\bin\rsrc.exe" -arch amd64 -ico "assets/parsec.ico" -o "src/rsrc.syso"
