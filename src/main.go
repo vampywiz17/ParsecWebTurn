@@ -411,8 +411,7 @@ func main() {
 			}
 			settings, token, err = loadSettings(root)
 			if err != nil {
-				showFatal("Cannot reload settings:
-" + err.Error())
+				showFatal("Cannot reload settings:\\n" + err.Error())
 			}
 			servers, err = requestIceServers(settings.TurnKeyID, token, settings.TTL)
 		}
