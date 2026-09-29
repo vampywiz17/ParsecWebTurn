@@ -12,15 +12,21 @@ import (
 )
 
 const (
-	defaultTTL = 86400
-	maxTTL     = 172800
+	defaultTTL         = 86400
+	maxTTL             = 172800
+	providerCloudflare = "cloudflare"
+	providerCustom     = "custom"
 )
 
 type Settings struct {
-	TurnKeyID        string `json:"turnKeyId"`
-	EncryptedToken   string `json:"encryptedApiToken"`
-	CacheCredentials bool   `json:"cacheCredentials"`
-	TTL              int    `json:"ttl"`
+	Provider                string   `json:"provider,omitempty"`
+	CustomURLs              []string `json:"customUrls,omitempty"`
+	CustomUsername          string   `json:"customUsername,omitempty"`
+	EncryptedCustomPassword string   `json:"encryptedCustomPassword,omitempty"`
+	TurnKeyID               string   `json:"turnKeyId"`
+	EncryptedToken          string   `json:"encryptedApiToken"`
+	CacheCredentials        bool     `json:"cacheCredentials"`
+	TTL                     int      `json:"ttl"`
 }
 
 func settingsPath(root string) string {
@@ -39,38 +45,88 @@ func loadSettings(root string) (Settings, string, error) {
 	if s.TTL == 0 {
 		s.TTL = defaultTTL
 	}
-	token, err := unprotectString(s.EncryptedToken)
-	if err != nil {
-		return s, "", fmt.Errorf("cannot decrypt API token for this Windows user: %w", err)
+	if s.Provider == "" {
+		s.Provider = providerCloudflare
 	}
-	if err := validateSettings(s.TurnKeyID, token, s.TTL); err != nil {
+	if s.Provider != providerCloudflare && s.Provider != providerCustom {
+		return s, "", errors.New("Unknown TURN provider; choose Cloudflare or Custom")
+	}
+	encrypted := s.EncryptedToken
+	if s.Provider == providerCustom {
+		encrypted = s.EncryptedCustomPassword
+	}
+	var token string
+	if encrypted != "" {
+		token, err = unprotectString(encrypted)
+	}
+	if err != nil {
+		return s, "", fmt.Errorf("cannot decrypt credentials for this Windows user: %w", err)
+	}
+	if err := validateConfiguration(s, token); err != nil {
 		return s, token, err
 	}
 	return s, token, nil
 }
 
 func saveSettings(root string, keyID, token string, ttl int, cacheCredentials bool) error {
-	keyID = strings.TrimSpace(keyID)
-	token = strings.TrimSpace(token)
-	if err := validateSettings(keyID, token, ttl); err != nil {
+	return saveConfiguration(root, Settings{Provider: providerCloudflare, TurnKeyID: keyID, TTL: ttl, CacheCredentials: cacheCredentials}, token, "")
+}
+
+func saveConfiguration(root string, s Settings, cloudToken, customPassword string) error {
+	if s.Provider == "" {
+		s.Provider = providerCloudflare
+	}
+	s.TurnKeyID = strings.TrimSpace(s.TurnKeyID)
+	cloudToken = strings.TrimSpace(cloudToken)
+	s.CustomUsername = strings.TrimSpace(s.CustomUsername)
+	secret := cloudToken
+	if s.Provider == providerCustom {
+		secret = customPassword
+	}
+	if err := validateConfiguration(s, secret); err != nil {
 		return err
 	}
-
-	enc, err := protectString(token)
-	if err != nil {
-		return fmt.Errorf("DPAPI encryption failed: %w", err)
+	if cloudToken != "" {
+		enc, err := protectString(cloudToken)
+		if err != nil {
+			return fmt.Errorf("DPAPI encryption failed: %w", err)
+		}
+		s.EncryptedToken = enc
 	}
-	s := Settings{
-		TurnKeyID:        keyID,
-		CacheCredentials: cacheCredentials,
-		EncryptedToken:   enc,
-		TTL:              ttl,
+	if customPassword != "" {
+		enc, err := protectString(customPassword)
+		if err != nil {
+			return fmt.Errorf("DPAPI encryption failed: %w", err)
+		}
+		s.EncryptedCustomPassword = enc
+	} else if s.Provider == providerCustom {
+		s.EncryptedCustomPassword = ""
+	}
+	if s.Provider == providerCustom {
+		servers, _ := customIceServers(s.CustomURLs, s.CustomUsername, customPassword)
+		var normalized []iceServer
+		if err := json.Unmarshal(servers, &normalized); err != nil {
+			return err
+		}
+		s.CustomURLs = normalized[0].URLs
 	}
 	raw, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err
 	}
 	return atomicWriteFile(settingsPath(root), raw)
+}
+
+func validateConfiguration(s Settings, secret string) error {
+	switch s.Provider {
+	case "", providerCloudflare:
+		return validateSettings(s.TurnKeyID, secret, s.TTL)
+	case providerCustom:
+		_, err := customIceServers(s.CustomURLs, s.CustomUsername, secret)
+		return err
+	default:
+		return errors.New("Unknown TURN provider; choose Cloudflare or Custom")
+	}
 }
 
 func validateSettings(keyID, token string, ttl int) error {

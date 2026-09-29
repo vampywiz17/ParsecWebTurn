@@ -25,3 +25,5 @@ assets/parsec.svg
 .turn-cache.json
 .parsecwebturn-*.tmp
 dist/
+settings-cloudflare.png
+settings-custom.png

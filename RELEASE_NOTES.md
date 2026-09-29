@@ -1,15 +1,17 @@
-ParsecWebTurn v0.3.0 improves startup reliability and simplifies building and releasing the portable Windows launcher.
+ParsecWebTurn v0.4.0 adds a modern settings interface and direct support for your own STUN/TURN servers.
 
-- ICE overrides cover both WebRTC construction and later `setConfiguration()` calls.
-- Invalid server configurations are rejected before launch; browser-blocked port 53 URLs are filtered.
-- Optional DPAPI-encrypted credential caching speeds up repeat launches while conservatively checking expiry and settings changes.
-- Running profiles and concurrent launchers are detected so the generated configuration is not silently replaced while Edge is active.
-- TURN credentials are no longer logged to the browser console.
-- Settings and runtime files use safe replacement writes.
-- Local and CI builds share one script, embed the Common Controls v6 manifest and checked-in icon, and run Go and JavaScript regression tests.
+- Parsec-inspired dark header, pink accents, a spacious connection card and inline validation.
+- Choose Cloudflare Realtime or a custom provider with fields tailored to each option.
+- Configure coturn, eturnal and other standard services using multiple URLs and a common username/password.
+- UDP, TCP, TLS and STUN-only configurations are supported.
+- Custom passwords are saved using Windows DPAPI; custom mode requires no Cloudflare credentials or API calls.
+- Switching providers preserves existing settings, and older Cloudflare settings migrate automatically.
+- Additional tests cover provider selection, encrypted custom storage, offline resolution, migration and saving through the native form.
 
-Download **ParsecWebTurn-v0.3.0-win64.zip**, extract it to a writable directory, and run `ParsecWebTurn.exe`. Existing `settings.json` files remain compatible; caching is opt-in in Settings. The standalone EXE also needs the `extension` files provided in the ZIP.
+Download **ParsecWebTurn-v0.4.0-win64.zip**, extract it to a writable directory, and run `ParsecWebTurn.exe`. Existing `settings.json` files remain compatible; Cloudflare caching is still opt-in. The standalone EXE also needs the `extension` files provided in the ZIP.
 
 Close existing ParsecWebTurn Edge windows before starting this version. Credentials are refreshed at launch; choose a TTL longer than your expected session. There is no automatic credential refresh within an already open session.
 
-The direct-to-Cloudflare, no-install design is unchanged. The API token and optional cache are protected by Windows DPAPI for the current user. Generated `extension/inject.js` still contains temporary TURN credentials and should not be shared.
+Custom TURN accepts static or externally generated username/password pairs. A TURN REST shared secret is not a client password: generate the temporary credential pair on your server first. The app does not generate or refresh custom REST credentials.
+
+The no-install design is unchanged. Saved secrets are protected by Windows DPAPI for the current user. Generated `extension/inject.js` necessarily contains the active TURN credential, which can be long-lived for custom static accounts; do not share that file or the browser profile.

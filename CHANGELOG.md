@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - Unreleased
+
+### Added
+
+- Custom STUN/TURN provider configuration for standard services such as coturn and eturnal.
+- Multiple server URLs with a common username/password; static and externally generated credentials, UDP/TCP/TLS endpoints and STUN-only configurations are supported.
+- Windows DPAPI protection for saved custom TURN passwords.
+- Provider switching retains Cloudflare and custom configuration without requiring re-entry of secrets.
+- Custom provider, legacy migration, encrypted storage, no-network startup and native form-save tests.
+
+### Changed
+
+- Modern settings window with a dark header, Parsec-inspired pink accents, a spaced connection card and inline validation.
+- Provider-specific fields are shown only when relevant; custom mode requires no Cloudflare key, TTL or API request.
+- Generalize startup errors to cover both providers.
+
+### Security
+
+- Custom credentials are encrypted in settings, but the generated browser injection necessarily contains the active TURN credential. For static custom accounts this credential is long-lived. Do not share the generated injection or profile.
+- TURN REST shared secrets are not accepted as client passwords; generate the temporary username/password on your server and enter those values instead.
+
 ## [0.3.0] - 2026-09-29
 
 ### Added
