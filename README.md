@@ -9,6 +9,7 @@ Portable, no-install launcher for **Parsec Web** using **Microsoft Edge** and ei
 - installs no VPN, driver, .NET runtime, or WebView2 runtime
 - uses the Microsoft Edge already present on Windows
 - creates a separate local Edge profile beside the application
+- disables automatic translation prompts in that dedicated profile for a cleaner app window
 - injects the ICE override at `document_start`, before the Parsec page scripts run
 - requests short-lived TURN credentials directly from Cloudflare, with optional encrypted caching
 - stores the long-lived TURN API token locally using **Windows DPAPI / Current User**

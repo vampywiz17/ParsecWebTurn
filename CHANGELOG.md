@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Suppress Edge's automatic translation offer in the dedicated app profile while preserving other browser preferences.
 - Modern settings window with a dark header, Parsec-inspired pink accents, a spaced connection card and inline validation.
 - Provider-specific fields are shown only when relevant; custom mode requires no Cloudflare key, TTL or API request.
 - Generalize startup errors to cover both providers.

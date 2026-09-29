@@ -64,8 +64,8 @@ func startEdge(root string) error {
 		HideWindow:    true,
 		CreationFlags: 0x00000008, // DETACHED_PROCESS
 	}
-	if err := ensureProfileStopped(profile); err != nil {
-		return err
+	if err := prepareEdgeProfile(profile); err != nil {
+		return fmt.Errorf("cannot configure app browser: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
 		return err

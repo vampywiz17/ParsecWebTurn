@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"image/png"
 	"os"
 	"os/exec"
@@ -156,6 +157,9 @@ func TestRealEdgeProfileLock(t *testing.T) {
 		t.Fatal("Microsoft Edge is required for native smoke tests")
 	}
 	profile := filepath.Join(t.TempDir(), "Profile")
+	if err := prepareEdgeProfile(profile); err != nil {
+		t.Fatal(err)
+	}
 	cmd := exec.Command(edge, "--headless=new", "--user-data-dir="+profile, "--no-first-run", "--no-default-browser-check", "--remote-debugging-port=0", "about:blank")
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	if err := cmd.Start(); err != nil {
@@ -187,6 +191,15 @@ func TestRealEdgeProfileLock(t *testing.T) {
 			active, _ := profileActive(profile)
 			if !active {
 				time.Sleep(500 * time.Millisecond)
+				data, err := os.ReadFile(filepath.Join(profile, "Default", "Preferences"))
+				var preferences struct {
+					Translate struct {
+						Enabled *bool `json:"enabled"`
+					} `json:"translate"`
+				}
+				if err != nil || json.Unmarshal(data, &preferences) != nil || preferences.Translate.Enabled == nil || *preferences.Translate.Enabled {
+					t.Error("Edge did not retain the disabled translation preference")
+				}
 				return
 			}
 			time.Sleep(100 * time.Millisecond)
@@ -209,6 +222,9 @@ func TestRealEdgeProfileLock(t *testing.T) {
 			endpoint = "ws://127.0.0.1:" + strings.TrimSpace(parts[0]) + strings.TrimSpace(parts[1])
 			if err := ensureProfileStopped(profile); err == nil {
 				t.Fatal("real running Edge profile was accepted")
+			}
+			if err := prepareEdgeProfile(profile); err == nil {
+				t.Fatal("preferences changed while Edge was running")
 			}
 			return
 		}
