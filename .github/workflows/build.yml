@@ -47,7 +47,7 @@ jobs:
           }
 
           go install github.com/akavel/rsrc@latest
-          & "$(go env GOPATH)\bin\rsrc.exe" -arch amd64 -ico "assets/parsec.ico" -o "src/rsrc.syso"
+          & "$(go env GOPATH)\bin\rsrc.exe" -arch amd64 -manifest "assets/app.manifest" -ico "assets/parsec.ico" -o "src/rsrc.syso"
 
       - name: Build
         shell: pwsh
