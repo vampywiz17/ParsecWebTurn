@@ -234,8 +234,7 @@ func showSettings(root string, current Settings, currentToken string) bool {
 		},
 	}).Create()
 	if err != nil {
-		walk.MsgBox(nil, "ParsecWebTurn", "Cannot create settings window:
-"+err.Error(), walk.MsgBoxIconError)
+		walk.MsgBox(nil, "ParsecWebTurn", "Cannot create settings window:\\n"+err.Error(), walk.MsgBoxIconError)
 		return false
 	}
 
@@ -306,11 +305,11 @@ func generateInjection(root string, servers json.RawMessage) error {
 
 	template, err := os.ReadFile(templatePath)
 	if err != nil {
-		return fmt.Errorf("cannot read extension\inject.template.js: %w", err)
+		return fmt.Errorf("cannot read extension\\\\inject.template.js: %w", err)
 	}
 	inject := strings.Replace(string(template), "__ICE_SERVERS__", string(servers), 1)
 	if err := os.WriteFile(injectPath, []byte(inject), 0600); err != nil {
-		return fmt.Errorf("cannot generate extension\inject.js: %w", err)
+		return fmt.Errorf("cannot generate extension\\\\inject.js: %w", err)
 	}
 	return nil
 }
@@ -339,7 +338,7 @@ func findEdge() string {
 
 func startEdge(root string) error {
 	if _, err := os.Stat(filepath.Join(root, "extension", "manifest.json")); err != nil {
-		return errors.New("extension\manifest.json is missing")
+		return errors.New("extension\\\\manifest.json is missing")
 	}
 	edge := findEdge()
 	if edge == "" {
@@ -387,16 +386,14 @@ func main() {
 	settings, token, err := loadSettings(root)
 	if forceSettings || err != nil {
 		if err != nil && !os.IsNotExist(err) {
-			walk.MsgBox(nil, "ParsecWebTurn", "Stored settings could not be loaded:
-"+err.Error(), walk.MsgBoxIconWarning)
+			walk.MsgBox(nil, "ParsecWebTurn", "Stored settings could not be loaded:\\n"+err.Error(), walk.MsgBoxIconWarning)
 		}
 		if !showSettings(root, settings, token) {
 			return
 		}
 		settings, token, err = loadSettings(root)
 		if err != nil {
-			showFatal("Cannot reload settings:
-" + err.Error())
+			showFatal("Cannot reload settings:\\n" + err.Error())
 		}
 	}
 
@@ -405,12 +402,7 @@ func main() {
 		choice := walk.MsgBox(
 			nil,
 			"ParsecWebTurn - Cloudflare TURN error",
-			err.Error()+"
-
-Retry after editing Cloudflare settings?
-
-Yes = open Settings
-No = try local ice.json fallback",
+			err.Error()+"\\n\\nRetry after editing Cloudflare settings?\\n\\nYes = open Settings\\nNo = try local ice.json fallback",
 			walk.MsgBoxYesNo|walk.MsgBoxIconWarning,
 		)
 		if choice == walk.DlgCmdYes {
@@ -427,9 +419,7 @@ No = try local ice.json fallback",
 		if err != nil {
 			servers, err = loadIceFallback(root)
 			if err != nil {
-				showFatal("Cloudflare credential generation failed and no usable ice.json fallback was found.
-
-" + err.Error())
+				showFatal("Cloudflare credential generation failed and no usable ice.json fallback was found.\\n\\n" + err.Error())
 			}
 		}
 	}
@@ -438,7 +428,6 @@ No = try local ice.json fallback",
 		showFatal(err.Error())
 	}
 	if err := startEdge(root); err != nil {
-		showFatal("Failed to start Edge:
-" + err.Error())
+		showFatal("Failed to start Edge:\\n" + err.Error())
 	}
 }
