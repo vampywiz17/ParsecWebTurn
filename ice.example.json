@@ -1,0 +1,14 @@
+{
+  "iceServers": [
+    {
+      "urls": [
+        "stun:stun.cloudflare.com:3478",
+        "turn:turn.cloudflare.com:3478?transport=udp",
+        "turn:turn.cloudflare.com:3478?transport=tcp",
+        "turns:turn.cloudflare.com:5349?transport=tcp"
+      ],
+      "username": "PASTE_CLOUDFLARE_TURN_USERNAME_HERE",
+      "credential": "PASTE_CLOUDFLARE_TURN_CREDENTIAL_HERE"
+    }
+  ]
+}
