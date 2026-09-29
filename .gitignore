@@ -1,0 +1,16 @@
+# Sensitive local configuration
+ice.json
+extension/inject.js
+
+# Runtime profile and local data
+Profile/
+
+# Build output
+ParsecWebTurn.exe
+*.exe
+
+# Editor/OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
