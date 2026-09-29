@@ -93,7 +93,7 @@ jobs:
           Windows GUI compatibility fix for automatic Cloudflare TURN credential management.
 
           ### What's new
-- Fixes `TTM_ADDTOOL failed` on affected Windows systems by embedding the required Microsoft Common Controls v6 application manifest.
+          - Fixes `TTM_ADDTOOL failed` on affected Windows systems by embedding the required Microsoft Common Controls v6 application manifest.
           - First-run native Windows settings dialog.
           - Enter your Cloudflare Realtime TURN **Key ID** and **API token** once.
           - Fresh short-lived TURN username/password are generated automatically on every launch.
