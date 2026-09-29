@@ -1,0 +1,98 @@
+name: Release v0.1.0
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/release-v0.1.0.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      - name: Build Windows x64
+        shell: pwsh
+        run: |
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          go build -trimpath -ldflags "-s -w -H=windowsgui" -o ParsecWebTurn.exe ./src
+
+      - name: Prepare release package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $pkg = "dist/ParsecWebTurn-v0.1.0-win64"
+          New-Item -ItemType Directory -Force -Path $pkg | Out-Null
+          New-Item -ItemType Directory -Force -Path "$pkg/extension" | Out-Null
+
+          Copy-Item ParsecWebTurn.exe "$pkg/"
+          Copy-Item ice.example.json "$pkg/"
+          Copy-Item README.md "$pkg/"
+          Copy-Item LICENSE "$pkg/"
+          Copy-Item CHANGELOG.md "$pkg/"
+          Copy-Item extension/manifest.json "$pkg/extension/"
+          Copy-Item extension/inject.template.js "$pkg/extension/"
+
+          Compress-Archive -Path "$pkg/*" -DestinationPath "dist/ParsecWebTurn-v0.1.0-win64.zip" -Force
+
+          $exeHash = (Get-FileHash "ParsecWebTurn.exe" -Algorithm SHA256).Hash.ToLower()
+          $zipHash = (Get-FileHash "dist/ParsecWebTurn-v0.1.0-win64.zip" -Algorithm SHA256).Hash.ToLower()
+
+          @(
+            "$exeHash  ParsecWebTurn.exe"
+            "$zipHash  ParsecWebTurn-v0.1.0-win64.zip"
+          ) | Set-Content -Encoding ascii "dist/SHA256SUMS.txt"
+
+      - name: Create GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = @'
+          ## ParsecWebTurn v0.1.0
+
+          Initial public release.
+
+          ### Highlights
+          - Portable Windows x64 launcher.
+          - No administrator rights required.
+          - Uses Microsoft Edge in app mode.
+          - Injects the custom WebRTC ICE configuration before Parsec Web starts.
+          - Supports Cloudflare STUN/TURN through a local `ice.json`.
+          - No TURN secrets are included in the release.
+
+          ### Installation
+          1. Download `ParsecWebTurn-v0.1.0-win64.zip`.
+          2. Extract it to any writable directory.
+          3. Copy `ice.example.json` to `ice.json`.
+          4. Put your short-lived Cloudflare TURN username and credential into `ice.json`.
+          5. Run `ParsecWebTurn.exe`.
+
+          Microsoft Edge must already be present on the Windows machine. Nothing else is installed.
+
+          ### Security
+          Do not commit or share your real `ice.json`. Keep the Cloudflare TURN API token/server-side key out of the client.
+
+          See `CHANGELOG.md` for the full initial changelog.
+          '@
+
+          gh release create v0.1.0 `
+            "ParsecWebTurn.exe" `
+            "dist/ParsecWebTurn-v0.1.0-win64.zip" `
+            "dist/SHA256SUMS.txt" `
+            --title "ParsecWebTurn v0.1.0" `
+            --notes "$notes" `
+            --target "${{ github.sha }}"
