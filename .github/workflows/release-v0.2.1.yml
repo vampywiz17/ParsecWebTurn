@@ -1,0 +1,129 @@
+name: Release v0.2.1
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/release-v0.2.1.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      - name: Prepare Parsec icon resource
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path assets | Out-Null
+
+          $haveSvg = $false
+          try {
+            Invoke-WebRequest "https://www.svgrepo.com/show/331528/parsec.svg" -OutFile "assets/parsec.svg" -Headers @{ "User-Agent" = "Mozilla/5.0" }
+            $head = Get-Content "assets/parsec.svg" -Raw
+            if ($head -match "<svg") { $haveSvg = $true }
+          } catch {
+            Write-Host "SVG Repo download failed, using official Parsec favicon fallback."
+          }
+
+          if ($haveSvg) {
+            choco install imagemagick -y --no-progress
+            magick "assets/parsec.svg" -background none -define icon:auto-resize=256,128,64,48,32,16 "assets/parsec.ico"
+          } else {
+            Invoke-WebRequest "https://parsec.app/favicon.ico" -OutFile "assets/parsec.ico"
+          }
+
+          go install github.com/akavel/rsrc@latest
+          & "$(go env GOPATH)\bin\rsrc.exe" -arch amd64 -manifest "assets/app.manifest" -ico "assets/parsec.ico" -o "src/rsrc.syso"
+
+      - name: Build Windows x64
+        shell: pwsh
+        run: |
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          go mod tidy
+          go build -trimpath -ldflags "-s -w -H=windowsgui" -o ParsecWebTurn.exe ./src
+
+      - name: Prepare release package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $pkg = "dist/ParsecWebTurn-v0.2.1-win64"
+          New-Item -ItemType Directory -Force -Path $pkg | Out-Null
+          New-Item -ItemType Directory -Force -Path "$pkg/extension" | Out-Null
+
+          Copy-Item ParsecWebTurn.exe "$pkg/"
+          Copy-Item ice.example.json "$pkg/"
+          Copy-Item README.md "$pkg/"
+          Copy-Item LICENSE "$pkg/"
+          Copy-Item CHANGELOG.md "$pkg/"
+          Copy-Item extension/manifest.json "$pkg/extension/"
+          Copy-Item extension/inject.template.js "$pkg/extension/"
+
+          Compress-Archive -Path "$pkg/*" -DestinationPath "dist/ParsecWebTurn-v0.2.1-win64.zip" -Force
+
+          $exeHash = (Get-FileHash "ParsecWebTurn.exe" -Algorithm SHA256).Hash.ToLower()
+          $zipHash = (Get-FileHash "dist/ParsecWebTurn-v0.2.1-win64.zip" -Algorithm SHA256).Hash.ToLower()
+
+          @(
+            "$exeHash  ParsecWebTurn.exe"
+            "$zipHash  ParsecWebTurn-v0.2.1-win64.zip"
+          ) | Set-Content -Encoding ascii "dist/SHA256SUMS.txt"
+
+      - name: Create GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = @'
+          ## ParsecWebTurn v0.2.1
+
+          Windows GUI compatibility fix for automatic Cloudflare TURN credential management.
+
+          ### What's new
+- Fixes `TTM_ADDTOOL failed` on affected Windows systems by embedding the required Microsoft Common Controls v6 application manifest.
+          - First-run native Windows settings dialog.
+          - Enter your Cloudflare Realtime TURN **Key ID** and **API token** once.
+          - Fresh short-lived TURN username/password are generated automatically on every launch.
+          - The long-lived API token is encrypted locally with **Windows DPAPI (Current User)**.
+          - Configurable credential lifetime up to 48 hours.
+          - `--settings` / `/settings` opens configuration again later.
+          - `ice.json` remains available as a fallback.
+          - Parsec icon is embedded in the Windows executable.
+          - No admin rights, VPN driver, WARP client, .NET runtime, or separate WebView2 installation is required.
+
+          ### Quick start
+          1. Download `ParsecWebTurn-v0.2.1-win64.zip`.
+          2. Extract it into a writable folder.
+          3. Run `ParsecWebTurn.exe`.
+          4. Enter your Cloudflare TURN Key ID and API token.
+          5. Click **Save & Start**.
+          6. Parsec Web opens in Microsoft Edge app mode with the generated Cloudflare STUN/TURN configuration.
+
+          ### Security note
+          This release is intentionally backend-free. Your long-lived Cloudflare TURN API token therefore exists on the local PC, but it is stored encrypted with Windows DPAPI and is not embedded in the executable. Use this mode only on a Windows account/device you trust.
+
+          The generated `extension/inject.js` contains only the current short-lived TURN credential and should still be treated as sensitive until it expires.
+
+          See `CHANGELOG.md` and `README.md` for full details.
+          '@
+
+          gh release create v0.2.1 `
+            "ParsecWebTurn.exe" `
+            "dist/ParsecWebTurn-v0.2.1-win64.zip" `
+            "dist/SHA256SUMS.txt" `
+            --title "ParsecWebTurn v0.2.1" `
+            --notes "$notes" `
+            --target "${{ github.sha }}"
