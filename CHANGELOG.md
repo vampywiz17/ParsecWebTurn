@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-09-29
+
+### Added
+
+- Optional DPAPI-encrypted TURN credential cache with conservative expiry checks and invalidation on Key ID, API token or TTL changes.
+- Dedicated Edge profile detection and launcher locking to prevent stale configuration reuse and concurrent writes during startup.
+- Go tests covering ICE/API validation, Windows DPAPI, credential caching, file replacement, profile locking and injection generation.
+- JavaScript regression tests for construction, subsequent configuration updates, inheritance, duplicate injection and credential-free logging.
+
+### Fixed
+
+- ICE overrides now also apply to `RTCPeerConnection.setConfiguration()`.
+- Invalid ICE entries and missing TURN authentication are rejected before Edge starts.
+- Browser-blocked port 53 endpoints are removed from ICE configurations.
+- TURN usernames/passwords are no longer printed to the console.
+- Windows messages use real newlines; fallback errors retain both the API and fallback failure.
+- Settings, cache and generated injection use temporary files with Windows replacement semantics.
+- Local builds embed the same Common Controls v6 manifest as release builds.
+
+### Changed
+
+- Split the launcher into small files for settings, UI, DPAPI, Cloudflare, ICE, cache, files, profile, extension and Edge operations.
+- Replace version-specific release workflows with one tag-triggered release workflow and a shared build/package script.
+- Commit dependency checksums, pin the resource generator and store the icon locally; remove build-time icon downloads/conversion and `go mod tidy`.
+- Add a TLS TURN port 443 fallback to the example configuration.
+- Inject the executable version into the API User-Agent at build time.
+
+### Compatibility
+
+- Existing settings files still work; credential caching is disabled unless enabled in Settings.
+- Credentials are refreshed at launch, not automatically within an open browser session. Close the dedicated Edge profile before relaunching and choose a TTL longer than your expected session.
+
 ## [0.2.1] - 2026-09-29
 
 ### Fixed

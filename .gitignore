@@ -19,4 +19,9 @@ Thumbs.db
 # Generated Windows resources
 src/rsrc.syso
 assets/parsec.svg
-assets/parsec.ico
+
+# Launcher state, credentials and temporary writes
+.launcher.lock
+.turn-cache.json
+.parsecwebturn-*.tmp
+dist/

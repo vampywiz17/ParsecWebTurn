@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Parsec Web TURN Override",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Overrides Parsec Web WebRTC ICE servers at document start.",
   "content_scripts": [
     {

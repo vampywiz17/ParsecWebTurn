@@ -1,13 +1,9 @@
 # Icon source
 
-The Windows executable icon is downloaded during CI build from:
+`parsec.ico` is the Parsec favicon obtained from <https://parsec.app/favicon.ico> on 2026-09-29. It is checked in so builds require no icon download, ImageMagick installation or conversion.
 
-https://www.svgrepo.com/show/331528/parsec.svg
-
-SVG Repo currently resolves/listings for the Parsec icon to:
-
-https://www.svgrepo.com/show/504721/parsec.svg
+SHA-256: `fce1a24e408ac00dcef4c8eb64e20d4042728b1fd1e96965a3da0f6f21869770`
 
 The icon is used only to identify the Parsec-focused launcher. ParsecWebTurn is an independent community project and is not affiliated with, endorsed by, or sponsored by Parsec or Unity.
 
-Before redistributing branded assets, review the current SVG Repo license/source information and the applicable Parsec trademark rules.
+Parsec trademarks remain the property of their owners.

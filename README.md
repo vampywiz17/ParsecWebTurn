@@ -10,7 +10,7 @@ Portable, no-install launcher for **Parsec Web** using **Microsoft Edge** and a 
 - uses the Microsoft Edge already present on Windows
 - creates a separate local Edge profile beside the application
 - injects the ICE override at `document_start`, before the Parsec page scripts run
-- automatically requests fresh short-lived TURN credentials directly from Cloudflare
+- requests short-lived TURN credentials directly from Cloudflare, with optional encrypted caching
 - stores the long-lived TURN API token locally using **Windows DPAPI / Current User**
 - supports a local `ice.json` fallback
 - uses the Parsec icon for the Windows executable
@@ -27,7 +27,11 @@ Portable, no-install launcher for **Parsec Web** using **Microsoft Edge** and a 
 
 ParsecWebTurn stores the TURN Key ID and TTL in `settings.json`. The API token is encrypted with Windows DPAPI and can only be decrypted in the same Windows user context.
 
-On every normal start the app calls Cloudflare's TURN credential endpoint and obtains a new short-lived `username` / `credential` pair automatically.
+By default, every start calls Cloudflare's TURN credential endpoint and obtains a new short-lived `username` / `credential` pair. Existing settings remain compatible.
+
+Enable **Reuse valid TURN credentials for faster startup** in Settings to avoid unnecessary API calls. The cache in `.turn-cache.json` is encrypted with DPAPI for the current Windows user. It is reused only when the Key ID, API token and TTL match, the local clock has not moved behind its issue time, and more than a quarter of the requested lifetime remains (at least five minutes). Expired, corrupt or incompatible caches trigger a fresh request. A cache write failure does not prevent a valid session from starting. A cached credential can have less remaining lifetime than the configured TTL; disable caching if your next session needs the full lifetime.
+
+The launcher does not refresh credentials in an already open browser. Set the TTL longer than your expected session, then close the dedicated Parsec Edge windows and launch again when you need fresh credentials. Launching while that profile is active shows a clear message instead of silently reusing old page configuration. If Edge keeps the profile active after closing its windows, disable Startup boost and background extensions in that dedicated profile.
 
 ## Cloudflare setup
 
@@ -77,7 +81,8 @@ Copy `ice.example.json` to `ice.json` and fill in a valid short-lived TURN usern
         "stun:stun.cloudflare.com:3478",
         "turn:turn.cloudflare.com:3478?transport=udp",
         "turn:turn.cloudflare.com:3478?transport=tcp",
-        "turns:turn.cloudflare.com:5349?transport=tcp"
+        "turns:turn.cloudflare.com:5349?transport=tcp",
+        "turns:turn.cloudflare.com:443?transport=tcp"
       ],
       "username": "YOUR_USERNAME",
       "credential": "YOUR_CREDENTIAL"
@@ -95,28 +100,29 @@ That means the long-lived TURN API token exists on the client PC. To reduce expo
 - it is never embedded in the executable or GitHub repository
 - it is stored with Windows DPAPI for the current user
 - only short-lived TURN credentials are written into the generated `extension/inject.js`
-- `settings.json`, `ice.json`, `extension/inject.js`, and `Profile/` must not be committed or shared
+- `settings.json`, `.turn-cache.json`, `ice.json`, `extension/inject.js`, and `Profile/` must not be committed or shared
+- console messages do not include TURN usernames or passwords
 
 For environments where the client device itself is not trusted, use a backend credential broker instead.
 
 ## Build
 
-Requires Go. The GitHub Actions workflow also downloads the Parsec SVG icon and embeds it in the Windows executable.
+Requires Windows, Go (CI uses 1.27.1), Node.js 24 or newer, and PowerShell. The same script is used locally and in CI; it embeds the checked-in icon and required Common Controls v6 manifest, runs Go and JavaScript tests, and creates the executable, portable ZIP and SHA-256 checksums.
 
 ```powershell
-$env:GOOS = "windows"
-$env:GOARCH = "amd64"
-go build -trimpath -ldflags "-s -w -H=windowsgui" -o ParsecWebTurn.exe ./src
+.\scripts\build.ps1
 ```
 
-For a local build with the same EXE icon as the release, generate a Windows resource first; see `.github/workflows/build.yml`.
+The first build downloads the Go dependencies and `github.com/akavel/rsrc@v0.10.2`. Dependency checksums are committed in `go.sum`; builds use `-mod=readonly` and do not run `go mod tidy`. The icon is not downloaded or converted during builds.
+
+For a release, update `VERSION`, `CHANGELOG.md` and `RELEASE_NOTES.md`, merge the validated changes into `main`, then push the matching `vX.Y.Z` tag. The release workflow validates the version and reruns the shared build before publishing assets. ZIP packaging uses an explicit file allowlist so local runtime files cannot enter a release.
 
 ## Troubleshooting
 
 Open Edge DevTools with `F12` and check the Console for:
 
 ```text
-[ParsecWebTurn] Cloudflare STUN/TURN override:
+[ParsecWebTurn] ICE override installed before Parsec startup; server count:
 ```
 
 For WebRTC diagnostics open:
@@ -125,11 +131,13 @@ For WebRTC diagnostics open:
 edge://webrtc-internals
 ```
 
-A successful TURN path should show a selected candidate pair with `state=succeeded` and a relay candidate.
+A successful TURN path should show a selected candidate pair with `state=succeeded` and a relay candidate. The override applies both at construction and to subsequent `setConfiguration()` calls. It preserves the application's transport policy; configuring TURN servers alone does not force a relay connection.
+
+Both API responses and `ice.json` are validated before launch. Browser-blocked port 53 URLs are filtered out; an empty usable configuration is rejected.
 
 ## Icon / trademark note
 
-The executable uses the Parsec SVG icon requested for this project, sourced from SVG Repo. See `assets/README.md` for the source link.
+The executable uses a checked-in Parsec favicon. See `assets/README.md` for its source and checksum.
 
 ParsecWebTurn is an independent community project and is **not affiliated with, endorsed by, or sponsored by Parsec or Unity**.
 

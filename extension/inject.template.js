@@ -11,22 +11,17 @@
   }
 
   const ICE_SERVERS = __ICE_SERVERS__;
+  const patchConfig = (config) => ({ ...config, iceServers: ICE_SERVERS });
 
   class PatchedRTCPeerConnection extends OriginalRTCPeerConnection {
     constructor(config = {}, constraints) {
-      const patchedConfig = {
-        ...config,
-        iceServers: ICE_SERVERS
-      };
+      super(patchConfig(config), constraints);
+    }
 
-      console.log("[ParsecWebTurn] Cloudflare STUN/TURN override:", patchedConfig.iceServers);
-      super(patchedConfig, constraints);
+    setConfiguration(config) {
+      return super.setConfiguration(patchConfig(config));
     }
   }
-
-  try {
-    Object.setPrototypeOf(PatchedRTCPeerConnection, OriginalRTCPeerConnection);
-  } catch (_) {}
 
   window.RTCPeerConnection = PatchedRTCPeerConnection;
   if (window.webkitRTCPeerConnection) {
@@ -34,5 +29,5 @@
   }
 
   window.__parsecWebTurnPatched = true;
-  console.log("[ParsecWebTurn] ICE override installed before Parsec startup");
+  console.log("[ParsecWebTurn] ICE override installed before Parsec startup; server count:", ICE_SERVERS.length);
 })();
