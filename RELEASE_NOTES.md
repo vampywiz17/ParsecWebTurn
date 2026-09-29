@@ -1,6 +1,8 @@
 ParsecWebTurn v0.4.0 adds a modern settings interface and direct support for your own STUN/TURN servers.
 
 - Parsec-inspired dark header, pink accents, a spacious connection card and inline validation.
+- Matching Parsec icons in the settings window title bar and Windows taskbar.
+- Automatic Edge translation prompts disabled in the dedicated app profile, preserving other preferences and existing sign-in sessions.
 - Choose Cloudflare Realtime or a custom provider with fields tailored to each option.
 - Configure coturn, eturnal and other standard services using multiple URLs and a common username/password.
 - UDP, TCP, TLS and STUN-only configurations are supported.
