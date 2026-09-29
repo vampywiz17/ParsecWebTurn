@@ -1,27 +1,73 @@
 # ParsecWebTurn
 
-Portable, no-install launcher for **Parsec Web** using **Microsoft Edge** and a custom WebRTC STUN/TURN configuration.
+Portable, no-install launcher for **Parsec Web** using **Microsoft Edge** and a custom Cloudflare Realtime WebRTC STUN/TURN configuration.
 
 ## What it does
 
 - launches `https://web.parsec.app/` as an Edge app window
-- uses a separate portable Edge profile in the same folder
-- loads a small unpacked Manifest V3 extension only for `web.parsec.app`
+- requires **no administrator rights**
+- installs no VPN, driver, .NET runtime, or WebView2 runtime
+- uses the Microsoft Edge already present on Windows
+- creates a separate local Edge profile beside the application
 - injects the ICE override at `document_start`, before the Parsec page scripts run
-- replaces Parsec's default ICE list with the contents of `ice.json`
-- requires **no administrator rights** and installs nothing
+- automatically requests fresh short-lived TURN credentials directly from Cloudflare
+- stores the long-lived TURN API token locally using **Windows DPAPI / Current User**
+- supports a local `ice.json` fallback
+- uses the Parsec icon for the Windows executable
 
-The launcher uses the Microsoft Edge already present on Windows. No separate .NET runtime, WebView2 install, VPN driver, WARP client, or browser extension installation is required.
+## First run
 
-## Setup
+1. Download and extract the release ZIP to any writable directory.
+2. Run `ParsecWebTurn.exe`.
+3. Enter:
+   - **Cloudflare TURN Key ID**
+   - **Cloudflare TURN Key API Token**
+   - credential TTL in seconds (default 86400 / 24 hours, maximum 172800 / 48 hours)
+4. Click **Save & Start**.
 
-1. Download or build `ParsecWebTurn.exe`.
-2. Copy `ice.example.json` to `ice.json`.
-3. Put your short-lived Cloudflare TURN `username` and `credential` into `ice.json`.
-4. Keep the `extension` directory next to the EXE.
-5. Start `ParsecWebTurn.exe`.
+ParsecWebTurn stores the TURN Key ID and TTL in `settings.json`. The API token is encrypted with Windows DPAPI and can only be decrypted in the same Windows user context.
 
-Example:
+On every normal start the app calls Cloudflare's TURN credential endpoint and obtains a new short-lived `username` / `credential` pair automatically.
+
+## Cloudflare setup
+
+Create a Cloudflare Realtime TURN key and use its **Key ID** and **API token** in the first-run settings dialog.
+
+The application calls:
+
+```text
+POST https://rtc.live.cloudflare.com/v1/turn/keys/<TURN_KEY_ID>/credentials/generate-ice-servers
+Authorization: Bearer <TURN_KEY_API_TOKEN>
+Content-Type: application/json
+```
+
+with a body such as:
+
+```json
+{"ttl":86400}
+```
+
+The returned `iceServers` list is injected into Parsec Web.
+
+## Change settings later
+
+Run:
+
+```powershell
+.\ParsecWebTurn.exe --settings
+```
+
+You can also use:
+
+```powershell
+.\ParsecWebTurn.exe /settings
+```
+
+## Local ICE fallback
+
+If the Cloudflare API request fails, the app can fall back to a local `ice.json`.
+
+Copy `ice.example.json` to `ice.json` and fill in a valid short-lived TURN username and credential:
 
 ```json
 {
@@ -40,9 +86,22 @@ Example:
 }
 ```
 
+## Security model
+
+The direct-to-Cloudflare design is intentionally backend-free and portable.
+
+That means the long-lived TURN API token exists on the client PC. To reduce exposure:
+
+- it is never embedded in the executable or GitHub repository
+- it is stored with Windows DPAPI for the current user
+- only short-lived TURN credentials are written into the generated `extension/inject.js`
+- `settings.json`, `ice.json`, `extension/inject.js`, and `Profile/` must not be committed or shared
+
+For environments where the client device itself is not trusted, use a backend credential broker instead.
+
 ## Build
 
-Requires Go.
+Requires Go. The GitHub Actions workflow also downloads the Parsec SVG icon and embeds it in the Windows executable.
 
 ```powershell
 $env:GOOS = "windows"
@@ -50,15 +109,7 @@ $env:GOARCH = "amd64"
 go build -trimpath -ldflags "-s -w -H=windowsgui" -o ParsecWebTurn.exe ./src
 ```
 
-A GitHub Actions workflow is included and produces a Windows x64 artifact on pushes and manual runs.
-
-## Notes
-
-- Cloudflare TURN credentials are short-lived. When they expire, update `ice.json` and restart the app.
-- `ice.json`, generated `extension/inject.js`, and `Profile/` are ignored by Git.
-- The generated `extension/inject.js` contains the active TURN username/credential. Treat it as sensitive while the credentials are valid.
-- If an organization policy blocks command-line loaded extensions, the launcher cannot override that policy.
-- This project intentionally launches Microsoft Edge because Parsec H.264 rendering can differ between Chromium builds/drivers.
+For a local build with the same EXE icon as the release, generate a Windows resource first; see `.github/workflows/build.yml`.
 
 ## Troubleshooting
 
@@ -76,9 +127,11 @@ edge://webrtc-internals
 
 A successful TURN path should show a selected candidate pair with `state=succeeded` and a relay candidate.
 
-## Security
+## Icon / trademark note
 
-Do **not** commit real TURN credentials. Use only short-lived credentials on the client and keep the Cloudflare TURN API token/server-side key out of this project.
+The executable uses the Parsec SVG icon requested for this project, sourced from SVG Repo. See `assets/README.md` for the source link.
+
+ParsecWebTurn is an independent community project and is **not affiliated with, endorsed by, or sponsored by Parsec or Unity**.
 
 ## License
 
