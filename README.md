@@ -1,6 +1,6 @@
 # ParsecWebTurn
 
-Portable, no-install launcher for **Parsec Web** using **Microsoft Edge** and a custom Cloudflare Realtime WebRTC STUN/TURN configuration.
+Portable, no-install launcher for **Parsec Web** using **Microsoft Edge** and either Cloudflare Realtime or your own WebRTC STUN/TURN servers, including coturn and eturnal.
 
 ## What it does
 
@@ -9,21 +9,25 @@ Portable, no-install launcher for **Parsec Web** using **Microsoft Edge** and a 
 - installs no VPN, driver, .NET runtime, or WebView2 runtime
 - uses the Microsoft Edge already present on Windows
 - creates a separate local Edge profile beside the application
+- disables automatic translation prompts in that dedicated profile for a cleaner app window
 - injects the ICE override at `document_start`, before the Parsec page scripts run
 - requests short-lived TURN credentials directly from Cloudflare, with optional encrypted caching
 - stores the long-lived TURN API token locally using **Windows DPAPI / Current User**
 - supports a local `ice.json` fallback
+- supports custom STUN/TURN URLs with Windows-protected passwords and no Cloudflare dependency
 - uses the Parsec icon for the Windows executable
 
 ## First run
 
 1. Download and extract the release ZIP to any writable directory.
 2. Run `ParsecWebTurn.exe`.
-3. Enter:
+3. Choose **Cloudflare Realtime** and enter:
    - **Cloudflare TURN Key ID**
    - **Cloudflare TURN Key API Token**
    - credential TTL in seconds (default 86400 / 24 hours, maximum 172800 / 48 hours)
-4. Click **Save & Start**.
+4. Click **Save & launch Parsec**.
+
+Alternatively choose **Custom server / coturn, eturnal** and configure your own server as described below.
 
 ParsecWebTurn stores the TURN Key ID and TTL in `settings.json`. The API token is encrypted with Windows DPAPI and can only be decrypted in the same Windows user context.
 
@@ -52,6 +56,25 @@ with a body such as:
 ```
 
 The returned `iceServers` list is injected into Parsec Web.
+
+## Custom TURN servers (coturn, eturnal and compatible services)
+
+Choose **Custom server / coturn, eturnal** in Settings. Enter one STUN/TURN URL per line, for example:
+
+```text
+stun:turn.example.com:3478
+turn:turn.example.com:3478?transport=udp
+turn:turn.example.com:3478?transport=tcp
+turns:turn.example.com:5349?transport=tcp
+```
+
+Enter the TURN **username** and **password / credential** accepted by your server. All TURN URLs in this form share the same credentials. STUN-only setups can leave both fields empty. Custom mode makes no Cloudflare API calls, requires no Cloudflare key and does not apply Cloudflare credential caching or TTL settings.
+
+The password is stored in `encryptedCustomPassword` using Windows DPAPI; server URLs and username are stored in `settings.json`. Existing Cloudflare settings migrate automatically, and switching providers preserves both sets of configuration.
+
+For **coturn**, use a configured long-term user account (`lt-cred-mech` / `user`) or a temporary username/password generated using your server's TURN REST authentication setup. For **eturnal**, use its configured static `credentials` or a temporary pair from your credential service / `eturnalctl credentials`. A `static-auth-secret` / shared `secret` is a server secret, not a password you can paste into this client. The app does not generate or refresh custom REST credentials; supply a pair valid for your session.
+
+See the official [coturn configuration reference](https://github.com/coturn/coturn/blob/master/examples/etc/turnserver.conf) and [eturnal documentation](https://eturnal.net/doc/). TURN over TLS requires a certificate trusted by Edge; server routing, firewall and relay-port configuration remain server-side responsibilities.
 
 ## Change settings later
 
@@ -99,7 +122,7 @@ That means the long-lived TURN API token exists on the client PC. To reduce expo
 
 - it is never embedded in the executable or GitHub repository
 - it is stored with Windows DPAPI for the current user
-- only short-lived TURN credentials are written into the generated `extension/inject.js`
+- the active TURN username and credential are written into generated `extension/inject.js`; Cloudflare credentials are temporary, while custom static credentials can be long-lived
 - `settings.json`, `.turn-cache.json`, `ice.json`, `extension/inject.js`, and `Profile/` must not be committed or shared
 - console messages do not include TURN usernames or passwords
 

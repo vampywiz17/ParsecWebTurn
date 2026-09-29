@@ -58,12 +58,12 @@ func main() {
 		}
 	}
 
-	servers, err := getIceServers(context.Background(), root, settings, token)
+	servers, err := resolveIceServers(context.Background(), root, settings, token)
 	if err != nil {
 		choice := walk.MsgBox(
 			nil,
-			"ParsecWebTurn - Cloudflare TURN error",
-			err.Error()+"\n\nRetry after editing Cloudflare settings?\n\nYes = open Settings\nNo = try local ice.json fallback",
+			"ParsecWebTurn - TURN configuration error",
+			err.Error()+"\n\nRetry after editing TURN settings?\n\nYes = open Settings\nNo = try local ice.json fallback",
 			walk.MsgBoxYesNo|walk.MsgBoxIconWarning,
 		)
 		if choice == walk.DlgCmdYes {
@@ -74,13 +74,13 @@ func main() {
 			if err != nil {
 				showFatal("Cannot reload settings:\n" + err.Error())
 			}
-			servers, err = getIceServers(context.Background(), root, settings, token)
+			servers, err = resolveIceServers(context.Background(), root, settings, token)
 		}
 		if err != nil {
-			cloudflareErr := err
+			providerErr := err
 			servers, err = loadIceFallback(root)
 			if err != nil {
-				showFatal(fmt.Sprintf("Cloudflare credential generation failed and no usable ice.json fallback was found.\n\nCloudflare: %v\nFallback: %v", cloudflareErr, err))
+				showFatal(fmt.Sprintf("TURN configuration failed and no usable ice.json fallback was found.\n\nProvider: %v\nFallback: %v", providerErr, err))
 			}
 		}
 	}

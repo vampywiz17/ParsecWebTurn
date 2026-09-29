@@ -4,6 +4,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"image/png"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,7 +14,25 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/lxn/walk"
 )
+
+func settingsWidget(container walk.Container, name string) walk.Widget {
+	children := container.Children()
+	for i := 0; i < children.Len(); i++ {
+		child := children.At(i)
+		if child.Name() == name {
+			return child
+		}
+		if nested, ok := child.(walk.Container); ok {
+			if found := settingsWidget(nested, name); found != nil {
+				return found
+			}
+		}
+	}
+	return nil
+}
 
 func TestNativeSettingsWindow(t *testing.T) {
 	if os.Getenv("PARSECWEBTURN_NATIVE_TESTS") != "1" {
@@ -28,8 +48,103 @@ func TestNativeSettingsWindow(t *testing.T) {
 	if *saved {
 		t.Fatal("settings were saved without user action")
 	}
-	if window.Title() != "ParsecWebTurn - Cloudflare TURN Settings" {
+	if window.Title() != "ParsecWebTurn - Connection Settings" {
 		t.Fatal("unexpected window title")
+	}
+	// WM_GETICON checks the native title-bar and taskbar icons.
+	for _, size := range []uintptr{0, 1} {
+		if window.SendMessage(0x007f, size, 0) == 0 {
+			t.Fatalf("missing native window icon (size %d)", size)
+		}
+	}
+	provider := settingsWidget(window, "provider").(*walk.ComboBox)
+	for _, index := range []int{1, 0} {
+		if err := provider.SetCurrentIndex(index); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if directory := os.Getenv("PARSECWEBTURN_PREVIEW_DIR"); directory != "" {
+		// Render only this test window, away from the user's desktop.
+		window.SetBounds(walk.Rectangle{X: -30000, Y: -30000, Width: 760, Height: 650})
+		capture := func(index int) {
+			bitmap, err := walk.NewBitmapFromWindow(window)
+			if err != nil {
+				t.Error(err)
+				window.Close()
+				return
+			}
+			image, err := bitmap.ToImage()
+			bitmap.Dispose()
+			if err != nil {
+				t.Error(err)
+				window.Close()
+				return
+			}
+			name := "settings-cloudflare.png"
+			// GDI window printing does not set alpha; the rendered window is opaque.
+			for offset := 3; offset < len(image.Pix); offset += 4 {
+				image.Pix[offset] = 255
+			}
+			if index == 1 {
+				name = "settings-custom.png"
+			}
+			file, err := os.Create(filepath.Join(directory, name))
+			if err != nil {
+				t.Error(err)
+				window.Close()
+				return
+			}
+			err = png.Encode(file, image)
+			file.Close()
+			if err != nil {
+				t.Error(err)
+			}
+		}
+		time.AfterFunc(350*time.Millisecond, func() {
+			window.Synchronize(func() {
+				capture(0)
+				provider.SetCurrentIndex(1)
+				time.AfterFunc(350*time.Millisecond, func() { window.Synchronize(func() { capture(1); window.Close() }) })
+			})
+		})
+		window.Run()
+	}
+}
+
+func TestNativeCustomSettingsSave(t *testing.T) {
+	if os.Getenv("PARSECWEBTURN_NATIVE_TESTS") != "1" {
+		t.Skip("enable native Windows smoke tests")
+	}
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	root := t.TempDir()
+	window, saved, err := createSettingsWindow(root, Settings{TTL: defaultTTL}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer window.Dispose()
+	settingsWidget(window, "provider").(*walk.ComboBox).SetCurrentIndex(1)
+	settingsWidget(window, "urls").(*walk.TextEdit).SetText("turn:example.com:3478?transport=udp\r\nturns:example.com:5349?transport=tcp")
+	settingsWidget(window, "username").(*walk.LineEdit).SetText("native-test-user")
+	settingsWidget(window, "password").(*walk.LineEdit).SetText("native-test-password")
+	// BN_CLICKED exercises the real Walk button handler without starting a browser.
+	window.SetBounds(walk.Rectangle{X: -30000, Y: -30000, Width: 760, Height: 650})
+	time.AfterFunc(350*time.Millisecond, func() {
+		window.Synchronize(func() {
+			button := settingsWidget(window, "save")
+			button.SendMessage(0x0111, 0, uintptr(button.Handle()))
+			if !*saved {
+				window.Close()
+			}
+		})
+	})
+	window.Run()
+	if !*saved {
+		t.Fatal("custom form did not save")
+	}
+	config, secret, err := loadSettings(root)
+	if err != nil || config.Provider != providerCustom || len(config.CustomURLs) != 2 || secret != "native-test-password" {
+		t.Fatalf("custom UI saved wrong settings: %v", err)
 	}
 }
 
@@ -42,6 +157,9 @@ func TestRealEdgeProfileLock(t *testing.T) {
 		t.Fatal("Microsoft Edge is required for native smoke tests")
 	}
 	profile := filepath.Join(t.TempDir(), "Profile")
+	if err := prepareEdgeProfile(profile); err != nil {
+		t.Fatal(err)
+	}
 	cmd := exec.Command(edge, "--headless=new", "--user-data-dir="+profile, "--no-first-run", "--no-default-browser-check", "--remote-debugging-port=0", "about:blank")
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	if err := cmd.Start(); err != nil {
@@ -73,6 +191,15 @@ func TestRealEdgeProfileLock(t *testing.T) {
 			active, _ := profileActive(profile)
 			if !active {
 				time.Sleep(500 * time.Millisecond)
+				data, err := os.ReadFile(filepath.Join(profile, "Default", "Preferences"))
+				var preferences struct {
+					Translate struct {
+						Enabled *bool `json:"enabled"`
+					} `json:"translate"`
+				}
+				if err != nil || json.Unmarshal(data, &preferences) != nil || preferences.Translate.Enabled == nil || *preferences.Translate.Enabled {
+					t.Error("Edge did not retain the disabled translation preference")
+				}
 				return
 			}
 			time.Sleep(100 * time.Millisecond)
@@ -95,6 +222,9 @@ func TestRealEdgeProfileLock(t *testing.T) {
 			endpoint = "ws://127.0.0.1:" + strings.TrimSpace(parts[0]) + strings.TrimSpace(parts[1])
 			if err := ensureProfileStopped(profile); err == nil {
 				t.Fatal("real running Edge profile was accepted")
+			}
+			if err := prepareEdgeProfile(profile); err == nil {
+				t.Fatal("preferences changed while Edge was running")
 			}
 			return
 		}
