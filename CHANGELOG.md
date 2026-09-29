@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] - 2026-09-29
+
+### Fixed
+
+- Fixed `TTM_ADDTOOL failed` when opening the native settings window on affected Windows systems.
+- Embedded a Windows application manifest enabling Microsoft Common Controls v6, which the Walk GUI toolkit requires for reliable tooltip/control initialization.
+
+
 ## [0.2.0] - 2026-09-29
 
 ### Added
