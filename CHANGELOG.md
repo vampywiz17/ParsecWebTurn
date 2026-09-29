@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0] - 2026-09-29
+
+### Added
+
+- First-run native Windows settings dialog.
+- Direct Cloudflare Realtime TURN credential generation using TURN Key ID + API token.
+- Automatic fresh short-lived TURN username/password generation on every launch.
+- Configurable credential TTL up to 172800 seconds / 48 hours.
+- Windows DPAPI Current User protection for the stored Cloudflare API token.
+- `--settings` and `/settings` options to reopen configuration.
+- Local `ice.json` fallback when the Cloudflare API cannot be reached.
+- Parsec icon embedded in the Windows executable.
+- Explicit third-party/trademark notice for the icon.
+
+### Changed
+
+- `ice.json` is no longer required for normal use.
+- Normal startup now obtains `iceServers` from Cloudflare before launching Edge.
+- README expanded with Cloudflare setup and security model.
+
+### Security
+
+- The long-lived API token is not stored in plaintext.
+- The token is encrypted using Windows DPAPI and bound to the current Windows user context.
+- Short-lived TURN credentials may still appear in generated `extension/inject.js` for the duration of their validity.
+- Backend-free mode assumes the local Windows user/device is trusted.
+
 ## [0.1.0] - 2026-09-29
 
 ### Added
@@ -16,12 +43,3 @@ All notable changes to this project will be documented in this file.
 - Manifest V3 helper extension scoped to `https://web.parsec.app/*`.
 - GitHub Actions build workflow.
 - MIT license.
-
-### Security
-
-- Real `ice.json`, generated `extension/inject.js`, and `Profile/` are excluded from Git.
-- TURN API keys are not embedded. Only short-lived TURN credentials should be placed in the local `ice.json`.
-
-### Notes
-
-This first release is intended for Windows x64 and relies on Microsoft Edge being available on the machine. It installs nothing and does not require a separate .NET or WebView2 installation.
