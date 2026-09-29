@@ -54,6 +54,7 @@ jobs:
         run: |
           $env:GOOS = "windows"
           $env:GOARCH = "amd64"
+          go mod tidy
           go build -trimpath -ldflags "-s -w -H=windowsgui" -o ParsecWebTurn.exe ./src
 
       - name: Prepare portable package
