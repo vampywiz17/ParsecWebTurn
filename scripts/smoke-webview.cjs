@@ -132,7 +132,7 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     const initial = await invoke(main,'get_configuration');
     assert.equal(initial.version,fs.readFileSync(path.join(repository,'VERSION'),'utf8').trim());
     assert.equal(initial.hasApiToken,false);
-    const input={provider:'custom',customUrls:['stun:127.0.0.1:9'],customUsername:'smoke-user',customPassword:'smoke-secret',
+    const input={provider:'custom',customUrls:['stun:127.0.0.1:9','turns:relay.example.invalid'],customUsername:'smoke-user',customPassword:'smoke-secret',
       turnKeyId:'',apiToken:'',cacheCredentials:false,ttl:86400};
     await invoke(main,'save_configuration',{input});
     const saved=await invoke(main,'get_configuration');
@@ -140,7 +140,7 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     assert.ok(!JSON.stringify(saved).includes('smoke-secret'));
     const disk=fs.readFileSync(path.join(root,'settings.json'),'utf8');
     assert.ok(!disk.includes('smoke-secret')); assert.ok(JSON.parse(disk).encryptedCustomPassword);
-    await evaluate(main,`document.getElementById('provider').value='custom';document.getElementById('urls').value='stun:127.0.0.1:9';document.getElementById('username').value='smoke-user-ui';document.getElementById('provider').dispatchEvent(new Event('change'));document.getElementById('save').click()`);
+    await evaluate(main,`document.getElementById('provider').value='custom';document.getElementById('urls').value=${JSON.stringify(input.customUrls.join('\n'))};document.getElementById('username').value='smoke-user-ui';document.getElementById('provider').dispatchEvent(new Event('change'));document.getElementById('save').click()`);
     let uiSaved = false;
     for(let i=0;i<100;i++) {uiSaved=await evaluate(main,`document.getElementById('status').textContent.startsWith('Settings saved')`);if(uiSaved)break;await delay(100);}
     assert.equal(uiSaved,true,'The real settings form must save successfully');
@@ -187,9 +187,31 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     for(let i=0;i<100;i++){sample=await invoke(stats,'get_stats');if(sample.inboundMbps>0 && sample.outboundMbps>0)break;await delay(100);}
     assert.equal(sample.state,'connected');assert.ok(sample.inboundMbps>0);assert.ok(sample.outboundMbps>0);
     assert.equal(sample.route,'direct');assert.ok(Number.isFinite(sample.rttMs));
+    assert.equal(sample.configuredTurnUsed,false,'An available TURN configuration does not imply actual use');
     assert.equal(sample.codec,null,'Data-channel-only video metadata must stay unknown');
     assert.equal(sample.fps,null);
     assert.equal(sample.stale,false);
+    // Inject synthetic Chromium prflx/TURN metadata into the real loopback stats.
+    // This verifies the native DTO and panel, not a real external TURN session.
+    await evaluate(parsec,`for(const peer of [first,second]) {
+      peer.smokeOriginalGetStats=peer.getStats.bind(peer);
+      peer.getStats=async(...args)=>{
+        const report=await peer.smokeOriginalGetStats(...args);
+        const transport=[...report.values()].find(value=>value.type==='transport' && value.selectedCandidatePairId);
+        const pair=transport && report.get(transport.selectedCandidatePairId);
+        if(pair)Object.assign(report.get(pair.localCandidateId),{candidateType:'prflx',relayProtocol:'tls',url:'turns:relay.example.invalid:5349?transport=tcp'});
+        return report;
+      };
+    }`);
+    for(let i=0;i<100;i++){sample=await invoke(stats,'get_stats');if(sample.route==='relay' && sample.configuredTurnUsed===true)break;await delay(100);}
+    assert.equal(sample.route,'relay');assert.equal(sample.configuredTurnUsed,true);
+    assert.equal(sample.turnServer,'turns:relay.example.invalid');assert.equal(sample.turnProtocol,'tls');
+    assert.equal(sample.protocol,'udp');assert.equal(sample.localCandidateType,'prflx');
+    await delay(1100);
+    assert.ok(await evaluate(stats,`document.getElementById('details').textContent.includes('Configured TURN in use: Yes')`));
+    await evaluate(parsec,`for(const peer of [first,second])peer.getStats=peer.smokeOriginalGetStats`);
+    for(let i=0;i<100;i++){sample=await invoke(stats,'get_stats');if(sample.route==='direct')break;await delay(100);}
+    assert.equal(sample.route,'direct');assert.equal(sample.configuredTurnUsed,false,'Route changes must clear old TURN evidence');
     await send('Media.enable',{},parsec);
     await evaluate(parsec,`(async()=>{
       const decoder = new VideoDecoder({output(frame){frame.close();},error(error){window.smoke.videoError=String(error);}});

@@ -25,6 +25,7 @@ All notable changes to this project will be documented in this file.
 - Count actual WebCodecs decoded frames for data-channel video FPS; distinguish unavailable video packet loss from zero loss.
 - Capture fullscreen recovery shortcuts before Parsec's handlers, including when the native menu is hidden.
 - Mark peer-reflexive ICE paths as unverified instead of assuming direct routing.
+- Recognize Chromium peer-reflexive TURN paths by the selected relay transport; show configured TURN usage, matched server and route evidence. Use the selected ICE transport pair when report selection is ambiguous.
 - Restricted native command access: the remote Parsec page can submit bounded statistics but cannot read or change saved settings.
 
 ### Requirements

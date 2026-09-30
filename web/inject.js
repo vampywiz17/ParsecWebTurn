@@ -39,7 +39,9 @@
       for (const [peer, previous] of peers) {
         if (peer.connectionState === 'closed') { peers.delete(peer); continue; }
         try {
-          const normalized = summarizeStats(await peer.getStats(), previous);
+          let selectedPair = null;
+          try { selectedPair = peer.sctp?.transport?.iceTransport?.getSelectedCandidatePair?.(); } catch {}
+          const normalized = summarizeStats(await peer.getStats(), previous, ICE_SERVERS, selectedPair);
           peers.set(peer, normalized.counters);
           const state = peer.connectionState || (peer.iceConnectionState === 'completed' ? 'connected' : peer.iceConnectionState) || 'new';
           results.push({ state, sample: normalized.sample });

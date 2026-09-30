@@ -88,3 +88,48 @@ test('observed peer-reflexive pairs cannot prove direct routing', () => {
   const data=report();data.get('local').candidateType='prflx';data.get('remote').candidateType='relay';
   assert.equal(context.summarizeStats(data,null).sample.route,'relay');
 });
+
+test('Chromium peer-reflexive TURN path is confirmed and matched to configured server', () => {
+  const data=report();
+  Object.assign(data.get('local'),{candidateType:'prflx',relayProtocol:'tls',url:'turns:relay.example:5349?transport=tcp'});
+  data.get('remote').candidateType='prflx';
+  const servers=[{urls:['stun:relay.example','turns:RELAY.example'],username:'private-user',credential:'private-secret'}];
+  const sample=context.summarizeStats(data,null,servers).sample;
+  assert.equal(sample.route,'relay');assert.equal(sample.configuredTurnUsed,true);
+  assert.equal(sample.turnServer,'turns:RELAY.example');assert.equal(sample.turnProtocol,'tls');
+  assert.equal(sample.protocol,'udp');assert.equal(sample.routeEvidence,'Selected local TURN transport');
+  assert.ok(!JSON.stringify(sample).includes('private-'));
+  data.get('local').url='turns:another.example:5349?transport=tcp';
+  const other=context.summarizeStats(data,null,servers).sample;
+  assert.equal(other.route,'relay');assert.equal(other.configuredTurnUsed,false);assert.equal(other.turnServer,null);
+  delete data.get('local').url;
+  assert.equal(context.summarizeStats(data,null,servers).sample.configuredTurnUsed,null);
+});
+
+test('available but unselected TURN candidates and TURN STUN binding do not imply relay use', () => {
+  const data=report();
+  data.set('unused-relay',{id:'unused-relay',type:'local-candidate',candidateType:'relay',relayProtocol:'tls',url:'turns:relay.example'});
+  data.get('local').candidateType='srflx';data.get('local').url='turn:relay.example';
+  const servers=[{urls:['turn:relay.example']}];
+  const direct=context.summarizeStats(data,null,servers).sample;
+  assert.equal(direct.route,'direct');assert.equal(direct.configuredTurnUsed,false);assert.equal(direct.turnServer,null);
+  data.get('local').candidateType='prflx';
+  const unknown=context.summarizeStats(data,null,servers).sample;
+  assert.equal(unknown.route,null);assert.equal(unknown.configuredTurnUsed,null);
+});
+
+test('selected ICE transport pair supplies route when report selection is ambiguous', () => {
+  const data=report();delete data.get('transport').selectedCandidatePairId;
+  data.get('pair').nominated=true;data.set('other',{...data.get('pair'),id:'other'});
+  const selected={local:{type:'prflx',protocol:'udp',relayProtocol:'tcp',url:'turn:relay.example:3478?transport=tcp'},remote:{type:'host',protocol:'udp'}};
+  const sample=context.summarizeStats(data,null,[{urls:['turn:relay.example?transport=tcp']}],selected).sample;
+  assert.equal(sample.route,'relay');assert.equal(sample.configuredTurnUsed,true);assert.equal(sample.turnProtocol,'tcp');
+  assert.equal(sample.rttMs,null,'Route fallback must not attribute another candidate pair RTT');
+});
+
+test('remote-only relay does not claim our configured TURN server is used', () => {
+  const data=report();data.get('remote').candidateType='relay';
+  const sample=context.summarizeStats(data,null,[{urls:['turn:relay.example']}]).sample;
+  assert.equal(sample.route,'relay');assert.equal(sample.configuredTurnUsed,false);
+  assert.equal(sample.routeEvidence,'Selected remote relay candidate');
+});

@@ -71,7 +71,9 @@ Video packet loss is available only when inbound RTP statistics provide it. Pars
 
 Route describes the selected ICE candidates, whose local/remote types are displayed. Configuring TURN does not force a relay; ambiguous candidate-pair selection stays unknown.
 
-If either selected candidate is peer-reflexive (`prflx`) without an explicit `relay` candidate, the route is **Unverified (peer-reflexive)**. This type alone cannot distinguish a direct path from a relay hidden by the other endpoint. An explicit selected `relay` candidate confirms relay use. RTT and traffic rates remain available in either case.
+Relay detection checks the selected candidate types **and the selected local TURN transport**. Chromium can rename a local relay candidate to peer-reflexive (`prflx`) while preserving `relayProtocol` and its TURN URL; this still confirms relay use. The selected server URL is matched to the configured TURN endpoints with default port/transport normalization. The panel shows route evidence, whether our configured TURN is in use, the matched server and the TURN transport separately from the ICE transport. A remote-only relay does not mean our configured TURN is used.
+
+If report selection is ambiguous, the data-channel ICE transport's `getSelectedCandidatePair()` supplies route information without guessing another pair's RTT. Peer-reflexive candidates without relay evidence remain **Unverified (peer-reflexive)**. Merely gathering a relay candidate or reaching a TURN server does not prove that the stream uses it. A TURN URL on a STUN-derived candidate is also insufficient. No connection policy or live session is changed to test routing.
 
 Parsec starts in a normal window. The application owns fullscreen: **F11** toggles it, **Ctrl+Shift+W** restores windowed mode, and the settings screen has a recovery button. Document-start capture handlers reserve these shortcuts even when the Parsec canvas has focus and the native menu is hidden. Automatic HTML fullscreen and locking Escape/F11/KeyW are blocked. The **App** and **View** native submenus remain separate from Parsec's controls; the menu is hidden during fullscreen.
 

@@ -7,6 +7,10 @@ pub struct ConnectionStats {
     pub state: String,
     pub route: Option<String>,
     pub protocol: Option<String>,
+    pub route_evidence: Option<String>,
+    pub turn_protocol: Option<String>,
+    pub configured_turn_used: Option<bool>,
+    pub turn_server: Option<String>,
     pub local_candidate_type: Option<String>,
     pub remote_candidate_type: Option<String>,
     pub rtt_ms: Option<f64>,
@@ -48,6 +52,14 @@ impl ConnectionStats {
                 .protocol
                 .as_ref()
                 .is_some_and(|s| !["udp", "tcp", "tls"].contains(&s.as_str()))
+            || self
+                .turn_protocol
+                .as_ref()
+                .is_some_and(|s| !["udp", "tcp", "tls"].contains(&s.as_str()))
+            || self
+                .turn_server
+                .as_ref()
+                .is_some_and(|s| s.len() > 512 || s.chars().any(char::is_control))
             || [
                 &self.codec,
                 &self.decoder,
@@ -55,6 +67,7 @@ impl ConnectionStats {
                 &self.decoder_backend,
                 &self.video_source,
                 &self.fps_source,
+                &self.route_evidence,
             ]
             .into_iter()
             .flatten()
