@@ -167,6 +167,14 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     assert.equal(await evaluate(parsec,`document.documentElement.requestFullscreen().then(()=>false,error=>error.name==='NotAllowedError')`),true,'Automatic web fullscreen must be blocked');
     const fullscreenMode = await invoke(main,'set_parsec_window_mode',{fullscreen:true});
     assert.equal(fullscreenMode.fullscreen,true); assert.equal(fullscreenMode.menuVisible,false);
+    await send('Input.dispatchKeyEvent',{type:'keyDown',key:'W',code:'KeyW',windowsVirtualKeyCode:87,modifiers:10},parsec);
+    await send('Input.dispatchKeyEvent',{type:'keyUp',key:'W',code:'KeyW',windowsVirtualKeyCode:87,modifiers:10},parsec);
+    await delay(300);
+    const recovered = await evaluate(parsec,`window.__TAURI_INTERNALS__.invoke('parsec_window_shortcut',{toggle:true})`);
+    assert.equal(recovered.fullscreen,true,'Ctrl+Shift+W must restore the focused WebView before toggling fullscreen again');
+    assert.equal(recovered.menuVisible,false);
+    // If Ctrl+Shift+W restored windowed mode, this toggle enters fullscreen again.
+    // Verify the native state from the local interface before returning windowed.
     const windowedMode = await invoke(main,'set_parsec_window_mode',{fullscreen:false});
     assert.equal(windowedMode.fullscreen,false); assert.equal(windowedMode.menuVisible,true); assert.equal(windowedMode.decorated,true);
     const rejected=await evaluate(parsec,`window.__TAURI_INTERNALS__.invoke('get_configuration').then(()=>false,()=>true)`);
@@ -193,14 +201,23 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
       const canvas = new OffscreenCanvas(64,64);canvas.getContext('2d').fillRect(0,0,64,64);
       const frame = new VideoFrame(canvas,{timestamp:0});encoder.encode(frame,{keyFrame:true});frame.close();
       await encoder.flush();await decoder.flush();window.smoke.decoder=decoder;window.smoke.encoder=encoder;
+      let timestamp=0;
+      window.smoke.videoTimer=setInterval(()=>{
+        if(encoder.encodeQueueSize>2)return;
+        const frame=new VideoFrame(canvas,{timestamp:timestamp+=50000});
+        encoder.encode(frame,{keyFrame:timestamp===50000});frame.close();
+      },50);
     })()`);
     for(let i=0;i<100;i++){sample=await invoke(stats,'get_stats');if(sample.videoSource==='Chromium Media' && sample.codec==='VP8' && sample.decoder && sample.width===64 && sample.height===64)break;await delay(100);}
     if(!sample.decoder) console.log('Synthetic video Media events: '+JSON.stringify(mediaEvents));
     assert.equal(sample.videoSource,'Chromium Media','Native Media events must supplement data-channel WebRTC statistics');
     assert.equal(sample.codec,'VP8'); assert.ok(sample.decoder); assert.equal(sample.width,64); assert.equal(sample.height,64);
+    for(let i=0;i<100;i++){sample=await invoke(stats,'get_stats');if(sample.fps>5 && sample.fpsSource==='WebCodecs decoder')break;await delay(100);}
+    assert.ok(sample.fps>5 && sample.fps<100,'Real decoded frames must produce a plausible FPS rate: '+sample.fps);
+    assert.equal(sample.fpsSource,'WebCodecs decoder');assert.equal(sample.packetsLost,null,'Data-channel traffic does not expose RTP packet loss');
     if(process.env.PARSECWEBTURN_SCREENSHOTS) {await delay(1200);const {data}=await send('Page.captureScreenshot',{},stats);fs.writeFileSync(path.join(repository,'tauri-stats.png'),Buffer.from(data,'base64'));}
     assert.equal(errors.length,0,String(errors));
-    console.log('PASS: native WebView2 settings, DPAPI save, document-start injection, direct WebRTC traffic/RTT, statistics panel and remote IPC isolation');
+    console.log('PASS: native WebView2 settings, DPAPI save, document-start injection, WebRTC traffic/RTT, actual decoded FPS, window recovery and remote IPC isolation');
     socket.send(JSON.stringify({id:++sequence,method:'Browser.close'}));
     await delay(500);
   } finally {

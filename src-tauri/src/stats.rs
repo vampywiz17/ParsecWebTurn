@@ -13,6 +13,7 @@ pub struct ConnectionStats {
     pub inbound_mbps: Option<f64>,
     pub outbound_mbps: Option<f64>,
     pub fps: Option<f64>,
+    pub fps_source: Option<String>,
     pub codec: Option<String>,
     pub decoder: Option<String>,
     pub video_profile: Option<String>,
@@ -53,6 +54,7 @@ impl ConnectionStats {
                 &self.video_profile,
                 &self.decoder_backend,
                 &self.video_source,
+                &self.fps_source,
             ]
             .into_iter()
             .flatten()
@@ -105,6 +107,7 @@ impl LatestStats {
             value.outbound_mbps = None;
             value.rtt_ms = None;
             value.fps = None;
+            value.fps_source = None;
         }
         value
     }

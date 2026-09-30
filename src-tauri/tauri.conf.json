@@ -24,7 +24,7 @@
           "local": false,
           "remote": { "urls": ["https://web.parsec.app/*"] },
           "windows": ["parsec"],
-          "permissions": ["allow-report-stats"]
+          "permissions": ["allow-report-stats", "allow-parsec-window-shortcut"]
         }
       ]
     }

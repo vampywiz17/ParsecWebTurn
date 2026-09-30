@@ -126,6 +126,7 @@ async fn open_parsec(
     *state.media.lock().map_err(|_| "Media lock failed")? = media::MediaState::default();
     let injection = include_str!("../../web/inject.js")
         .replace("__STATS_HELPER__", include_str!("../../web/stats.js"))
+        .replace("__VIDEO_HELPER__", include_str!("../../web/video.js"))
         .replace(
             "__ICE_SERVERS__",
             &serde_json::to_string(servers).map_err(|_| "Cannot encode ICE servers")?,
@@ -226,6 +227,30 @@ fn set_parsec_mode(app: &tauri::AppHandle, fullscreen: bool) -> Result<(), Strin
 }
 
 #[tauri::command]
+async fn parsec_window_shortcut(
+    app: tauri::AppHandle,
+    window: WebviewWindow,
+    toggle: bool,
+) -> Result<serde_json::Value, String> {
+    if window.label() != "parsec"
+        || window
+            .url()
+            .map_err(|_| "Cannot check Parsec origin")?
+            .origin()
+            .ascii_serialization()
+            != "https://web.parsec.app"
+    {
+        return Err("Window shortcuts must come from the Parsec webview".into());
+    }
+    let fullscreen = toggle && !window.is_fullscreen().map_err(|e| e.to_string())?;
+    set_parsec_mode(&app, fullscreen)?;
+    Ok(serde_json::json!({
+        "fullscreen": window.is_fullscreen().map_err(|e| e.to_string())?,
+        "menuVisible": window.is_menu_visible().map_err(|e| e.to_string())?,
+    }))
+}
+
+#[tauri::command]
 async fn set_parsec_window_mode(
     app: tauri::AppHandle,
     window: WebviewWindow,
@@ -315,7 +340,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             get_stats,
             report_stats,
             open_stats,
-            set_parsec_window_mode
+            set_parsec_window_mode,
+            parsec_window_shortcut
         ])
         .setup(move |app| {
             let settings =

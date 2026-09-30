@@ -13,7 +13,8 @@ async function update() {
       ? 'Unverified (peer-reflexive)' : 'Unknown');
     const rows = [ ['ICE route', route], ['Local candidate', stats.localCandidateType], ['Remote candidate', stats.remoteCandidateType], ['Transport', stats.protocol], ['Video codec', stats.codec], ['Decoder', stats.decoder],
       ['Profile', stats.videoProfile], ['Decoder backend', stats.decoderBackend], ['Hardware decode', stats.hardwareDecode == null ? null : (stats.hardwareDecode ? 'Yes' : 'No')],
-      ['Video source', stats.videoSource], ['Resolution', stats.width && stats.height ? `${stats.width} × ${stats.height}` : null], ['Packets lost', stats.packetsLost] ];
+      ['Video source', stats.videoSource], ['FPS source', stats.fpsSource], ['Resolution', stats.width && stats.height ? `${stats.width} × ${stats.height}` : null],
+      ['Video packets lost', stats.packetsLost ?? (stats.fpsSource === 'WebCodecs decoder' ? 'Not exposed for data-channel video' : null)] ];
     $('details').replaceChildren(...rows.map(([label, value]) => { const row = document.createElement('div'); row.textContent = `${label}: ${value ?? 'Not reported'}`; return row; }));
   } catch { $('state').textContent = 'Statistics unavailable'; }
   finally { busy = false; }

@@ -22,6 +22,9 @@ All notable changes to this project will be documented in this file.
 - Native F11 fullscreen and Ctrl+Shift+W windowed recovery; block automatic web fullscreen and Escape locking.
 - Proper App/View submenus and dark native windows.
 - Video codec, decoder, FPS, resolution and packet-loss details when provided by the web client.
+- Count actual WebCodecs decoded frames for data-channel video FPS; distinguish unavailable video packet loss from zero loss.
+- Capture fullscreen recovery shortcuts before Parsec's handlers, including when the native menu is hidden.
+- Mark peer-reflexive ICE paths as unverified instead of assuming direct routing.
 - Restricted native command access: the remote Parsec page can submit bounded statistics but cannot read or change saved settings.
 
 ### Requirements

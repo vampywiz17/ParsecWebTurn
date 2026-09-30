@@ -19,6 +19,7 @@ function setup({ available = true, legacy = true, origin = 'https://web.parsec.a
   const servers = [{ urls: ['turn:example.invalid:3478'], username: 'test-user', credential: 'test-secret' }];
   const script = fs.readFileSync(path.join(__dirname, '../web/inject.js'), 'utf8')
     .replace('__STATS_HELPER__', fs.readFileSync(path.join(__dirname, '../web/stats.js'), 'utf8'))
+    .replace('__VIDEO_HELPER__', fs.readFileSync(path.join(__dirname, '../web/video.js'), 'utf8'))
     .replace('__ICE_SERVERS__', JSON.stringify(servers));
   vm.runInContext(script, context);
   return { window, logs, context, script, NativePeerConnection, servers };

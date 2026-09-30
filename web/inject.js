@@ -10,6 +10,7 @@
   const patchConfig = config => ({ ...config, iceServers: ICE_SERVERS });
   const peers = new Map();
   __STATS_HELPER__
+  __VIDEO_HELPER__
 
   class PatchedRTCPeerConnection extends OriginalRTCPeerConnection {
     constructor(config = {}, constraints) {
@@ -44,7 +45,13 @@
           results.push({ state, sample: normalized.sample });
         } catch { /* An individual peer can close during sampling. */ }
       }
-      await window.__TAURI_INTERNALS__.invoke('report_stats', { sample: aggregateStats(results) });
+      const sample = aggregateStats(results);
+      const decodedFps = sampleDecodedFps(performance.now());
+      if (sample.state === 'connected' && sample.fps == null && decodedFps != null) {
+        sample.fps = decodedFps;
+        sample.fpsSource = 'WebCodecs decoder';
+      } else if (sample.fps != null) sample.fpsSource = 'WebRTC inbound video';
+      await window.__TAURI_INTERNALS__.invoke('report_stats', { sample });
     } catch { /* Diagnostics must never interrupt a Parsec session. */ }
     finally { sampling = false; }
   }, 1000);
