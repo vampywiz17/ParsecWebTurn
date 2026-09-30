@@ -497,7 +497,7 @@ mod tests {
                 let (mut stream, _) = listener.accept().unwrap();
                 stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
                 let mut request = [0u8; 2048];
-                stream.read(&mut request).unwrap();
+                assert!(stream.read(&mut request).unwrap() > 0);
                 stream.write_all(response.as_bytes()).unwrap();
             });
             let client = reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(5)).build().unwrap();
