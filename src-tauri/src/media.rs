@@ -6,7 +6,7 @@ use std::{
     sync::{Arc, LazyLock, Mutex},
 };
 
-#[derive(Default)]
+#[derive(Default, Clone, PartialEq)]
 struct Video {
     codec: Option<String>,
     decoder: Option<String>,
@@ -63,15 +63,7 @@ impl MediaState {
             return;
         }
         let video = self.players.entry(id.into()).or_default();
-        let old = (
-            &video.codec,
-            &video.decoder,
-            &video.profile,
-            &video.backend,
-            video.hardware,
-            video.size,
-        );
-        let old = format!("{old:?}");
+        let old = video.clone();
         if event == "Media.playerPropertiesChanged" {
             if let Some(properties) = value["properties"].as_array() {
                 for property in properties {
@@ -79,7 +71,7 @@ impl MediaState {
                         continue;
                     };
                     match property["name"].as_str() {
-                        Some("kVideoDecoderName") => video.decoder = safe_word(text),
+                        Some("kVideoDecoderName") => set_decoder(video, text),
                         Some("kIsPlatformVideoDecoder") => {
                             video.hardware = match text {
                                 "true" => Some(true),
@@ -129,12 +121,11 @@ impl MediaState {
                         "Dav1dVideoDecoder",
                         "VpxVideoDecoder",
                     ] {
-                        if text.contains(decoder) {
-                            video.decoder = Some(decoder.into());
+                        if text.contains(decoder)
+                            && (text.starts_with("Use ") || text.contains(" is using "))
+                        {
+                            set_decoder(video, decoder);
                         }
-                    }
-                    if text.contains("D3DVideoDecoder") {
-                        video.hardware = Some(true);
                     }
                     if text.contains("using D3D11 backend") {
                         video.backend = Some("D3D11".into());
@@ -155,18 +146,7 @@ impl MediaState {
                 }
             }
         }
-        let new = format!(
-            "{:?}",
-            (
-                &video.codec,
-                &video.decoder,
-                &video.profile,
-                &video.backend,
-                video.hardware,
-                video.size
-            )
-        );
-        if old != new {
+        if *video != old {
             self.sequence += 1;
             video.sequence = self.sequence;
         }
@@ -179,7 +159,9 @@ impl MediaState {
         let Some(video) = self
             .players
             .values()
-            .filter(|v| v.sequence > 0)
+            // Media also reports encoder players. Never let an encoder's newer
+            // codec/configuration replace the active decoder's metadata.
+            .filter(|v| v.sequence > 0 && v.decoder.is_some())
             .max_by_key(|v| v.sequence)
         else {
             return;
@@ -204,6 +186,20 @@ impl MediaState {
 
 fn valid_size(width: u32, height: u32) -> bool {
     (1..=16384).contains(&width) && (1..=16384).contains(&height)
+}
+fn set_decoder(video: &mut Video, text: &str) {
+    let Some(name) = safe_word(text) else {
+        return;
+    };
+    if video.decoder.as_ref() != Some(&name) {
+        video.backend = None;
+    }
+    video.hardware = match name.as_str() {
+        "D3DVideoDecoder" => Some(true),
+        "FFmpegVideoDecoder" | "Dav1dVideoDecoder" | "VpxVideoDecoder" => Some(false),
+        _ => None,
+    };
+    video.decoder = Some(name);
 }
 fn safe_word(text: &str) -> Option<String> {
     (!text.is_empty()
@@ -290,10 +286,17 @@ mod tests {
         assert_eq!((sample.width, sample.height), (Some(1920), Some(1080)));
         assert_eq!(sample.hardware_decode, Some(true));
         assert!(!serde_json::to_string(&sample).unwrap().contains("185805"));
+        state.receive("Media.playerMessagesLogged", r#"{"playerId":"encoder","messages":[{"message":"Initialized VideoEncoder: codec: vp8, natural size: [64,64]"}]}"#);
+        state.supplement(&mut sample);
+        assert_eq!(sample.codec.as_deref(), Some("H.264"));
+        state.receive("Media.playerPropertiesChanged", r#"{"playerId":"p","properties":[{"name":"kVideoDecoderName","value":"VpxVideoDecoder"},{"name":"kIsPlatformVideoDecoder","value":"false"}]}"#);
+        state.supplement(&mut sample);
+        assert_eq!(sample.hardware_decode, Some(false));
+        assert_eq!(sample.decoder_backend, None);
         state.receive(
             "Media.playerEventsAdded",
             r#"{"playerId":"p","events":[{"value":"{\"event\":\"kVideoDecoderDestroyed\"}"}]}"#,
         );
-        assert!(state.players.is_empty());
+        assert!(!state.players.contains_key("p"));
     }
 }

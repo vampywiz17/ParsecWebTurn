@@ -61,6 +61,7 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
   let sequence = 0;
   const errors = [];
   const sessions = new Map();
+  const mediaEvents = [];
   try {
     let browser;
     for (let i=0; i<150; i++) {
@@ -86,6 +87,8 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     });
     socket.addEventListener('message', ({data}) => {
       const message = JSON.parse(data);
+      if(message.method==='Media.playerPropertiesChanged') mediaEvents.push(message.params.properties);
+      if(message.method==='Media.playerMessagesLogged') mediaEvents.push(message.params.messages.filter(item=>/decoder|Initialized/i.test(item.message) && !/LUID|adapter/i.test(item.message)));
       if(message.id) { const task=pending.get(message.id); if(task){ pending.delete(message.id); message.error?task.reject(new Error(JSON.stringify(message.error))):task.resolve(message.result); } return; }
       if(message.method==='Target.attachedToTarget') {
         const {sessionId,targetInfo} = message.params;
@@ -179,6 +182,7 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     assert.equal(sample.codec,null,'Data-channel-only video metadata must stay unknown');
     assert.equal(sample.fps,null);
     assert.equal(sample.stale,false);
+    await send('Media.enable',{},parsec);
     await evaluate(parsec,`(async()=>{
       const decoder = new VideoDecoder({output(frame){frame.close();},error(error){window.smoke.videoError=String(error);}});
       const encoder = new VideoEncoder({output(chunk,metadata){
@@ -190,7 +194,8 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
       const frame = new VideoFrame(canvas,{timestamp:0});encoder.encode(frame,{keyFrame:true});frame.close();
       await encoder.flush();await decoder.flush();window.smoke.decoder=decoder;window.smoke.encoder=encoder;
     })()`);
-    for(let i=0;i<100;i++){sample=await invoke(stats,'get_stats');if(sample.videoSource==='Chromium Media' && sample.codec==='VP8')break;await delay(100);}
+    for(let i=0;i<100;i++){sample=await invoke(stats,'get_stats');if(sample.videoSource==='Chromium Media' && sample.codec==='VP8' && sample.decoder && sample.width===64 && sample.height===64)break;await delay(100);}
+    if(!sample.decoder) console.log('Synthetic video Media events: '+JSON.stringify(mediaEvents));
     assert.equal(sample.videoSource,'Chromium Media','Native Media events must supplement data-channel WebRTC statistics');
     assert.equal(sample.codec,'VP8'); assert.ok(sample.decoder); assert.equal(sample.width,64); assert.equal(sample.height,64);
     if(process.env.PARSECWEBTURN_SCREENSHOTS) {await delay(1200);const {data}=await send('Page.captureScreenshot',{},stats);fs.writeFileSync(path.join(repository,'tauri-stats.png'),Buffer.from(data,'base64'));}
