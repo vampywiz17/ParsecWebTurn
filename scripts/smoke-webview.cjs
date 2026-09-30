@@ -275,7 +275,7 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     assert.equal(child.exitCode,null,'Internal Parsec window replacement must preserve the app');
     // Exercise the Windows X-button path with settings hidden and stats open.
     // Closing the browser engine would not exercise the native app-close event.
-    execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-File',
+    execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',
       path.join(repository,'scripts/test-window-close.ps1'),'-TestProcessId',String(child.pid)],{windowsHide:true});
     for(let i=0;i<100 && child.exitCode===null;i++)await delay(100);
     assert.equal(child.exitCode,0,'Closing Parsec must exit the app instead of reopening settings');
