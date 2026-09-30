@@ -75,3 +75,16 @@ test('ambiguous nominated pairs never guess direct or relay', () => {
   assert.equal(selected.localCandidateType, 'relay');
   assert.equal(selected.remoteCandidateType, 'srflx');
 });
+
+test('observed peer-reflexive pairs cannot prove direct routing', () => {
+  for (const [local,remote] of [['prflx','prflx'],['prflx','host'],['host','prflx']]) {
+    const data=report();data.get('local').candidateType=local;data.get('remote').candidateType=remote;
+    const result=context.summarizeStats(data,null).sample;
+    assert.equal(result.route,null);
+    assert.equal(result.rttMs,24);
+    assert.equal(result.localCandidateType,local);
+    assert.equal(result.remoteCandidateType,remote);
+  }
+  const data=report();data.get('local').candidateType='prflx';data.get('remote').candidateType='relay';
+  assert.equal(context.summarizeStats(data,null).sample.route,'relay');
+});

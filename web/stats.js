@@ -36,7 +36,10 @@ function summarizeStats(report, previous) {
       localCandidateType: local?.candidateType || null,
       remoteCandidateType: remote?.candidateType || null,
       route: local?.candidateType === 'relay' || remote?.candidateType === 'relay' ? 'relay' :
-        (local?.candidateType && remote?.candidateType ? 'direct' : null),
+        // Peer-reflexive candidates are learned during connectivity checks.
+        // Their type alone cannot exclude a relay hidden by the other endpoint.
+        (['host', 'srflx'].includes(local?.candidateType) &&
+          ['host', 'srflx'].includes(remote?.candidateType) ? 'direct' : null),
       protocol: ['udp', 'tcp', 'tls'].includes(protocol) ? protocol : null,
       rttMs: pair && finite(pair.currentRoundTripTime) !== null ? pair.currentRoundTripTime * 1000 : null,
       inboundMbps: counters ? rate('received') : null,

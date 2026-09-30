@@ -69,6 +69,8 @@ The native WebView2 Media event API also supplies codec, decoder, hardware decod
 
 Route describes the selected ICE candidates, whose local/remote types are displayed. Configuring TURN does not force a relay; ambiguous candidate-pair selection stays unknown.
 
+If either selected candidate is peer-reflexive (`prflx`) without an explicit `relay` candidate, the route is **Unverified (peer-reflexive)**. This type alone cannot distinguish a direct path from a relay hidden by the other endpoint. An explicit selected `relay` candidate confirms relay use. RTT and traffic rates remain available in either case.
+
 Parsec starts in a normal window. The application owns fullscreen: **F11** toggles it, **Ctrl+Shift+W** restores windowed mode, and the settings screen has a recovery button. Automatic HTML fullscreen and locking Escape/F11 are blocked. The **App** and **View** native submenus remain separate from Parsec's controls; the menu is hidden during fullscreen.
 
 Traffic is **actual usage, not a bandwidth-capacity test**. RTT is a WebRTC path measurement, not a separate ICMP ping. Parsec may carry video through data channels; in that case traffic/RTT can be available while video-specific fields remain unknown. Multiple connected peers have their traffic rates summed; route/RTT come from the most active connected peer. Stale samples are marked and their rate/RTT values cleared after five seconds.
