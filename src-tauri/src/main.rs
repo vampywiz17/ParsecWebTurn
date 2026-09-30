@@ -51,6 +51,13 @@ fn local_url(url: &url::Url) -> bool {
 }
 
 #[tauri::command]
+fn show_configuration(app: tauri::AppHandle, window: WebviewWindow) -> Result<(), String> {
+    trusted_local(&window, "main")?;
+    show_settings(&app);
+    Ok(())
+}
+
+#[tauri::command]
 fn get_configuration(
     window: WebviewWindow,
     state: State<'_, AppState>,
@@ -335,6 +342,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             auto_connect: AtomicBool::new(!force_settings),
         })
         .invoke_handler(tauri::generate_handler![
+            show_configuration,
             get_configuration,
             save_configuration,
             connect_saved,
@@ -365,6 +373,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 ],
             )?)?;
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                .visible(false)
                 .title("ParsecWebTurn — Connection settings")
                 .theme(Some(tauri::Theme::Dark))
                 .inner_size(780.0, 820.0)

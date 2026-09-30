@@ -60,6 +60,8 @@ Switching providers preserves each provider's saved credentials. Password fields
 
 Closing the Parsec window exits the entire application, including hidden settings and open statistics. Closing settings while Parsec is running hides only the settings window. Reconnecting from settings replaces the Parsec window internally without exiting the app.
 
+Automatic startup keeps settings hidden to avoid a brief settings-window flash. The ready settings form appears on first run, with `--settings`, or when saved settings or connection preparation fail.
+
 ## Connection statistics
 
 Open **Connection stats** from the native menu. The application samples `RTCPeerConnection.getStats()` once per second and displays:

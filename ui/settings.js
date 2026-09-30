@@ -27,7 +27,11 @@ async function action(operation) {
   for (const button of document.querySelectorAll('button')) button.disabled = true;
   $('error').hidden = true; $('fallback').hidden = true;
   try { await operation(); }
-  catch (error) { showError(error); $('fallback').hidden = false; }
+  catch (error) {
+    showError(error); $('fallback').hidden = false;
+    // Startup is hidden until the form is ready; failures must remain visible.
+    await invoke('show_configuration');
+  }
   finally { busy = false; for (const button of document.querySelectorAll('button')) button.disabled = false; }
 }
 async function save(connect) {
@@ -43,4 +47,13 @@ $('stats').addEventListener('click', () => action(() => invoke('open_stats')));
 $('save').addEventListener('click', () => action(() => save(false)));
 $('settings').addEventListener('submit', event => { event.preventDefault(); action(() => save(true)); });
 $('fallback').addEventListener('click', () => action(async () => { $('status').textContent = 'Opening local fallback…'; await invoke('connect_fallback'); $('status').textContent = 'Parsec opened using ice.json.'; }));
-action(async () => { const config = await load(); if (config.autoConnect) { $('status').textContent = 'Preparing your connection…'; await invoke('connect_saved'); $('status').textContent = 'Parsec opened.'; } });
+action(async () => {
+  const config = await load();
+  if (config.autoConnect) {
+    $('status').textContent = 'Preparing your connection…';
+    await invoke('connect_saved');
+    $('status').textContent = 'Parsec opened.';
+  } else {
+    await invoke('show_configuration');
+  }
+});

@@ -32,6 +32,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Hide connection settings during automatic startup; show the ready form on first run, explicit settings launch or configuration/connection errors.
 - Closing the Parsec window exits the application instead of reopening connection settings; internal window replacement during reconnect remains supported.
 
 ### Requirements

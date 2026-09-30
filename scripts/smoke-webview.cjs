@@ -181,6 +181,8 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     assert.equal(rejected,true,'Remote Parsec page must not access settings');
     const rejectedWrite=await evaluate(parsec,`window.__TAURI_INTERNALS__.invoke('save_configuration',{input:${JSON.stringify(input)}}).then(()=>false,()=>true)`);
     assert.equal(rejectedWrite,true,'Remote Parsec page must not modify settings');
+    const rejectedShow=await evaluate(parsec,`window.__TAURI_INTERNALS__.invoke('show_configuration').then(()=>false,()=>true)`);
+    assert.equal(rejectedShow,true,'Remote Parsec page must not reveal settings');
     await evaluate(main,`document.getElementById('stats').click()`);
     const stats=await find('/stats.html');
     let sample;
@@ -279,7 +281,10 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
       path.join(repository,'scripts/test-window-close.ps1'),'-TestProcessId',String(child.pid)],{windowsHide:true});
     for(let i=0;i<100 && child.exitCode===null;i++)await delay(100);
     assert.equal(child.exitCode,0,'Closing Parsec must exit the app instead of reopening settings');
-    console.log('PASS: native WebView2 settings, DPAPI save, WebIDL compatibility, WebRTC traffic/RTT, decoded FPS, window recovery, remote IPC isolation, reconnect and X-button app exit');
+    execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',
+      path.join(repository,'scripts/test-startup.ps1'),'-ExecutablePath',path.resolve(process.argv[2] || path.join(repository,'ParsecWebTurn.exe')),
+      '-SavedProfile',root],{windowsHide:true,stdio:['ignore','pipe','pipe']});
+    console.log('PASS: native WebView2 settings, DPAPI save, WebIDL compatibility, WebRTC traffic/RTT, decoded FPS, window recovery, remote IPC isolation, reconnect, X-button app exit and startup visibility');
   } finally {
     socket?.close();
     if(child.exitCode===null) child.kill();
