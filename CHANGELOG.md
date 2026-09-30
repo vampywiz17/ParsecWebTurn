@@ -2,6 +2,44 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0] - 2026-09-30
+
+### Changed
+
+- Replace the Go launcher and external Edge app window with a Rust/Tauri 2 application using Windows WebView2.
+- Integrate settings, the Parsec window, developer tools and connection statistics into the same application.
+- Embed the ICE override and UI in the executable; no extension directory or generated credential script is needed.
+- Preserve v0.4.0 settings and CurrentUser DPAPI encryption. WebView2 uses a new profile and requires a fresh Parsec sign-in.
+- Port Cloudflare requests, custom TURN, encrypted caching, validation and local ice.json fallback to Rust.
+- Keep the direct/relay policy selected by Parsec; no forced relay mode.
+- Replace ICE configuration spreading with a native WebIDL dictionary adapter, preserving inherited/getter fields, frozen inputs and native argument errors for constructors and setConfiguration.
+- Validate STUN and TURN URI syntax separately and normalize case-insensitive scheme names.
+- Build and validate the Windows distribution with Cargo and a committed lockfile.
+
+### Added
+
+- Live WebRTC traffic rates, connection RTT, direct/relay route and transport diagnostics.
+- Show selected local/remote ICE candidate types; ambiguous candidate pairs remain unknown.
+- Read Chromium Media codec, decoder, hardware decoding, profile and visible resolution, including stream reconfiguration.
+- Native F11 fullscreen and Ctrl+Shift+W windowed recovery; block automatic web fullscreen and Escape locking.
+- Proper App/View submenus and dark native windows.
+- Video codec, decoder, FPS, resolution and packet-loss details when provided by the web client.
+- Count actual WebCodecs decoded frames for data-channel video FPS; distinguish unavailable video packet loss from zero loss.
+- Capture fullscreen recovery shortcuts before Parsec's handlers, including when the native menu is hidden.
+- Mark peer-reflexive ICE paths as unverified instead of assuming direct routing.
+- Recognize Chromium peer-reflexive TURN paths by the selected relay transport; show configured TURN usage, matched server and route evidence. Use the selected ICE transport pair when report selection is ambiguous.
+- Restricted native command access: the remote Parsec page can submit bounded statistics but cannot read or change saved settings.
+
+### Fixed
+
+- Hide connection settings during automatic startup; show the ready form on first run, explicit settings launch or configuration/connection errors.
+- Closing the Parsec window exits the application instead of reopening connection settings; internal window replacement during reconnect remains supported.
+
+### Requirements
+
+- Microsoft Edge WebView2 Runtime must be present. The runtime is separate from the Edge browser; the app does not silently install it.
+- HEVC decoding and the previously reported long-session freeze remain separate issues; this migration does not claim to fix them.
+
 ## [0.4.0] - 2026-09-30
 
 ### Added
