@@ -38,11 +38,20 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
   await new Promise(resolve => portServer.listen(0, '127.0.0.1', resolve));
   const port = portServer.address().port;
   await new Promise(resolve => portServer.close(resolve));
+  const browserArguments = `--remote-debugging-port=${port} --disable-features=msWebOOUI,msPdfOOUI,WebRtcHideLocalIpsWithMdns`;
+  const ciPolicy = 'HKLM\\Software\\Policies\\Microsoft\\Edge\\WebView2\\AdditionalBrowserArguments';
+  // WebView2 150+ ignores WEBVIEW2_* environment overrides for elevated hosts.
+  // GitHub runners are elevated; apply Microsoft's documented HKLM alternative
+  // to this executable only, on the disposable runner, then remove it below.
+  // https://github.com/MicrosoftEdge/WebView2Feedback/issues/5640
+  if(process.env.GITHUB_ACTIONS==='true') {
+    execFileSync('reg.exe',['add',ciPolicy,'/v','ParsecWebTurn.exe','/t','REG_SZ','/d',browserArguments,'/f']);
+  }
   const child = spawn(path.resolve(process.argv[2] || path.join(repository, 'ParsecWebTurn.exe')),
     ['--settings', '--data-dir', root], {
       // mDNS can be blocked by a CI/local firewall even for loopback peers.
       // Disable candidate obfuscation only in this isolated mock-page test.
-      env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --disable-features=msWebOOUI,msPdfOOUI,WebRtcHideLocalIpsWithMdns` },
+      env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: browserArguments },
       windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'],
     });
   let startupError = '';
@@ -168,6 +177,9 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
   } finally {
     socket?.close();
     if(child.exitCode===null) child.kill();
+    if(process.env.GITHUB_ACTIONS==='true') {
+      execFileSync('reg.exe',['delete',ciPolicy,'/v','ParsecWebTurn.exe','/f']);
+    }
     // Keep the disposable profile for inspecting a failed smoke test.
   }
 })().catch(error=>{console.error(error);process.exitCode=1;});
