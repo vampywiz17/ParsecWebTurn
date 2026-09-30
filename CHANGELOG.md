@@ -12,6 +12,8 @@ All notable changes to this project will be documented in this file.
 - Preserve v0.4.0 settings and CurrentUser DPAPI encryption. WebView2 uses a new profile and requires a fresh Parsec sign-in.
 - Port Cloudflare requests, custom TURN, encrypted caching, validation and local ice.json fallback to Rust.
 - Keep the direct/relay policy selected by Parsec; no forced relay mode.
+- Replace ICE configuration spreading with a native WebIDL dictionary adapter, preserving inherited/getter fields, frozen inputs and native argument errors for constructors and setConfiguration.
+- Validate STUN and TURN URI syntax separately and normalize case-insensitive scheme names.
 - Build and validate the Windows distribution with Cargo and a committed lockfile.
 
 ### Added

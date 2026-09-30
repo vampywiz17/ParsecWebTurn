@@ -191,6 +191,33 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     assert.equal(sample.codec,null,'Data-channel-only video metadata must stay unknown');
     assert.equal(sample.fps,null);
     assert.equal(sample.stale,false);
+    const compatibility = await evaluate(parsec,`(() => {
+      const Native = Object.getPrototypeOf(window.RTCPeerConnection);
+      const inspect = (Constructor, config, setter=false) => {
+        let peer;
+        try {
+          peer=new Constructor(setter ? {} : config);
+          if(setter)peer.setConfiguration(config);
+          const value=peer.getConfiguration();
+          return {policy:value.iceTransportPolicy,bundle:value.bundlePolicy,pool:value.iceCandidatePoolSize};
+        } catch(error) { return {error:error.name}; }
+        finally {peer?.close();}
+      };
+      const inputs={
+        inherited:Object.create({iceTransportPolicy:'relay',bundlePolicy:'max-bundle'}),
+        nonEnumerable:Object.defineProperty({},'iceTransportPolicy',{value:'relay'}),
+        primitive:42,
+        unrelatedGetter:Object.defineProperty({},'unrelated',{enumerable:true,get(){throw Error('Unexpected getter');}}),
+        frozen:Object.freeze({iceTransportPolicy:'relay',iceServers:[]}),
+      };
+      return Object.entries(inputs).map(([name,config])=>({name,
+        native:inspect(Native,config),injected:inspect(window.RTCPeerConnection,config),
+        nativeSetter:inspect(Native,config,true),injectedSetter:inspect(window.RTCPeerConnection,config,true)}));
+    })()`);
+    for(const item of compatibility) {
+      assert.deepEqual(item.injected,item.native,'Native constructor compatibility: '+item.name);
+      assert.deepEqual(item.injectedSetter,item.nativeSetter,'Native setConfiguration compatibility: '+item.name);
+    }
     // Inject synthetic Chromium prflx/TURN metadata into the real loopback stats.
     // This verifies the native DTO and panel, not a real external TURN session.
     await evaluate(parsec,`for(const peer of [first,second]) {
@@ -242,7 +269,7 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     assert.equal(sample.fpsSource,'WebCodecs decoder');assert.equal(sample.packetsLost,null,'Data-channel traffic does not expose RTP packet loss');
     if(process.env.PARSECWEBTURN_SCREENSHOTS) {await delay(1200);const {data}=await send('Page.captureScreenshot',{},stats);fs.writeFileSync(path.join(repository,'tauri-stats.png'),Buffer.from(data,'base64'));}
     assert.equal(errors.length,0,String(errors));
-    console.log('PASS: native WebView2 settings, DPAPI save, document-start injection, WebRTC traffic/RTT, actual decoded FPS, window recovery and remote IPC isolation');
+    console.log('PASS: native WebView2 settings, DPAPI save, WebIDL constructor/setConfiguration compatibility, WebRTC traffic/RTT, actual decoded FPS, window recovery and remote IPC isolation');
     socket.send(JSON.stringify({id:++sequence,method:'Browser.close'}));
     await delay(500);
   } finally {

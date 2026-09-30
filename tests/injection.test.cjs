@@ -6,10 +6,18 @@ const vm = require('node:vm');
 
 function setup({ available = true, legacy = true, origin = 'https://web.parsec.app' } = {}) {
   const logs = [];
+  function readDictionary(config) {
+    if (config != null && !['object','function'].includes(typeof config)) throw new TypeError('Invalid dictionary');
+    const result={iceServers:[],iceTransportPolicy:'all',bundlePolicy:'balanced'};
+    for (const key of ['bundlePolicy','certificates','iceCandidatePoolSize','iceServers','iceTransportPolicy','rtcpMuxPolicy']) {
+      const value=config?.[key];if(value!==undefined)result[key]=value;
+    }
+    return structuredClone(result);
+  }
   class NativePeerConnection {
     static generateCertificate() { return 'certificate'; }
-    constructor(config, constraints) { this.config = structuredClone(config); this.constraints = constraints; }
-    setConfiguration(config) { this.config = structuredClone(config); }
+    constructor(config, constraints) { this.config = readDictionary(config); this.constraints = constraints; }
+    setConfiguration(config) { this.config = readDictionary(config); }
     getConfiguration() { return structuredClone(this.config); }
   }
   const window = available ? { RTCPeerConnection: NativePeerConnection } : {};
@@ -77,4 +85,30 @@ test('credentials are not installed on unrelated origins', () => {
   const { window, NativePeerConnection } = setup({ origin: 'https://example.invalid' });
   assert.equal(window.RTCPeerConnection, NativePeerConnection);
   assert.equal(window.__parsecWebTurnPatched, undefined);
+});
+
+test('dictionary adapter preserves inherited/non-enumerable fields and getter receiver', () => {
+  const {window,servers}=setup();
+  const inherited={iceTransportPolicy:'relay',bundlePolicy:'max-bundle'};
+  const input=Object.create(inherited);
+  Object.defineProperty(input,'iceCandidatePoolSize',{value:2});
+  Object.defineProperty(input,'certificates',{get(){assert.equal(this,input);return [];}});
+  Object.defineProperty(input,'unrelated',{enumerable:true,get(){throw Error('Unknown field must not be read');}});
+  const pc=new window.RTCPeerConnection(input);
+  assert.equal(pc.config.iceTransportPolicy,'relay');assert.equal(pc.config.bundlePolicy,'max-bundle');
+  assert.equal(pc.config.iceCandidatePoolSize,2);assert.deepEqual(pc.config.iceServers,servers);
+  pc.setConfiguration(input);assert.equal(pc.config.iceTransportPolicy,'relay');
+});
+
+test('frozen input is supported, original ICE getter is not evaluated, and native errors survive', () => {
+  const {window,servers}=setup();
+  const input=Object.freeze({iceTransportPolicy:'relay',get iceServers(){throw Error('Replaced field must not be read');}});
+  const pc=new window.RTCPeerConnection(input);
+  assert.deepEqual(pc.config.iceServers,servers);assert.equal(pc.config.iceTransportPolicy,'relay');
+  for(const value of [42,true,'invalid',Symbol('invalid')]) {
+    assert.throws(()=>new window.RTCPeerConnection(value),TypeError);
+    assert.throws(()=>pc.setConfiguration(value),TypeError);
+  }
+  const failure=new Error('Original getter failure');
+  assert.throws(()=>new window.RTCPeerConnection({get bundlePolicy(){throw failure;}}),error=>error===failure);
 });

@@ -19,9 +19,14 @@ pub fn parse(raw: &[u8]) -> Result<Vec<IceServer>, String> {
         .filter(|entries| !entries.is_empty())
         .ok_or("iceServers must be a non-empty array")?;
     let mut result = Vec::new();
-    static PATTERN: OnceLock<Regex> = OnceLock::new();
-    let pattern = PATTERN.get_or_init(|| {
-        Regex::new(r"^(stun|stuns|turn|turns):(\[[0-9a-fA-F:.]+\]|[a-zA-Z0-9.-]+)(?::([0-9]+))?(?:\?transport=(udp|tcp))?$").unwrap()
+    static PATTERNS: OnceLock<(Regex, Regex)> = OnceLock::new();
+    let (stun_pattern, turn_pattern) = PATTERNS.get_or_init(|| {
+        // STUN has no query component (RFC 7064). WebRTC supports the UDP/TCP
+        // transport subset of TURN URIs (RFC 7065). Scheme names ignore case.
+        (
+            Regex::new(r"^((?i:stuns?)):(\[[0-9a-fA-F:.]+\]|[a-zA-Z0-9.-]+)(?::([0-9]+))?$").unwrap(),
+            Regex::new(r"^((?i:turns?)):(\[[0-9a-fA-F:.]+\]|[a-zA-Z0-9.-]+)(?::([0-9]+))?(?:\?transport=(udp|tcp))?$").unwrap(),
+        )
     });
     for entry in entries {
         if !entry.is_object() {
@@ -59,7 +64,11 @@ pub fn parse(raw: &[u8]) -> Result<Vec<IceServer>, String> {
             credential: string_field("credential")?,
         };
         for url in urls {
-            let parts = pattern.captures(&url).ok_or("Invalid STUN/TURN URL")?;
+            let parts = stun_pattern
+                .captures(&url)
+                .or_else(|| turn_pattern.captures(&url))
+                .ok_or("Invalid STUN/TURN URL")?;
+            let scheme = parts[1].to_ascii_lowercase();
             let host = &parts[2];
             if host.starts_with('[') {
                 host[1..host.len() - 1]
@@ -77,15 +86,18 @@ pub fn parse(raw: &[u8]) -> Result<Vec<IceServer>, String> {
                     return Err("ICE port must be between 1 and 65535".into());
                 }
                 if port == 53 {
+                    // Existing WebView compatibility policy, not an RFC URI restriction.
                     continue;
                 }
             }
-            if parts[1].starts_with("turn")
+            if scheme.starts_with("turn")
                 && (server.username.trim().is_empty() || server.credential.trim().is_empty())
             {
                 return Err("TURN requires a username and password".into());
             }
-            server.urls.push(url);
+            server
+                .urls
+                .push(format!("{scheme}:{}", url.split_once(':').unwrap().1));
         }
         if !server.urls.is_empty() {
             result.push(server);
@@ -136,9 +148,29 @@ mod tests {
             r#"{"iceServers":[{"urls":"stun:[::::]:3478"}]}"#,
             r#"{"iceServers":[{"urls":"https://example.com"}]}"#,
             r#"{"iceServers":[{"urls":"stun:example.com:53"}]}"#,
+            r#"{"iceServers":[{"urls":"stun:example.com?transport=udp"}]}"#,
+            r#"{"iceServers":[{"urls":"stuns:example.com?transport=tcp"}]}"#,
+            r#"{"iceServers":[{"urls":"TURN:example.com"}]}"#,
+            r#"{"iceServers":[{"urls":"turn:example.com?transport=UDP","username":"u","credential":"p"}]}"#,
             r#"{"iceServers":[{"urls":"stun:example.com"}]}{}"#,
         ] {
             assert!(parse(raw.as_bytes()).is_err(), "Accepted {raw}");
         }
+    }
+
+    #[test]
+    fn accepts_case_insensitive_schemes_and_normalizes_them_for_webview() {
+        let servers = parse(br#"{"iceServers":[{"urls":["STUN:example.com:3478","StUnS:[::1]:5349"]},{"urls":["TURN:example.com?transport=udp","TuRnS:example.com:443?transport=tcp"],"username":"u","credential":"p"}]}"#).unwrap();
+        assert_eq!(
+            servers[0].urls,
+            ["stun:example.com:3478", "stuns:[::1]:5349"]
+        );
+        assert_eq!(
+            servers[1].urls,
+            [
+                "turn:example.com?transport=udp",
+                "turns:example.com:443?transport=tcp"
+            ]
+        );
     }
 }

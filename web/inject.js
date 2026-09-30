@@ -7,7 +7,18 @@
     return;
   }
   const ICE_SERVERS = __ICE_SERVERS__;
-  const patchConfig = config => ({ ...config, iceServers: ICE_SERVERS });
+  const patchConfig = config => {
+    // Let the native WebIDL converter reject primitive dictionary arguments.
+    if (config != null && !['object', 'function'].includes(typeof config)) return config;
+    const original = config ?? {};
+    // WebIDL reads known members, including inherited/non-enumerable getters.
+    // An empty target avoids invariants imposed by frozen input properties.
+    return new Proxy(Object.create(null), {
+      get(_target, key) {
+        return key === 'iceServers' ? ICE_SERVERS : Reflect.get(original, key, original);
+      },
+    });
+  };
   const peers = new Map();
   __STATS_HELPER__
   __VIDEO_HELPER__
