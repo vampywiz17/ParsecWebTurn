@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const http = require('node:http');
 const assert = require('node:assert/strict');
-const { spawn } = require('node:child_process');
+const { spawn, execFileSync } = require('node:child_process');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const repository = path.resolve(__dirname, '..');
 
@@ -58,6 +58,13 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
       try { browser = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json(); if(browser.webSocketDebuggerUrl) break; } catch {}
       if(child.exitCode !== null) throw new Error('Application exited before creating WebView2');
       await delay(100);
+    }
+    if(!browser?.webSocketDebuggerUrl && process.env.GITHUB_ACTIONS==='true') {
+      // Runner diagnostics contain only process/runtime configuration, never
+      // real accounts: this entire test uses a disposable synthetic profile.
+      console.log(execFileSync('powershell.exe',['-NoProfile','-Command',
+        "Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('ParsecWebTurn.exe','msedgewebview2.exe') } | Select-Object Name,ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Depth 3; Get-ChildItem Env:WEBVIEW2* | Format-List; Get-ItemProperty 'HKLM:/SOFTWARE/Policies/Microsoft/Edge','HKCU:/SOFTWARE/Policies/Microsoft/Edge' -ErrorAction SilentlyContinue | Select-Object DeveloperToolsAvailability,RemoteDebuggingAllowed | ConvertTo-Json"
+      ],{encoding:'utf8'}));
     }
     assert.ok(browser?.webSocketDebuggerUrl, 'WebView2 debugging endpoint was not created. '+startupError);
     socket = new WebSocket(browser.webSocketDebuggerUrl);
