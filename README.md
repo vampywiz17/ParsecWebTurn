@@ -1,169 +1,103 @@
 # ParsecWebTurn
 
-Portable, no-install launcher for **Parsec Web** using **Microsoft Edge** and either Cloudflare Realtime or your own WebRTC STUN/TURN servers, including coturn and eturnal.
+A portable Windows application for **Parsec Web**, written in **Rust with Tauri 2**. It opens the web client inside the app and lets you use Cloudflare Realtime or your own STUN/TURN servers, including coturn, eturnal and ExpressTURN.
 
-## What it does
+The connection can be direct when the network allows it, or use a TURN relay when needed. No VPN or driver installation is required. A TLS TURN endpoint on port 443 can help on restrictive networks, but the network must also permit Parsec's HTTPS/WebSocket services and the selected relay.
 
-- launches `https://web.parsec.app/` as an Edge app window
-- requires **no administrator rights**
-- installs no VPN, driver, .NET runtime, or WebView2 runtime
-- uses the Microsoft Edge already present on Windows
-- creates a separate local Edge profile beside the application
-- disables automatic translation prompts in that dedicated profile for a cleaner app window
-- injects the ICE override at `document_start`, before the Parsec page scripts run
-- requests short-lived TURN credentials directly from Cloudflare, with optional encrypted caching
-- stores the long-lived TURN API token locally using **Windows DPAPI / Current User**
-- supports a local `ice.json` fallback
-- supports custom STUN/TURN URLs with Windows-protected passwords and no Cloudflare dependency
-- uses the Parsec icon for the Windows executable
+## Requirements and first run
 
-## First run
+- Windows 10/11 x64, with **Microsoft Edge WebView2 Runtime** already installed.
+- A writable directory for the executable, settings and browser profiles.
+- Cloudflare TURN credentials or an existing custom TURN account.
 
-1. Download and extract the release ZIP to any writable directory.
+The WebView2 runtime is **separate from the Microsoft Edge browser**. Windows 11 normally includes it, but managed computers may have different configurations. ParsecWebTurn does not silently install a runtime or require administrator rights when the runtime is present. If it is missing, ask your administrator or use Microsoft's [WebView2 Runtime installer](https://developer.microsoft.com/en-us/microsoft-edge/webview2/).
+
+1. Extract the release ZIP to a writable directory.
 2. Run `ParsecWebTurn.exe`.
-3. Choose **Cloudflare Realtime** and enter:
-   - **Cloudflare TURN Key ID**
-   - **Cloudflare TURN Key API Token**
-   - credential TTL in seconds (default 86400 / 24 hours, maximum 172800 / 48 hours)
-4. Click **Save & launch Parsec**.
+3. Choose Cloudflare Realtime or Custom server, enter the relay details, and click **Save & connect**.
+4. Sign into Parsec inside the application.
 
-Alternatively choose **Custom server / coturn, eturnal** and configure your own server as described below.
+Web assets and the ICE override are embedded in the executable. There is no browser extension to install or `extension` directory to copy. The native app menu provides **Connection settings**, **Connection stats**, **Developer tools** and **Exit**. Settings can be saved without interrupting an active connection; **Save & connect** replaces the current session.
 
-ParsecWebTurn stores the TURN Key ID and TTL in `settings.json`. The API token is encrypted with Windows DPAPI and can only be decrypted in the same Windows user context.
+On subsequent launches, valid saved settings open Parsec automatically. Use `ParsecWebTurn.exe --settings` or `/settings` to start with the settings window instead. `--data-dir <directory>` selects a different portable configuration/profile directory.
 
-By default, every start calls Cloudflare's TURN credential endpoint and obtains a new short-lived `username` / `credential` pair. Existing settings remain compatible.
+## Upgrading from v0.4.0
 
-Enable **Reuse valid TURN credentials for faster startup** in Settings to avoid unnecessary API calls. The cache in `.turn-cache.json` is encrypted with DPAPI for the current Windows user. It is reused only when the Key ID, API token and TTL match, the local clock has not moved behind its issue time, and more than a quarter of the requested lifetime remains (at least five minutes). Expired, corrupt or incompatible caches trigger a fresh request. A cache write failure does not prevent a valid session from starting. A cached credential can have less remaining lifetime than the configured TTL; disable caching if your next session needs the full lifetime.
+Keep your existing `settings.json` beside the new executable. The field names and Windows DPAPI / CurrentUser format remain compatible, so saved API tokens and TURN passwords continue to work under the same Windows account.
 
-The launcher does not refresh credentials in an already open browser. Set the TTL longer than your expected session, then close the dedicated Parsec Edge windows and launch again when you need fresh credentials. Launching while that profile is active shows a clear message instead of silently reusing old page configuration. If Edge keeps the profile active after closing its windows, disable Startup boost and background extensions in that dedicated profile.
+Tauri uses a new `WebView2Profile` directory. The previous Edge `Profile` is not modified or imported; sign into Parsec again once. `SettingsProfile` stores the local settings webview's browser state. Keep these directories private. Only one app instance can use the same data directory at a time.
 
-## Cloudflare setup
+## Cloudflare Realtime
 
-Create a Cloudflare Realtime TURN key and use its **Key ID** and **API token** in the first-run settings dialog.
+Create a Cloudflare Realtime TURN key and enter its **Key ID** and **API token**. ParsecWebTurn requests a temporary username/password directly from Cloudflare over HTTPS. The default lifetime is 24 hours; accepted values are 60–172800 seconds (maximum 48 hours).
 
-The application calls:
+**Reuse valid credentials for faster startup** enables an optional DPAPI-encrypted cache. It is reused only when the key, token and lifetime match, the clock has not moved behind the issue time, and more than a quarter of the requested lifetime remains (at least five minutes). Cache corruption or write failures do not prevent a fresh request. Existing v0.4.0 cache entries can also be read.
 
-```text
-POST https://rtc.live.cloudflare.com/v1/turn/keys/<TURN_KEY_ID>/credentials/generate-ice-servers
-Authorization: Bearer <TURN_KEY_API_TOKEN>
-Content-Type: application/json
-```
+Cloudflare requests have a 20-second timeout, reject redirects and limit responses to 1 MiB. Errors do not include API tokens or reflected server response bodies.
 
-with a body such as:
+Credentials are resolved when connecting, **not refreshed within an already open session**. Choose a lifetime longer than the session, or reconnect to obtain a new pair. Cached credentials may have less time remaining.
 
-```json
-{"ttl":86400}
-```
+## Custom TURN (coturn, eturnal, ExpressTURN)
 
-The returned `iceServers` list is injected into Parsec Web.
-
-## Custom TURN servers (coturn, eturnal and compatible services)
-
-Choose **Custom server / coturn, eturnal** in Settings. Enter one STUN/TURN URL per line, for example:
+Enter one STUN/TURN URL per line, for example:
 
 ```text
 stun:turn.example.com:3478
 turn:turn.example.com:3478?transport=udp
 turn:turn.example.com:3478?transport=tcp
-turns:turn.example.com:5349?transport=tcp
+turns:turn.example.com:443?transport=tcp
 ```
 
-Enter the TURN **username** and **password / credential** accepted by your server. All TURN URLs in this form share the same credentials. STUN-only setups can leave both fields empty. Custom mode makes no Cloudflare API calls, requires no Cloudflare key and does not apply Cloudflare credential caching or TTL settings.
+All configured TURN URLs share the supplied username/password. STUN-only configurations can leave both empty. URL validation rejects malformed entries and removes port 53 endpoints, which browsers cannot use.
 
-The password is stored in `encryptedCustomPassword` using Windows DPAPI; server URLs and username are stored in `settings.json`. Existing Cloudflare settings migrate automatically, and switching providers preserves both sets of configuration.
+Custom mode makes no Cloudflare calls. Use static credentials or a temporary username/password generated by your TURN service. A TURN REST `static-auth-secret` or eturnal shared `secret` is **not a client password**. The app does not generate or renew custom REST credentials.
 
-For **coturn**, use a configured long-term user account (`lt-cred-mech` / `user`) or a temporary username/password generated using your server's TURN REST authentication setup. For **eturnal**, use its configured static `credentials` or a temporary pair from your credential service / `eturnalctl credentials`. A `static-auth-secret` / shared `secret` is a server secret, not a password you can paste into this client. The app does not generate or refresh custom REST credentials; supply a pair valid for your session.
+For [coturn](https://github.com/coturn/coturn/blob/master/examples/etc/turnserver.conf), use a long-term user or a generated REST pair. For [eturnal](https://eturnal.net/doc/), use configured static credentials or a generated pair. For ExpressTURN, enter the host, transport, port and credentials supplied by the service. TLS endpoints need a certificate trusted by WebView2; server firewall and relay-port setup remain server-side responsibilities.
 
-See the official [coturn configuration reference](https://github.com/coturn/coturn/blob/master/examples/etc/turnserver.conf) and [eturnal documentation](https://eturnal.net/doc/). TURN over TLS requires a certificate trusted by Edge; server routing, firewall and relay-port configuration remain server-side responsibilities.
+Switching providers preserves each provider's saved credentials. Password fields stay blank in the settings UI: leave them blank to retain the saved value, enter a replacement, or select **Forget saved…** to remove it. Only valid settings are written.
 
-## Change settings later
+## Connection statistics
 
-Run:
+Open **Connection stats** from the native menu. The application samples `RTCPeerConnection.getStats()` once per second and displays:
 
-```powershell
-.\ParsecWebTurn.exe --settings
-```
+- Incoming/outgoing WebRTC traffic in Mbps, calculated from byte-counter changes.
+- RTT of the selected ICE candidate pair, when available.
+- Direct/relay route and transport of the most active connection.
+- Video FPS, codec, decoder, resolution and lost packets, when the web client exposes standard inbound-video statistics.
 
-You can also use:
+Traffic is **actual usage, not a bandwidth-capacity test**. RTT is a WebRTC path measurement, not a separate ICMP ping. Parsec may carry video through data channels; in that case traffic/RTT can be available while video-specific fields remain unknown. Multiple connected peers have their traffic rates summed; route/RTT come from the most active connected peer. Stale samples are marked and their rate/RTT values cleared after five seconds.
 
-```powershell
-.\ParsecWebTurn.exe /settings
-```
+The remote Parsec view can submit bounded statistics only. It cannot invoke settings, credential storage, fallback or connection commands. Diagnostics never include candidate IP addresses or credentials.
 
-## Local ICE fallback
+This migration does not claim to fix HEVC driver issues or long-session freezing. WebView2 still uses a browser engine for the web client. Developer tools are available from the menu for troubleshooting.
 
-If the Cloudflare API request fails, the app can fall back to a local `ice.json`.
+## Local fallback
 
-Copy `ice.example.json` to `ice.json` and fill in a valid short-lived TURN username and credential:
+If the provider cannot supply usable credentials, the settings window offers **Connect using local ice.json instead**. Copy `ice.example.json` to `ice.json` and supply a valid `iceServers` object. The fallback is explicit and uses the same validation as provider responses.
 
-```json
-{
-  "iceServers": [
-    {
-      "urls": [
-        "stun:stun.cloudflare.com:3478",
-        "turn:turn.cloudflare.com:3478?transport=udp",
-        "turn:turn.cloudflare.com:3478?transport=tcp",
-        "turns:turn.cloudflare.com:5349?transport=tcp",
-        "turns:turn.cloudflare.com:443?transport=tcp"
-      ],
-      "username": "YOUR_USERNAME",
-      "credential": "YOUR_CREDENTIAL"
-    }
-  ]
-}
-```
+## Security
 
-## Security model
+Saved secrets and the credential cache use Windows DPAPI for the current user. They are not portable to another Windows account. The web client's ICE configuration necessarily contains the active TURN username/password in memory; do not share developer-tools exports or browser profiles containing private data.
 
-The direct-to-Cloudflare design is intentionally backend-free and portable.
-
-That means the long-lived TURN API token exists on the client PC. To reduce exposure:
-
-- it is never embedded in the executable or GitHub repository
-- it is stored with Windows DPAPI for the current user
-- the active TURN username and credential are written into generated `extension/inject.js`; Cloudflare credentials are temporary, while custom static credentials can be long-lived
-- `settings.json`, `.turn-cache.json`, `ice.json`, `extension/inject.js`, and `Profile/` must not be committed or shared
-- console messages do not include TURN usernames or passwords
-
-For environments where the client device itself is not trusted, use a backend credential broker instead.
+The Parsec page has no native settings/storage privileges. The local settings and stats pages have separate, narrowly scoped Tauri capabilities and a content security policy. Only `https://web.parsec.app` receives the ICE override. GPU acceleration is left to WebView2; the application does not disable the browser sandbox or TLS verification.
 
 ## Build
 
-Requires Windows, Go (CI uses 1.27.1), Node.js 24 or newer, and PowerShell. The same script is used locally and in CI; it embeds the checked-in icon and required Common Controls v6 manifest, runs Go and JavaScript tests, and creates the executable, portable ZIP and SHA-256 checksums.
+Install stable Rust with the MSVC toolchain, Visual Studio C++ Build Tools / Windows SDK, WebView2 Runtime and Node.js (for regression tests). No Go toolchain, npm frontend framework or Tauri CLI is required.
 
 ```powershell
-.\scripts\build.ps1
+rustup component add rustfmt clippy
+./scripts/build.ps1
 ```
 
-The first build downloads the Go dependencies and `github.com/akavel/rsrc@v0.10.2`. Dependency checksums are committed in `go.sum`; builds use `-mod=readonly` and do not run `go mod tidy`. The icon is not downloaded or converted during builds.
+The script checks version consistency and formatting, runs Rust and JavaScript tests, runs Clippy, builds the embedded application and packages an explicit file allowlist. `src-tauri/Cargo.lock` locks dependencies. The Windows CI uses the same script; `v*` tags publish releases after successful validation.
 
-For a release, update `VERSION`, `CHANGELOG.md` and `RELEASE_NOTES.md`, merge the validated changes into `main`, then push the matching `vX.Y.Z` tag. The release workflow validates the version and reruns the shared build before publishing assets. ZIP packaging uses an explicit file allowlist so local runtime files cannot enter a release.
+For development:
 
-## Troubleshooting
-
-Open Edge DevTools with `F12` and check the Console for:
-
-```text
-[ParsecWebTurn] ICE override installed before Parsec startup; server count:
+```powershell
+cargo run --manifest-path src-tauri/Cargo.toml -- --settings --data-dir ./dev-data
 ```
 
-For WebRTC diagnostics open:
+## Attribution
 
-```text
-edge://webrtc-internals
-```
-
-A successful TURN path should show a selected candidate pair with `state=succeeded` and a relay candidate. The override applies both at construction and to subsequent `setConfiguration()` calls. It preserves the application's transport policy; configuring TURN servers alone does not force a relay connection.
-
-Both API responses and `ice.json` are validated before launch. Browser-blocked port 53 URLs are filtered out; an empty usable configuration is rejected.
-
-## Icon / trademark note
-
-The executable uses a checked-in Parsec favicon. See `assets/README.md` for its source and checksum.
-
-ParsecWebTurn is an independent community project and is **not affiliated with, endorsed by, or sponsored by Parsec or Unity**.
-
-## License
-
-MIT
+ParsecWebTurn is an independent community project, not affiliated with Parsec or Unity. The [Parsec icon](assets/README.md) identifies the Parsec-focused application. Parsec trademarks belong to their owners.

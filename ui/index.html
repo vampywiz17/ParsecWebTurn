@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ParsecWebTurn</title><link rel="stylesheet" href="style.css"><script src="settings.js" defer></script></head>
+<body>
+<main>
+  <header><span class="brand"><img src="icon.ico" alt=""> PARSEC WEB TURN</span><span class="version" id="version"></span><h1>Your connection.<br>Your way.</h1><p>Parsec Web, with the relay you choose.</p></header>
+  <form id="settings">
+    <section class="card">
+      <label for="provider">TURN PROVIDER</label>
+      <select id="provider"><option value="cloudflare">Cloudflare Realtime</option><option value="custom">Custom server · coturn, eturnal, ExpressTURN</option></select>
+      <div id="cloudflare" class="provider-panel">
+        <p class="hint">Generate temporary relay credentials automatically.</p>
+        <label for="key">TURN Key ID</label><input id="key" autocomplete="off" placeholder="Cloudflare TURN Key ID">
+        <label for="token">API token</label><input id="token" type="password" autocomplete="off" placeholder="Cloudflare TURN API token">
+        <label class="check"><input type="checkbox" id="forget-token"> Forget saved API token</label>
+        <div class="row"><div><label for="ttl">Credential lifetime (seconds)</label><input id="ttl" type="number" min="60" max="172800" step="1" value="86400"></div></div>
+        <label class="check"><input type="checkbox" id="cache"> Reuse valid credentials for faster startup</label>
+        <p class="hint">Maximum 48 hours. Credentials are refreshed at launch, not during an open session.</p>
+      </div>
+      <div id="custom" class="provider-panel" hidden>
+        <p class="hint">Use your own TURN service. Cloudflare is not required.</p>
+        <label for="urls">STUN / TURN URLs</label><textarea id="urls" rows="3" spellcheck="false" placeholder="turns:turn.example.com:443?transport=tcp"></textarea>
+        <p class="hint">One URL per line. All TURN URLs use the same credentials.</p>
+        <label for="username">Username</label><input id="username" autocomplete="off" placeholder="TURN username">
+        <label for="password">Password / credential</label><input id="password" type="password" autocomplete="off" placeholder="TURN password">
+        <label class="check"><input type="checkbox" id="forget-password"> Forget saved TURN password</label>
+        <p class="hint">STUN-only setups can leave credentials empty. A TURN REST shared secret is not a client password.</p>
+      </div>
+    </section>
+    <p id="error" class="error" role="alert" hidden></p>
+    <p id="status" class="status" aria-live="polite"></p>
+    <footer><p class="hint">Saved secrets protected by your Windows account.<br>Direct connections remain available; TURN helps when needed.</p><div class="actions"><button id="save" type="button" class="secondary">Save</button><button id="connect" type="submit">Save &amp; connect</button></div></footer>
+    <button id="fallback" type="button" class="text-button" hidden>Connect using local ice.json instead</button>
+    <p class="hint">Opening a new connection replaces the current Parsec session. Use the app menu to return to settings or view connection stats.</p>
+  </form>
+</main>
+</body>
+</html>

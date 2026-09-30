@@ -23,10 +23,12 @@ jobs:
         run: |
           $version = (Get-Content VERSION -Raw).Trim()
           if ("v$version" -ne $env:GITHUB_REF_NAME) { throw 'Tag does not match VERSION' }
-      - uses: actions/setup-go@v5
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          go-version: '1.27.1'
-          cache: true
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
       - uses: actions/setup-node@v4
         with:
           node-version: '24'

@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0] - Unreleased
+
+### Changed
+
+- Replace the Go launcher and external Edge app window with a Rust/Tauri 2 application using Windows WebView2.
+- Integrate settings, the Parsec window, developer tools and connection statistics into the same application.
+- Embed the ICE override and UI in the executable; no extension directory or generated credential script is needed.
+- Preserve v0.4.0 settings and CurrentUser DPAPI encryption. WebView2 uses a new profile and requires a fresh Parsec sign-in.
+- Port Cloudflare requests, custom TURN, encrypted caching, validation and local ice.json fallback to Rust.
+- Keep the direct/relay policy selected by Parsec; no forced relay mode.
+- Build and validate the Windows distribution with Cargo and a committed lockfile.
+
+### Added
+
+- Live WebRTC traffic rates, connection RTT, direct/relay route and transport diagnostics.
+- Video codec, decoder, FPS, resolution and packet-loss details when provided by the web client.
+- Restricted native command access: the remote Parsec page can submit bounded statistics but cannot read or change saved settings.
+
+### Requirements
+
+- Microsoft Edge WebView2 Runtime must be present. The runtime is separate from the Edge browser; the app does not silently install it.
+- HEVC decoding and the previously reported long-session freeze remain separate issues; this migration does not claim to fix them.
+
 ## [0.4.0] - 2026-09-30
 
 ### Added

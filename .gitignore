@@ -27,3 +27,11 @@ assets/parsec.svg
 dist/
 settings-cloudflare.png
 settings-custom.png
+
+# Rust / WebView2 output
+src-tauri/target/
+src-tauri/gen/
+SettingsProfile/
+WebView2Profile/
+tauri-settings.png
+tauri-stats.png

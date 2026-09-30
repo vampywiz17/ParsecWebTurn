@@ -1,0 +1,33 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "ParsecWebTurn",
+  "version": "0.5.0",
+  "identifier": "app.parsecwebturn.desktop",
+  "build": { "frontendDist": "../ui" },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src ipc: http://ipc.localhost",
+      "capabilities": [
+        {
+          "identifier": "settings",
+          "windows": ["main"],
+          "permissions": ["allow-get-configuration", "allow-save-configuration", "allow-connect-saved", "allow-connect-fallback"]
+        },
+        {
+          "identifier": "statistics",
+          "windows": ["stats"],
+          "permissions": ["allow-get-stats"]
+        },
+        {
+          "identifier": "parsec-statistics",
+          "local": false,
+          "remote": { "urls": ["https://web.parsec.app/*"] },
+          "windows": ["parsec"],
+          "permissions": ["allow-report-stats"]
+        }
+      ]
+    }
+  },
+  "bundle": { "active": false, "icon": ["../assets/parsec.ico"] }
+}

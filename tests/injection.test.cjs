@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function setup({ available = true, legacy = true } = {}) {
+function setup({ available = true, legacy = true, origin = 'https://web.parsec.app' } = {}) {
   const logs = [];
   class NativePeerConnection {
     static generateCertificate() { return 'certificate'; }
@@ -14,9 +14,12 @@ function setup({ available = true, legacy = true } = {}) {
   }
   const window = available ? { RTCPeerConnection: NativePeerConnection } : {};
   if (available && legacy) window.webkitRTCPeerConnection = NativePeerConnection;
-  const context = vm.createContext({ window, console: { log: (...args) => logs.push(args), error: (...args) => logs.push(args) } });
+  window.location = { origin };
+  const context = vm.createContext({ window, setInterval: () => 1, console: { log: (...args) => logs.push(args), error: (...args) => logs.push(args) } });
   const servers = [{ urls: ['turn:example.invalid:3478'], username: 'test-user', credential: 'test-secret' }];
-  const script = fs.readFileSync(path.join(__dirname, '../extension/inject.template.js'), 'utf8').replace('__ICE_SERVERS__', JSON.stringify(servers));
+  const script = fs.readFileSync(path.join(__dirname, '../web/inject.js'), 'utf8')
+    .replace('__STATS_HELPER__', fs.readFileSync(path.join(__dirname, '../web/stats.js'), 'utf8'))
+    .replace('__ICE_SERVERS__', JSON.stringify(servers));
   vm.runInContext(script, context);
   return { window, logs, context, script, NativePeerConnection, servers };
 }
@@ -67,4 +70,10 @@ test('absent legacy alias is not introduced; null and omitted configs work', () 
   for (const config of [undefined, null]) {
     assert.deepEqual(new window.RTCPeerConnection(config).getConfiguration().iceServers, servers);
   }
+});
+
+test('credentials are not installed on unrelated origins', () => {
+  const { window, NativePeerConnection } = setup({ origin: 'https://example.invalid' });
+  assert.equal(window.RTCPeerConnection, NativePeerConnection);
+  assert.equal(window.__parsecWebTurnPatched, undefined);
 });
