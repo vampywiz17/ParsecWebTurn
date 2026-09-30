@@ -8,6 +8,7 @@ fn main() {
             "get_stats",
             "report_stats",
             "open_stats",
+            "set_parsec_window_mode",
         ]),
     ))
     .expect("Tauri build failed");

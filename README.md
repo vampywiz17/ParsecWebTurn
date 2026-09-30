@@ -65,6 +65,12 @@ Open **Connection stats** from the native menu. The application samples `RTCPeer
 - Direct/relay route and transport of the most active connection.
 - Video FPS, codec, decoder, resolution and lost packets, when the web client exposes standard inbound-video statistics.
 
+The native WebView2 Media event API also supplies codec, decoder, hardware decoding, profile, backend and visible resolution, even when Parsec carries video through data channels. Decoder reconfiguration updates the displayed resolution. FPS remains unknown without a frame counter. No remote debugging port is opened for this collection.
+
+Route describes the selected ICE candidates, whose local/remote types are displayed. Configuring TURN does not force a relay; ambiguous candidate-pair selection stays unknown.
+
+Parsec starts in a normal window. The application owns fullscreen: **F11** toggles it, **Ctrl+Shift+W** restores windowed mode, and the settings screen has a recovery button. Automatic HTML fullscreen and locking Escape/F11 are blocked. The **App** and **View** native submenus remain separate from Parsec's controls; the menu is hidden during fullscreen.
+
 Traffic is **actual usage, not a bandwidth-capacity test**. RTT is a WebRTC path measurement, not a separate ICMP ping. Parsec may carry video through data channels; in that case traffic/RTT can be available while video-specific fields remain unknown. Multiple connected peers have their traffic rates summed; route/RTT come from the most active connected peer. Stale samples are marked and their rate/RTT values cleared after five seconds.
 
 The remote Parsec view can submit bounded statistics only. It cannot invoke settings, credential storage, fallback or connection commands. Diagnostics never include candidate IP addresses or credentials.

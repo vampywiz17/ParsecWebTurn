@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod ice;
+mod media;
 mod provider;
 mod settings;
 mod stats;
@@ -14,12 +15,12 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Mutex,
+        Arc, Mutex,
     },
     time::Instant,
 };
 use tauri::{
-    menu::{Menu, MenuItem},
+    menu::{Menu, MenuItem, Submenu},
     Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
 
@@ -28,6 +29,7 @@ struct AppState {
     _instance_lock: File,
     operation: tokio::sync::Mutex<()>,
     stats: Mutex<LatestStats>,
+    media: Arc<Mutex<media::MediaState>>,
     auto_connect: AtomicBool,
 }
 
@@ -121,20 +123,24 @@ async fn open_parsec(
         }
     }
     *state.stats.lock().map_err(|_| "Statistics lock failed")? = LatestStats::default();
+    *state.media.lock().map_err(|_| "Media lock failed")? = media::MediaState::default();
     let injection = include_str!("../../web/inject.js")
         .replace("__STATS_HELPER__", include_str!("../../web/stats.js"))
         .replace(
             "__ICE_SERVERS__",
             &serde_json::to_string(servers).map_err(|_| "Cannot encode ICE servers")?,
         );
+    let injection = format!("{}\n{}", include_str!("../../web/window.js"), injection);
     let profile = state.root.join("WebView2Profile");
     fs::create_dir_all(&profile).map_err(|e| format!("Cannot create WebView2 profile: {e}"))?;
-    WebviewWindowBuilder::new(
+    let parsec = WebviewWindowBuilder::new(
         app,
         "parsec",
         WebviewUrl::External("https://web.parsec.app/".parse().unwrap()),
     )
     .title("Parsec — ParsecWebTurn")
+    .theme(Some(tauri::Theme::Dark))
+    .fullscreen(false)
     .inner_size(1280.0, 800.0)
     .min_inner_size(800.0, 500.0)
     .data_directory(profile)
@@ -146,6 +152,7 @@ async fn open_parsec(
     .map_err(|e| {
         format!("Cannot open Parsec. Ensure Microsoft Edge WebView2 Runtime is installed. {e}")
     })?;
+    media::attach(&parsec, state.media.clone());
     if let Some(settings) = app.get_webview_window("main") {
         let _ = settings.hide();
     }
@@ -178,11 +185,17 @@ fn report_stats(
 #[tauri::command]
 fn get_stats(window: WebviewWindow, state: State<'_, AppState>) -> Result<ConnectionStats, String> {
     trusted_local(&window, "stats")?;
-    Ok(state
+    let mut sample = state
         .stats
         .lock()
         .map_err(|_| "Statistics lock failed")?
-        .snapshot())
+        .snapshot();
+    state
+        .media
+        .lock()
+        .map_err(|_| "Media lock failed")?
+        .supplement(&mut sample);
+    Ok(sample)
 }
 
 fn show_settings(app: &tauri::AppHandle) {
@@ -191,6 +204,43 @@ fn show_settings(app: &tauri::AppHandle) {
         let _ = window.unminimize();
         let _ = window.set_focus();
     }
+}
+
+fn set_parsec_mode(app: &tauri::AppHandle, fullscreen: bool) -> Result<(), String> {
+    let window = app
+        .get_webview_window("parsec")
+        .ok_or("Open Parsec first")?;
+    window.eval("navigator.keyboard?.unlock(); document.exitPointerLock?.(); if(document.fullscreenElement) document.exitFullscreen().catch(()=>{});")
+        .map_err(|e| e.to_string())?;
+    window
+        .set_fullscreen(fullscreen)
+        .map_err(|e| e.to_string())?;
+    if fullscreen {
+        window.hide_menu().map_err(|e| e.to_string())?;
+    } else {
+        window.set_decorations(true).map_err(|e| e.to_string())?;
+        window.show_menu().map_err(|e| e.to_string())?;
+        window.unminimize().map_err(|e| e.to_string())?;
+    }
+    window.set_focus().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn set_parsec_window_mode(
+    app: tauri::AppHandle,
+    window: WebviewWindow,
+    fullscreen: bool,
+) -> Result<serde_json::Value, String> {
+    trusted_local(&window, "main")?;
+    set_parsec_mode(&app, fullscreen)?;
+    let parsec = app
+        .get_webview_window("parsec")
+        .ok_or("Open Parsec first")?;
+    Ok(serde_json::json!({
+        "fullscreen": parsec.is_fullscreen().map_err(|e| e.to_string())?,
+        "menuVisible": parsec.is_menu_visible().map_err(|e| e.to_string())?,
+        "decorated": parsec.is_decorated().map_err(|e| e.to_string())?,
+    }))
 }
 
 async fn show_stats(app: &tauri::AppHandle) -> Result<(), String> {
@@ -203,8 +253,10 @@ async fn show_stats(app: &tauri::AppHandle) -> Result<(), String> {
     }
     WebviewWindowBuilder::new(app, "stats", WebviewUrl::App("stats.html".into()))
         .title("ParsecWebTurn — Connection stats")
-        .inner_size(470.0, 680.0)
-        .resizable(false)
+        .theme(Some(tauri::Theme::Dark))
+        .inner_size(500.0, 820.0)
+        .min_inner_size(430.0, 600.0)
+        .resizable(true)
         .data_directory(state.root.join("WebView2Profile"))
         .additional_browser_args(BROWSER_ARGS)
         .on_navigation(local_url)
@@ -252,6 +304,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             _instance_lock: lock,
             operation: tokio::sync::Mutex::new(()),
             stats: Mutex::new(LatestStats::default()),
+            media: Arc::new(Mutex::new(media::MediaState::default())),
             auto_connect: AtomicBool::new(!force_settings),
         })
         .invoke_handler(tauri::generate_handler![
@@ -261,7 +314,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             connect_fallback,
             get_stats,
             report_stats,
-            open_stats
+            open_stats,
+            set_parsec_window_mode
         ])
         .setup(move |app| {
             let settings =
@@ -271,12 +325,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let devtools =
                 MenuItem::with_id(app, "devtools", "Developer tools", true, Some("F12"))?;
             let exit = MenuItem::with_id(app, "exit", "Exit", true, None::<&str>)?;
+            let fullscreen =
+                MenuItem::with_id(app, "fullscreen", "Toggle fullscreen", true, Some("F11"))?;
+            let windowed =
+                MenuItem::with_id(app, "windowed", "Windowed mode", true, Some("Ctrl+Shift+W"))?;
             app.set_menu(Menu::with_items(
                 app,
-                &[&settings, &stats, &devtools, &exit],
+                &[
+                    &Submenu::with_items(app, "App", true, &[&settings, &stats, &exit])?,
+                    &Submenu::with_items(app, "View", true, &[&fullscreen, &windowed, &devtools])?,
+                ],
             )?)?;
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("ParsecWebTurn — Connection settings")
+                .theme(Some(tauri::Theme::Dark))
                 .inner_size(780.0, 820.0)
                 .min_inner_size(660.0, 640.0)
                 .data_directory(settings_profile)
@@ -287,6 +349,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         })
         .on_menu_event(|app, event| match event.id().as_ref() {
+            "fullscreen" => {
+                if let Some(window) = app.get_webview_window("parsec") {
+                    if let Ok(fullscreen) = window.is_fullscreen() {
+                        let _ = set_parsec_mode(app, !fullscreen);
+                    }
+                }
+            }
+            "windowed" => {
+                let _ = set_parsec_mode(app, false);
+            }
             "settings" => show_settings(app),
             "stats" => {
                 let app = app.clone();

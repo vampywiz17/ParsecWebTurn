@@ -38,6 +38,7 @@ async function save(connect) {
   if (connect) { await invoke('connect_saved'); $('status').textContent = 'Parsec opened. Return here using Connection settings in the app menu.'; }
 }
 $('provider').addEventListener('change', panel);
+$('windowed').addEventListener('click', () => action(async () => { await invoke('set_parsec_window_mode', {fullscreen:false}); $('status').textContent='Parsec restored to windowed mode. Use F11 to toggle fullscreen.'; }));
 $('stats').addEventListener('click', () => action(() => invoke('open_stats')));
 $('save').addEventListener('click', () => action(() => save(false)));
 $('settings').addEventListener('submit', event => { event.preventDefault(); action(() => save(true)); });

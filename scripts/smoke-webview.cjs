@@ -161,6 +161,11 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
       const diagnostics = await evaluate(parsec,`(async()=>({error:window.smoke.error,first:first.connectionState,second:second.connectionState,firstIce:first.iceConnectionState,secondIce:second.iceConnectionState,channel:channel.readyState,reports:await Promise.all([first,second].map(async peer=>[...await peer.getStats()].map(([,value])=>({type:value.type,state:value.state,candidateType:value.candidateType,protocol:value.protocol,mdns:value.address?.endsWith('.local'),requestsSent:value.requestsSent,responsesReceived:value.responsesReceived}))))}))()`);
       throw new Error('Loopback WebRTC did not connect: '+JSON.stringify(diagnostics));
     }
+    assert.equal(await evaluate(parsec,`document.documentElement.requestFullscreen().then(()=>false,error=>error.name==='NotAllowedError')`),true,'Automatic web fullscreen must be blocked');
+    const fullscreenMode = await invoke(main,'set_parsec_window_mode',{fullscreen:true});
+    assert.equal(fullscreenMode.fullscreen,true); assert.equal(fullscreenMode.menuVisible,false);
+    const windowedMode = await invoke(main,'set_parsec_window_mode',{fullscreen:false});
+    assert.equal(windowedMode.fullscreen,false); assert.equal(windowedMode.menuVisible,true); assert.equal(windowedMode.decorated,true);
     const rejected=await evaluate(parsec,`window.__TAURI_INTERNALS__.invoke('get_configuration').then(()=>false,()=>true)`);
     assert.equal(rejected,true,'Remote Parsec page must not access settings');
     const rejectedWrite=await evaluate(parsec,`window.__TAURI_INTERNALS__.invoke('save_configuration',{input:${JSON.stringify(input)}}).then(()=>false,()=>true)`);
@@ -174,6 +179,20 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     assert.equal(sample.codec,null,'Data-channel-only video metadata must stay unknown');
     assert.equal(sample.fps,null);
     assert.equal(sample.stale,false);
+    await evaluate(parsec,`(async()=>{
+      const decoder = new VideoDecoder({output(frame){frame.close();},error(error){window.smoke.videoError=String(error);}});
+      const encoder = new VideoEncoder({output(chunk,metadata){
+        if(decoder.state==='unconfigured')decoder.configure(metadata.decoderConfig || {codec:'vp8',codedWidth:64,codedHeight:64});
+        decoder.decode(chunk);
+      },error(error){window.smoke.videoError=String(error);}});
+      encoder.configure({codec:'vp8',width:64,height:64,latencyMode:'realtime',hardwareAcceleration:'prefer-software'});
+      const canvas = new OffscreenCanvas(64,64);canvas.getContext('2d').fillRect(0,0,64,64);
+      const frame = new VideoFrame(canvas,{timestamp:0});encoder.encode(frame,{keyFrame:true});frame.close();
+      await encoder.flush();await decoder.flush();window.smoke.decoder=decoder;window.smoke.encoder=encoder;
+    })()`);
+    for(let i=0;i<100;i++){sample=await invoke(stats,'get_stats');if(sample.videoSource==='Chromium Media' && sample.codec==='VP8')break;await delay(100);}
+    assert.equal(sample.videoSource,'Chromium Media','Native Media events must supplement data-channel WebRTC statistics');
+    assert.equal(sample.codec,'VP8'); assert.ok(sample.decoder); assert.equal(sample.width,64); assert.equal(sample.height,64);
     if(process.env.PARSECWEBTURN_SCREENSHOTS) {await delay(1200);const {data}=await send('Page.captureScreenshot',{},stats);fs.writeFileSync(path.join(repository,'tauri-stats.png'),Buffer.from(data,'base64'));}
     assert.equal(errors.length,0,String(errors));
     console.log('PASS: native WebView2 settings, DPAPI save, document-start injection, direct WebRTC traffic/RTT, statistics panel and remote IPC isolation');

@@ -61,3 +61,17 @@ test('aggregates traffic while selecting the most active connected peer for RTT'
   assert.equal(result.inboundMbps,5); assert.equal(result.outboundMbps,2);
   assert.equal(result.rttMs,20); assert.equal(result.peerConnections,3);
 });
+
+test('ambiguous nominated pairs never guess direct or relay', () => {
+  const data = report();
+  data.get('transport').selectedCandidatePairId = undefined;
+  data.get('pair').nominated = true;
+  data.set('other', {...data.get('pair'),id:'other'});
+  assert.equal(context.summarizeStats(data, null).sample.route, null);
+  data.get('other').selected = true;
+  data.get('local').candidateType = 'relay';
+  const selected = context.summarizeStats(data, null).sample;
+  assert.equal(selected.route, 'relay');
+  assert.equal(selected.localCandidateType, 'relay');
+  assert.equal(selected.remoteCandidateType, 'srflx');
+});

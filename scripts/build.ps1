@@ -14,7 +14,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Cargo command failed: $args" }
     }
     Invoke-Cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-    & node --test tests/injection.test.cjs tests/stats.test.cjs
+    & node --test tests/injection.test.cjs tests/stats.test.cjs tests/window.test.cjs
     if ($LASTEXITCODE -ne 0) { throw 'Injection tests failed' }
     Invoke-Cargo test --locked --manifest-path src-tauri/Cargo.toml
     # Pass the -- separator directly to the native command; PowerShell

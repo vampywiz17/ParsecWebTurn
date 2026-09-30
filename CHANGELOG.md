@@ -17,6 +17,10 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - Live WebRTC traffic rates, connection RTT, direct/relay route and transport diagnostics.
+- Show selected local/remote ICE candidate types; ambiguous candidate pairs remain unknown.
+- Read Chromium Media codec, decoder, hardware decoding, profile and visible resolution, including stream reconfiguration.
+- Native F11 fullscreen and Ctrl+Shift+W windowed recovery; block automatic web fullscreen and Escape locking.
+- Proper App/View submenus and dark native windows.
 - Video codec, decoder, FPS, resolution and packet-loss details when provided by the web client.
 - Restricted native command access: the remote Parsec page can submit bounded statistics but cannot read or change saved settings.
 

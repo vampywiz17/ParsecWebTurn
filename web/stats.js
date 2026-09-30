@@ -2,8 +2,10 @@
 function summarizeStats(report, previous) {
   const entries = [...report.values()];
   const transport = entries.find(entry => entry.type === 'transport' && entry.selectedCandidatePairId);
+  const nominated = entries.filter(entry => entry.type === 'candidate-pair' && entry.nominated && entry.state === 'succeeded');
   const pair = (transport && report.get(transport.selectedCandidatePairId)) ||
-    entries.find(entry => entry.type === 'candidate-pair' && entry.nominated && entry.state === 'succeeded');
+    entries.find(entry => entry.type === 'candidate-pair' && entry.selected === true && entry.state === 'succeeded') ||
+    (nominated.length === 1 ? nominated[0] : null);
   const counter = pair || entries.find(entry => entry.type === 'transport' && Number.isFinite(entry.bytesReceived));
   const local = pair && report.get(pair.localCandidateId);
   const remote = pair && report.get(pair.remoteCandidateId);
@@ -31,6 +33,8 @@ function summarizeStats(report, previous) {
   return {
     counters,
     sample: {
+      localCandidateType: local?.candidateType || null,
+      remoteCandidateType: remote?.candidateType || null,
       route: local?.candidateType === 'relay' || remote?.candidateType === 'relay' ? 'relay' :
         (local?.candidateType && remote?.candidateType ? 'direct' : null),
       protocol: ['udp', 'tcp', 'tls'].includes(protocol) ? protocol : null,

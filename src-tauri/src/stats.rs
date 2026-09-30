@@ -7,12 +7,18 @@ pub struct ConnectionStats {
     pub state: String,
     pub route: Option<String>,
     pub protocol: Option<String>,
+    pub local_candidate_type: Option<String>,
+    pub remote_candidate_type: Option<String>,
     pub rtt_ms: Option<f64>,
     pub inbound_mbps: Option<f64>,
     pub outbound_mbps: Option<f64>,
     pub fps: Option<f64>,
     pub codec: Option<String>,
     pub decoder: Option<String>,
+    pub video_profile: Option<String>,
+    pub decoder_backend: Option<String>,
+    pub hardware_decode: Option<bool>,
+    pub video_source: Option<String>,
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub packets_lost: Option<u64>,
@@ -41,11 +47,21 @@ impl ConnectionStats {
                 .protocol
                 .as_ref()
                 .is_some_and(|s| !["udp", "tcp", "tls"].contains(&s.as_str()))
-            || [&self.codec, &self.decoder]
+            || [
+                &self.codec,
+                &self.decoder,
+                &self.video_profile,
+                &self.decoder_backend,
+                &self.video_source,
+            ]
+            .into_iter()
+            .flatten()
+            .any(|s| s.len() > 128)
+            || self.peer_connections > 1000
+            || [&self.local_candidate_type, &self.remote_candidate_type]
                 .into_iter()
                 .flatten()
-                .any(|s| s.len() > 128)
-            || self.peer_connections > 1000
+                .any(|s| !["host", "srflx", "prflx", "relay"].contains(&s.as_str()))
         {
             return Err("Invalid connection statistics".into());
         }
