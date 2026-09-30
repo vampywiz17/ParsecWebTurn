@@ -113,7 +113,9 @@ async fn open_parsec(
     servers: &[ice::IceServer],
 ) -> Result<(), String> {
     if let Some(existing) = app.get_webview_window("parsec") {
-        existing.close().map_err(|e| e.to_string())?;
+        // User close exits the app. Reconnecting replaces the window internally
+        // without emitting the user-facing CloseRequested event.
+        existing.destroy().map_err(|e| e.to_string())?;
         let deadline = Instant::now() + std::time::Duration::from_secs(5);
         while app.get_webview_window("parsec").is_some() {
             if Instant::now() >= deadline {
@@ -410,15 +412,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             _ => {}
         })
         .on_window_event(|window, event| match event {
+            tauri::WindowEvent::CloseRequested { api, .. } if window.label() == "parsec" => {
+                api.prevent_close();
+                window.app_handle().exit(0);
+            }
             tauri::WindowEvent::CloseRequested { api, .. }
                 if window.label() == "main"
                     && window.app_handle().get_webview_window("parsec").is_some() =>
             {
                 api.prevent_close();
                 let _ = window.hide();
-            }
-            tauri::WindowEvent::Destroyed if window.label() == "parsec" => {
-                show_settings(window.app_handle())
             }
             tauri::WindowEvent::Destroyed if window.label() == "main" => {
                 window.app_handle().exit(0)

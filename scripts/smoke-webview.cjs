@@ -269,9 +269,17 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     assert.equal(sample.fpsSource,'WebCodecs decoder');assert.equal(sample.packetsLost,null,'Data-channel traffic does not expose RTP packet loss');
     if(process.env.PARSECWEBTURN_SCREENSHOTS) {await delay(1200);const {data}=await send('Page.captureScreenshot',{},stats);fs.writeFileSync(path.join(repository,'tauri-stats.png'),Buffer.from(data,'base64'));}
     assert.equal(errors.length,0,String(errors));
-    console.log('PASS: native WebView2 settings, DPAPI save, WebIDL constructor/setConfiguration compatibility, WebRTC traffic/RTT, actual decoded FPS, window recovery and remote IPC isolation');
-    socket.send(JSON.stringify({id:++sequence,method:'Browser.close'}));
-    await delay(500);
+    // Reconnect replaces a native window internally; this must not exit the app.
+    await invoke(main,'connect_saved');
+    await find('https://web.parsec.app');
+    assert.equal(child.exitCode,null,'Internal Parsec window replacement must preserve the app');
+    // Exercise the Windows X-button path with settings hidden and stats open.
+    // Closing the browser engine would not exercise the native app-close event.
+    execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-File',
+      path.join(repository,'scripts/test-window-close.ps1'),'-TestProcessId',String(child.pid)],{windowsHide:true});
+    for(let i=0;i<100 && child.exitCode===null;i++)await delay(100);
+    assert.equal(child.exitCode,0,'Closing Parsec must exit the app instead of reopening settings');
+    console.log('PASS: native WebView2 settings, DPAPI save, WebIDL compatibility, WebRTC traffic/RTT, decoded FPS, window recovery, remote IPC isolation, reconnect and X-button app exit');
   } finally {
     socket?.close();
     if(child.exitCode===null) child.kill();

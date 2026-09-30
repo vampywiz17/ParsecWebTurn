@@ -58,6 +58,8 @@ For [coturn](https://github.com/coturn/coturn/blob/master/examples/etc/turnserve
 
 Switching providers preserves each provider's saved credentials. Password fields stay blank in the settings UI: leave them blank to retain the saved value, enter a replacement, or select **Forget saved…** to remove it. Only valid settings are written.
 
+Closing the Parsec window exits the entire application, including hidden settings and open statistics. Closing settings while Parsec is running hides only the settings window. Reconnecting from settings replaces the Parsec window internally without exiting the app.
+
 ## Connection statistics
 
 Open **Connection stats** from the native menu. The application samples `RTCPeerConnection.getStats()` once per second and displays:

@@ -30,6 +30,10 @@ All notable changes to this project will be documented in this file.
 - Recognize Chromium peer-reflexive TURN paths by the selected relay transport; show configured TURN usage, matched server and route evidence. Use the selected ICE transport pair when report selection is ambiguous.
 - Restricted native command access: the remote Parsec page can submit bounded statistics but cannot read or change saved settings.
 
+### Fixed
+
+- Closing the Parsec window exits the application instead of reopening connection settings; internal window replacement during reconnect remains supported.
+
 ### Requirements
 
 - Microsoft Edge WebView2 Runtime must be present. The runtime is separate from the Edge browser; the app does not silently install it.
