@@ -295,7 +295,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     if let Err(error) = show_stats(&app).await {
                         show_settings(&app);
                         if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.eval(&format!(
+                            let _ = window.eval(format!(
                                 "showError({})",
                                 serde_json::to_string(&error).unwrap()
                             ));

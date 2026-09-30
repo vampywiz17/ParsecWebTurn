@@ -109,7 +109,13 @@ for(const candidate of pendingFirst.splice(0)) await first.addIceCandidate(candi
     assert.ok(!JSON.stringify(saved).includes('smoke-secret'));
     const disk=fs.readFileSync(path.join(root,'settings.json'),'utf8');
     assert.ok(!disk.includes('smoke-secret')); assert.ok(JSON.parse(disk).encryptedCustomPassword);
-    await evaluate(main,`document.getElementById('provider').value='custom';document.getElementById('urls').value='stun:127.0.0.1:9';document.getElementById('username').value='smoke-user';document.getElementById('provider').dispatchEvent(new Event('change'))`);
+    await evaluate(main,`document.getElementById('provider').value='custom';document.getElementById('urls').value='stun:127.0.0.1:9';document.getElementById('username').value='smoke-user-ui';document.getElementById('provider').dispatchEvent(new Event('change'));document.getElementById('save').click()`);
+    let uiSaved = false;
+    for(let i=0;i<100;i++) {uiSaved=await evaluate(main,`document.getElementById('status').textContent.startsWith('Settings saved')`);if(uiSaved)break;await delay(100);}
+    assert.equal(uiSaved,true,'The real settings form must save successfully');
+    const uiConfig = await invoke(main,'get_configuration');
+    assert.equal(uiConfig.customUsername,'smoke-user-ui');
+    assert.equal(uiConfig.hasCustomPassword,true,'Blank password field must retain the saved secret');
     if(process.env.PARSECWEBTURN_SCREENSHOTS) {
       const {data}=await send('Page.captureScreenshot',{},main);
       fs.writeFileSync(path.join(repository,'tauri-settings.png'),Buffer.from(data,'base64'));
@@ -128,7 +134,7 @@ for(const candidate of pendingFirst.splice(0)) await first.addIceCandidate(candi
     assert.equal(rejected,true,'Remote Parsec page must not access settings');
     const rejectedWrite=await evaluate(parsec,`window.__TAURI_INTERNALS__.invoke('save_configuration',{input:${JSON.stringify(input)}}).then(()=>false,()=>true)`);
     assert.equal(rejectedWrite,true,'Remote Parsec page must not modify settings');
-    await invoke(main,'open_stats');
+    await evaluate(main,`document.getElementById('stats').click()`);
     const stats=await find('/stats.html');
     let sample;
     for(let i=0;i<100;i++){sample=await invoke(stats,'get_stats');if(sample.inboundMbps>0 && sample.outboundMbps>0)break;await delay(100);}
