@@ -1,6 +1,10 @@
 fn main() {
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
+            "get_update",
+            "check_update",
+            "install_update",
+            "dismiss_update",
             "show_configuration",
             "get_configuration",
             "save_configuration",

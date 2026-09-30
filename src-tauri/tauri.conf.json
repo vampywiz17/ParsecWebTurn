@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "ParsecWebTurn",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "identifier": "app.parsecwebturn.desktop",
   "build": { "frontendDist": "../ui" },
   "app": {
@@ -9,6 +9,11 @@
     "security": {
       "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src ipc: http://ipc.localhost",
       "capabilities": [
+        {
+          "identifier": "updates",
+          "windows": ["updates"],
+          "permissions": ["allow-get-update", "allow-check-update", "allow-install-update", "allow-dismiss-update"]
+        },
         {
           "identifier": "settings",
           "windows": ["main"],

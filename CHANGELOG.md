@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0] - Unreleased
+
+### Added
+
+- Background GitHub stable-release checks and automatic EXE downloads, plus App → Check for updates.
+- Native update window with release notes and explicit Restart and install approval; active sessions continue until approval.
+- Bounded HTTPS downloads restricted to this repository's release assets, checked against GitHub SHA-256 metadata and SHA256SUMS.txt before use.
+- Portable Rust update helper waits for exit, replaces the EXE in its original directory, preserves data-dir/settings launch options and keeps a recovery copy. Replacement/launch failures restore the previous executable when possible.
+
 ## [0.5.0] - 2026-09-30
 
 ### Changed

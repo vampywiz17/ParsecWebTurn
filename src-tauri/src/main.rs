@@ -6,6 +6,7 @@ mod provider;
 mod settings;
 mod stats;
 mod storage;
+mod updater;
 
 use fs2::FileExt;
 use settings::{SaveRequest, Settings, SettingsView};
@@ -305,6 +306,30 @@ async fn open_stats(app: tauri::AppHandle, window: WebviewWindow) -> Result<(), 
     show_stats(&app).await
 }
 
+#[tauri::command]
+fn get_update(app: tauri::AppHandle, window: WebviewWindow) -> Result<updater::View, String> {
+    trusted_local(&window, "updates")?;
+    updater::view(&app)
+}
+
+#[tauri::command]
+async fn check_update(app: tauri::AppHandle, window: WebviewWindow) -> Result<(), String> {
+    trusted_local(&window, "updates")?;
+    updater::check(&app, true).await
+}
+
+#[tauri::command]
+fn install_update(app: tauri::AppHandle, window: WebviewWindow) -> Result<(), String> {
+    trusted_local(&window, "updates")?;
+    updater::install(&app)
+}
+
+#[tauri::command]
+fn dismiss_update(window: WebviewWindow) -> Result<(), String> {
+    trusted_local(&window, "updates")?;
+    window.close().map_err(|e| e.to_string())
+}
+
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut root = std::env::current_exe()?
         .parent()
@@ -333,6 +358,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let settings_profile = root.join("WebView2Profile");
     fs::create_dir_all(&settings_profile)?;
     tauri::Builder::default()
+        .manage(updater::State::default())
         .manage(AppState {
             root,
             _instance_lock: lock,
@@ -342,6 +368,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             auto_connect: AtomicBool::new(!force_settings),
         })
         .invoke_handler(tauri::generate_handler![
+            get_update,
+            check_update,
+            install_update,
+            dismiss_update,
             show_configuration,
             get_configuration,
             save_configuration,
@@ -361,6 +391,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let devtools =
                 MenuItem::with_id(app, "devtools", "Developer tools", true, Some("F12"))?;
             let exit = MenuItem::with_id(app, "exit", "Exit", true, None::<&str>)?;
+            let updates =
+                MenuItem::with_id(app, "updates", "Check for updates", true, None::<&str>)?;
             let fullscreen =
                 MenuItem::with_id(app, "fullscreen", "Toggle fullscreen", true, Some("F11"))?;
             let windowed =
@@ -368,7 +400,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             app.set_menu(Menu::with_items(
                 app,
                 &[
-                    &Submenu::with_items(app, "App", true, &[&settings, &stats, &exit])?,
+                    &Submenu::with_items(app, "App", true, &[&settings, &stats, &updates, &exit])?,
                     &Submenu::with_items(app, "View", true, &[&fullscreen, &windowed, &devtools])?,
                 ],
             )?)?;
@@ -383,9 +415,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .general_autofill_enabled(false)
                 .on_navigation(local_url)
                 .build()?;
+            if std::env::var_os("PARSECWEBTURN_NO_UPDATE_CHECK").is_none() {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    // Network/update failures never block normal startup.
+                    let _ = updater::check(&handle, false).await;
+                });
+            }
             Ok(())
         })
         .on_menu_event(|app, event| match event.id().as_ref() {
+            "updates" => {
+                let handle = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = updater::check(&handle, true).await;
+                });
+            }
             "fullscreen" => {
                 if let Some(window) = app.get_webview_window("parsec") {
                     if let Ok(fullscreen) = window.is_fullscreen() {
@@ -442,7 +487,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn main() {
-    if let Err(error) = run() {
+    let result = if std::env::args().nth(1).as_deref() == Some("--apply-update") {
+        updater::apply().map_err(|e| -> Box<dyn std::error::Error> { e.into() })
+    } else {
+        run()
+    };
+    if let Err(error) = result {
         eprintln!("ParsecWebTurn startup failed: {error}");
         #[link(name = "user32")]
         extern "system" {

@@ -21,6 +21,14 @@ Web assets and the ICE override are embedded in the executable. There is no brow
 
 On subsequent launches, valid saved settings open Parsec automatically. Use `ParsecWebTurn.exe --settings` or `/settings` to start with the settings window instead. `--data-dir <directory>` selects a different portable configuration/profile directory.
 
+## Application updates
+
+On startup the application checks the latest stable GitHub release in the background. A newer version is downloaded automatically and verified against GitHub's SHA-256 asset digest and the release's `SHA256SUMS.txt`. The update window shows release notes; choose **Restart and install** when ready. This disconnects an active Parsec session. **Later** leaves the current session running. **App → Check for updates** checks manually and also shows network/rate-limit errors; background failures do not interrupt startup.
+
+The portable updater replaces only the executable, retaining its current filename, configuration directory and browser profile. It requires a writable application directory and no elevated rights. The previous EXE is kept as `previous.exe` inside a `.parsec-update-*` directory beside the app for recovery; that directory may be deleted once the update is working and the helper has exited. These checks establish integrity through GitHub HTTPS and release metadata, not a separate publisher signature.
+
+Set `PARSECWEBTURN_NO_UPDATE_CHECK=1` to skip automatic checks; the menu check remains available. Pre-updater releases such as v0.5.0 need one manual EXE upgrade before in-app updates become available.
+
 ## Upgrading from v0.4.0
 
 Keep your existing `settings.json` beside the new executable. The field names and Windows DPAPI / CurrentUser format remain compatible, so saved API tokens and TURN passwords continue to work under the same Windows account.
