@@ -95,6 +95,17 @@ fn digest(value: &str) -> Result<String, String> {
     Ok(value.to_ascii_lowercase())
 }
 
+fn verify(data: &[u8], expected_size: u64, expected_digest: &str) -> Result<(), String> {
+    if data.len() > MAX_EXE
+        || data.len() as u64 != expected_size
+        || !data.starts_with(b"MZ")
+        || format!("{:x}", Sha256::digest(data)) != digest(expected_digest)?
+    {
+        return Err("Update executable integrity verification failed.".into());
+    }
+    Ok(())
+}
+
 fn asset<'a>(release: &'a Release, name: &str) -> Result<&'a Asset, String> {
     let selected: Vec<_> = release.assets.iter().filter(|a| a.name == name).collect();
     if selected.len() != 1 {
@@ -295,14 +306,7 @@ async fn prepare(app: &tauri::AppHandle) -> Result<Option<Staged>, String> {
         return Err("GitHub asset digest and published checksum disagree.".into());
     }
     let data = bytes(&client, &exe.browser_download_url, MAX_EXE).await?;
-    if data.len() as u64 != exe.size || format!("{:x}", Sha256::digest(&data)) != expected {
-        return Err(
-            "Update integrity verification failed; the executable will not be used.".into(),
-        );
-    }
-    if !data.starts_with(b"MZ") {
-        return Err("Update is not a Windows executable.".into());
-    }
+    verify(&data, exe.size, &expected)?;
     let target = std::env::current_exe().map_err(|e| e.to_string())?;
     let directory = tempfile::Builder::new()
         .prefix(".parsec-update-")
@@ -389,12 +393,7 @@ pub fn apply() -> Result<(), String> {
         return Err("Staged executable is too large.".into());
     }
     let data = fs::read(&candidate).map_err(|e| e.to_string())?;
-    if data.len() > MAX_EXE
-        || !data.starts_with(b"MZ")
-        || format!("{:x}", Sha256::digest(&data)) != digest(&plan.digest)?
-    {
-        return Err("Staged executable integrity check failed.".into());
-    }
+    verify(&data, data.len() as u64, &plan.digest)?;
     wait_for_exit(plan.parent_pid)?;
     let target = directory
         .parent()
@@ -470,6 +469,42 @@ fn wait_for_exit(pid: u32) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn rejects_modified_incomplete_and_non_executable_downloads() {
+        let data = b"MZsynthetic executable";
+        let hash = format!("{:x}", Sha256::digest(data));
+        assert!(verify(data, data.len() as u64, &hash).is_ok());
+        assert!(verify(b"MZmodified executable", data.len() as u64, &hash).is_err());
+        assert!(verify(data, data.len() as u64 + 1, &hash).is_err());
+        let other = b"not an executable";
+        assert!(verify(
+            other,
+            other.len() as u64,
+            &format!("{:x}", Sha256::digest(other))
+        )
+        .is_err());
+    }
+    #[tokio::test]
+    async fn bounds_announced_and_chunked_http_responses() {
+        use std::io::Read;
+        for response in [
+            "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\n12345",
+            "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n3\r\n123\r\n3\r\n456\r\n0\r\n\r\n",
+        ] {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let url = format!("http://{}/", listener.local_addr().unwrap());
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                let mut request = [0u8; 2048];
+                stream.read(&mut request).unwrap();
+                stream.write_all(response.as_bytes()).unwrap();
+            });
+            let client = reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(5)).build().unwrap();
+            assert!(bytes(&client, &url, 4).await.is_err());
+            server.join().unwrap();
+        }
+    }
     #[test]
     fn compares_stable_versions_numerically() {
         assert!(version("v0.10.0").unwrap() > version("0.9.9").unwrap());
