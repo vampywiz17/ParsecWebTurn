@@ -193,28 +193,30 @@ fn show_settings(app: &tauri::AppHandle) {
     }
 }
 
-fn show_stats(app: &tauri::AppHandle) {
+async fn show_stats(app: &tauri::AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let _operation = state.operation.lock().await;
     if let Some(window) = app.get_webview_window("stats") {
         let _ = window.show();
         let _ = window.set_focus();
-        return;
+        return Ok(());
     }
-    let state = app.state::<AppState>();
-    let _ = WebviewWindowBuilder::new(app, "stats", WebviewUrl::App("stats.html".into()))
+    WebviewWindowBuilder::new(app, "stats", WebviewUrl::App("stats.html".into()))
         .title("ParsecWebTurn — Connection stats")
         .inner_size(470.0, 680.0)
         .resizable(false)
         .data_directory(state.root.join("WebView2Profile"))
         .additional_browser_args(BROWSER_ARGS)
         .on_navigation(local_url)
-        .build();
+        .build()
+        .map(|_| ())
+        .map_err(|e| format!("Cannot open connection statistics: {e}"))
 }
 
 #[tauri::command]
-fn open_stats(app: tauri::AppHandle, window: WebviewWindow) -> Result<(), String> {
+async fn open_stats(app: tauri::AppHandle, window: WebviewWindow) -> Result<(), String> {
     trusted_local(&window, "main")?;
-    show_stats(&app);
-    Ok(())
+    show_stats(&app).await
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -286,7 +288,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         })
         .on_menu_event(|app, event| match event.id().as_ref() {
             "settings" => show_settings(app),
-            "stats" => show_stats(app),
+            "stats" => {
+                let app = app.clone();
+                // WebView2 creation must not run in a synchronous event handler.
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = show_stats(&app).await {
+                        show_settings(&app);
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.eval(&format!(
+                                "showError({})",
+                                serde_json::to_string(&error).unwrap()
+                            ));
+                        }
+                    }
+                });
+            }
             "devtools" => {
                 if let Some(window) = app.get_webview_window("parsec") {
                     window.open_devtools();
