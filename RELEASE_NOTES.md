@@ -1,23 +1,16 @@
-ParsecWebTurn v0.5.0 moves the application to Rust and Tauri 2, with Parsec Web embedded through Windows WebView2.
+ParsecWebTurn v0.6.0 adds in-app updates for the portable Rust/Tauri application.
 
-- Integrated connection settings, Parsec window, developer tools and live connection statistics.
-- Cloudflare Realtime, custom TURN services, encrypted caching and local ice.json fallback are implemented entirely in Rust; no Go helper remains.
-- Existing settings.json files and CurrentUser DPAPI-encrypted credentials remain compatible.
-- UI and ICE scripts are embedded in the executable; no extension directory is needed.
-- Live incoming/outgoing traffic, connection RTT, selected ICE route, configured TURN usage and matched server. Ambiguous routes remain unverified.
-- Chromium Media events provide codec, profile, decoder, hardware decoding, backend and visible resolution. WebCodecs counts actual decoded FPS for data-channel video; unavailable packet loss stays unknown.
-- Parsec starts windowed, with dark App/View menus, F11 fullscreen and Ctrl+Shift+W windowed recovery.
-- Automatic startup no longer flashes the settings window. First run, explicit settings launch and preparation errors show the settings form.
-- Closing the Parsec window exits the entire application; reconnecting internally replaces the window without exiting.
-- ICE configuration preserves native WebIDL behavior and validates STUN/TURN URIs separately. Native command permissions isolate the remote Parsec page from settings and saved secrets.
-- The connection policy remains unchanged: direct connections are allowed, with TURN available when needed.
+- Background checks for the latest stable GitHub release, automatic downloads, and **App → Check for updates**.
+- Release notes in an integrated update window. **Restart and install** requires an explicit click; **Later** keeps your current Parsec session running.
+- GitHub SHA-256 asset metadata and `SHA256SUMS.txt` must agree with the downloaded executable. Unexpected asset URLs, oversized downloads, prereleases and older versions are rejected.
+- A Rust helper waits for the app to exit, replaces only its EXE, preserves the executable filename and configuration/profile directory, and restarts with the existing launch mode.
+- The previous executable is kept in `.parsec-update-*/previous.exe` for recovery. Replacement or launch failures attempt to restore the previous EXE.
+- Update commands are restricted to the local update window; the remote Parsec client cannot initiate updates.
 
-Download **ParsecWebTurn-v0.5.0-win64.zip**, extract to a writable directory, and run `ParsecWebTurn.exe`. **Microsoft Edge WebView2 Runtime must already be installed**; it is separate from the Edge browser. The application does not silently install it.
+Download **ParsecWebTurn-v0.6.0-win64.zip**, extract it to a writable directory, and run `ParsecWebTurn.exe`. **Microsoft Edge WebView2 Runtime must already be installed.** No VPN, updater installer or administrator rights are required when the runtime is present and the app directory is writable.
 
-Keep your settings.json to reuse saved configuration. WebView2 uses a new browser profile, so sign into Parsec once again. The old Edge profile is left untouched.
+**Upgrading from v0.5.0:** replace the EXE manually once to gain in-app updates. Keep `settings.json` and `WebView2Profile`; saved credentials and the existing Parsec sign-in remain available. Future updates can be applied from inside the app. Restarting disconnects an active session.
 
-Credentials are obtained at connection startup, not refreshed during an open session. Select a lifetime longer than the session, or reconnect. This release does not claim to resolve HEVC driver bugs or long-session freezing.
+Background update failures do not interrupt normal startup. Use the menu check to see network or GitHub rate-limit errors. Set `PARSECWEBTURN_NO_UPDATE_CHECK=1` to disable automatic checks; manual checks remain available. Download integrity relies on GitHub HTTPS and release metadata, not a separate publisher signature.
 
-Saved secrets are protected with Windows DPAPI. Active TURN credentials necessarily exist in the web client's memory; do not share private browser profiles or developer-tools exports.
-
-Validation: Windows CI passes 13 Rust tests, 22 JavaScript tests, formatting, strict Clippy and native WebView2 integration checks, including decoded FPS, fullscreen recovery, reconnect, app exit and startup visibility.
+The existing TURN/STUN and direct/relay behavior remains unchanged. This release does not claim to resolve HEVC driver bugs or long-session freezing.

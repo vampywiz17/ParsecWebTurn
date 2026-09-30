@@ -359,7 +359,7 @@ pub fn install(app: &tauri::AppHandle) -> Result<(), String> {
         .spawn()
         .map_err(|e| format!("Cannot start update helper: {e}"))?;
     // The helper owns these files after handoff. Do not delete them on app exit.
-    inner.staged.take().unwrap().directory.keep();
+    let _ = inner.staged.take().unwrap().directory.keep();
     app.exit(0);
     Ok(())
 }
