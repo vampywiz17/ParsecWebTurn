@@ -7,6 +7,7 @@ fn main() {
             "connect_fallback",
             "get_stats",
             "report_stats",
+            "open_stats",
         ]),
     ))
     .expect("Tauri build failed");

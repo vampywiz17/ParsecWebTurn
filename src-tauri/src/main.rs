@@ -191,11 +191,18 @@ fn show_stats(app: &tauri::AppHandle) {
     let state = app.state::<AppState>();
     let _ = WebviewWindowBuilder::new(app, "stats", WebviewUrl::App("stats.html".into()))
         .title("ParsecWebTurn — Connection stats")
-        .inner_size(470.0, 590.0)
+        .inner_size(470.0, 680.0)
         .resizable(false)
         .data_directory(state.root.join("SettingsProfile"))
         .on_navigation(local_url)
         .build();
+}
+
+#[tauri::command]
+fn open_stats(app: tauri::AppHandle, window: WebviewWindow) -> Result<(), String> {
+    trusted_local(&window, "main")?;
+    show_stats(&app);
+    Ok(())
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -239,7 +246,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             connect_saved,
             connect_fallback,
             get_stats,
-            report_stats
+            report_stats,
+            open_stats
         ])
         .setup(move |app| {
             let settings =
@@ -283,6 +291,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             tauri::WindowEvent::Destroyed if window.label() == "parsec" => {
                 show_settings(window.app_handle())
+            }
+            tauri::WindowEvent::Destroyed if window.label() == "main" => {
+                window.app_handle().exit(0)
             }
             _ => {}
         })

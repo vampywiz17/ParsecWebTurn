@@ -38,6 +38,7 @@ async function save(connect) {
   if (connect) { await invoke('connect_saved'); $('status').textContent = 'Parsec opened. Return here using Connection settings in the app menu.'; }
 }
 $('provider').addEventListener('change', panel);
+$('stats').addEventListener('click', () => action(() => invoke('open_stats')));
 $('save').addEventListener('click', () => action(() => save(false)));
 $('settings').addEventListener('submit', event => { event.preventDefault(); action(() => save(true)); });
 $('fallback').addEventListener('click', () => action(async () => { $('status').textContent = 'Opening local fallback…'; await invoke('connect_fallback'); $('status').textContent = 'Parsec opened using ice.json.'; }));

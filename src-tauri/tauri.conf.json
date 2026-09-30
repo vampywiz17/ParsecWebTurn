@@ -12,7 +12,7 @@
         {
           "identifier": "settings",
           "windows": ["main"],
-          "permissions": ["allow-get-configuration", "allow-save-configuration", "allow-connect-saved", "allow-connect-fallback"]
+          "permissions": ["allow-get-configuration", "allow-save-configuration", "allow-connect-saved", "allow-connect-fallback", "allow-open-stats"]
         },
         {
           "identifier": "statistics",
