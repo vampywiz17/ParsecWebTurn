@@ -333,6 +333,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
 fn main() {
     if let Err(error) = run() {
+        eprintln!("ParsecWebTurn startup failed: {error}");
         #[link(name = "user32")]
         extern "system" {
             fn MessageBoxW(hwnd: isize, text: *const u16, title: *const u16, kind: u32) -> i32;

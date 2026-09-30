@@ -1,9 +1,9 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ParsecWebTurn</title><link rel="stylesheet" href="style.css"><script src="settings.js" defer></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ParsecWebTurn</title><link rel="stylesheet" href="style.css"><link rel="stylesheet" href="compact.css"><script src="settings.js" defer></script></head>
 <body>
 <main>
-  <header><span class="brand"><img src="icon.ico" alt=""> PARSEC WEB TURN</span><span class="version" id="version"></span><h1>Your connection.<br>Your way.</h1><p>Parsec Web, with the relay you choose.</p></header>
+  <header><span class="brand"><img src="icon.ico" alt=""> PARSEC WEB TURN</span><span class="version" id="version"></span><h1>Connection settings</h1><p>Parsec Web, with the relay you choose.</p></header>
   <form id="settings">
     <section class="card">
       <label for="provider">TURN PROVIDER</label>
@@ -21,8 +21,8 @@
         <p class="hint">Use your own TURN service. Cloudflare is not required.</p>
         <label for="urls">STUN / TURN URLs</label><textarea id="urls" rows="3" spellcheck="false" placeholder="turns:turn.example.com:443?transport=tcp"></textarea>
         <p class="hint">One URL per line. All TURN URLs use the same credentials.</p>
-        <label for="username">Username</label><input id="username" autocomplete="off" placeholder="TURN username">
-        <label for="password">Password / credential</label><input id="password" type="password" autocomplete="off" placeholder="TURN password">
+        <div class="credential-row"><div><label for="username">Username</label><input id="username" autocomplete="off" placeholder="TURN username"></div>
+        <div><label for="password">Password / credential</label><input id="password" type="password" autocomplete="off" placeholder="TURN password"></div></div>
         <label class="check"><input type="checkbox" id="forget-password"> Forget saved TURN password</label>
         <p class="hint">STUN-only setups can leave credentials empty. A TURN REST shared secret is not a client password.</p>
       </div>

@@ -16,17 +16,19 @@ window.smoke.policy = first.getConfiguration().iceTransportPolicy;
 first.setConfiguration({iceServers:[{urls:'stun:replacement.invalid'}],iceTransportPolicy:'all'});
 window.smoke.after = first.getConfiguration().iceServers;
 const second = new RTCPeerConnection();
-const pendingFirst = [], pendingSecond = [];
-first.onicecandidate = ({candidate}) => { if(candidate) second.addIceCandidate(candidate).catch(()=>pendingSecond.push(candidate)); };
-second.onicecandidate = ({candidate}) => { if(candidate) first.addIceCandidate(candidate).catch(()=>pendingFirst.push(candidate)); };
+// The configured dummy STUN endpoint tests the override without external traffic.
+// Remove it via the native prototype for the loopback fixture only, so gathering
+// does not wait for STUN retries. Both patched peers remain tracked for telemetry.
+const nativeSetConfiguration = Object.getPrototypeOf(RTCPeerConnection.prototype).setConfiguration;
+nativeSetConfiguration.call(first,{iceServers:[]});
+nativeSetConfiguration.call(second,{iceServers:[]});
+const gather = async peer => { for(let i=0;i<200;i++){ if(peer.iceGatheringState==='complete')return; await new Promise(resolve=>setTimeout(resolve,50)); } throw new Error('ICE gathering timeout'); };
 second.ondatachannel = ({channel}) => { window.smoke.receiver = channel; channel.onmessage = ()=>{}; };
 const channel = first.createDataChannel('smoke');
 window.smoke.sender = channel;
 channel.onopen = () => { window.smoke.connected = true; setInterval(()=>{ if(channel.readyState==='open' && channel.bufferedAmount<1000000) channel.send(new Uint8Array(16000)); },100); };
-(async()=>{ await first.setLocalDescription(await first.createOffer()); await second.setRemoteDescription(first.localDescription);
-for(const candidate of pendingSecond.splice(0)) await second.addIceCandidate(candidate);
-await second.setLocalDescription(await second.createAnswer()); await first.setRemoteDescription(second.localDescription);
-for(const candidate of pendingFirst.splice(0)) await first.addIceCandidate(candidate);
+(async()=>{ await first.setLocalDescription(await first.createOffer()); await gather(first); await second.setRemoteDescription(first.localDescription);
+await second.setLocalDescription(await second.createAnswer()); await gather(second); await first.setRemoteDescription(second.localDescription);
 })().catch(error=>window.smoke.error=String(error));
 </script></body></html>`;
 
@@ -38,9 +40,13 @@ for(const candidate of pendingFirst.splice(0)) await first.addIceCandidate(candi
   await new Promise(resolve => portServer.close(resolve));
   const child = spawn(path.resolve(process.argv[2] || path.join(repository, 'ParsecWebTurn.exe')),
     ['--settings', '--data-dir', root], {
-      env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}` },
-      windowsHide: true, stdio: 'ignore',
+      // mDNS can be blocked by a CI/local firewall even for loopback peers.
+      // Disable candidate obfuscation only in this isolated mock-page test.
+      env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --disable-features=msWebOOUI,msPdfOOUI,WebRtcHideLocalIpsWithMdns` },
+      windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'],
     });
+  let startupError = '';
+  child.stderr.on('data',data=>{startupError=(startupError+data.toString()).slice(-4096);});
   let socket;
   const pending = new Map();
   let sequence = 0;
@@ -53,7 +59,7 @@ for(const candidate of pendingFirst.splice(0)) await first.addIceCandidate(candi
       if(child.exitCode !== null) throw new Error('Application exited before creating WebView2');
       await delay(100);
     }
-    assert.ok(browser?.webSocketDebuggerUrl, 'WebView2 debugging endpoint was not created');
+    assert.ok(browser?.webSocketDebuggerUrl, 'WebView2 debugging endpoint was not created. '+startupError);
     socket = new WebSocket(browser.webSocketDebuggerUrl);
     await new Promise((resolve,reject) => { socket.addEventListener('open',resolve,{once:true}); socket.addEventListener('error',reject,{once:true}); });
     const send = (method, params={}, sessionId) => new Promise((resolve,reject) => {
@@ -87,7 +93,8 @@ for(const candidate of pendingFirst.splice(0)) await first.addIceCandidate(candi
     const find = async suffix => {
       for(let i=0;i<150;i++) {
         const {targetInfos} = await send('Target.getTargets');
-        const target = targetInfos.find(info=>info.type==='page' && info.url.includes(suffix));
+        const target = targetInfos.find(info=>info.type==='page' && (info.url.includes(suffix) ||
+          (suffix==='/index.html' && /^(?:https?:\/\/tauri\.localhost|tauri:\/\/localhost)\/$/.test(info.url))));
         if(target) {
           let sessionId=sessions.get(target.targetId);
           if(!sessionId) { ({sessionId}=await send('Target.attachToTarget',{targetId:target.targetId,flatten:true})); sessions.set(target.targetId,sessionId); }
@@ -99,7 +106,7 @@ for(const candidate of pendingFirst.splice(0)) await first.addIceCandidate(candi
     };
     const main = await find('/index.html');
     const initial = await invoke(main,'get_configuration');
-    assert.equal(initial.version,'0.5.0');
+    assert.equal(initial.version,fs.readFileSync(path.join(repository,'VERSION'),'utf8').trim());
     assert.equal(initial.hasApiToken,false);
     const input={provider:'custom',customUrls:['stun:127.0.0.1:9'],customUsername:'smoke-user',customPassword:'smoke-secret',
       turnKeyId:'',apiToken:'',cacheCredentials:false,ttl:86400};
@@ -124,12 +131,15 @@ for(const candidate of pendingFirst.splice(0)) await first.addIceCandidate(candi
     await invoke(main,'connect_saved');
     const parsec=await find('https://web.parsec.app');
     let smoke;
-    for(let i=0;i<100;i++){smoke=await evaluate(parsec,'window.smoke && ({installedBeforePageScript:window.smoke.installedBeforePageScript,servers:window.smoke.servers,after:window.smoke.after,policy:window.smoke.policy,connected:window.smoke.connected,error:window.smoke.error})'); if(smoke?.connected)break;await delay(100);}
+    for(let i=0;i<300;i++){smoke=await evaluate(parsec,'window.smoke && ({installedBeforePageScript:window.smoke.installedBeforePageScript,servers:window.smoke.servers,after:window.smoke.after,policy:window.smoke.policy,connected:window.smoke.connected,error:window.smoke.error})'); if(smoke?.connected)break;await delay(100);}
     assert.equal(smoke?.installedBeforePageScript,true);
     assert.equal(smoke.policy,'all');
     assert.equal(smoke.servers[0].urls[0],'stun:127.0.0.1:9');
     assert.equal(smoke.after[0].urls[0],'stun:127.0.0.1:9');
-    assert.equal(smoke.connected,true,smoke.error || 'Loopback WebRTC did not connect');
+    if(!smoke.connected) {
+      const diagnostics = await evaluate(parsec,`(async()=>({error:window.smoke.error,first:first.connectionState,second:second.connectionState,firstIce:first.iceConnectionState,secondIce:second.iceConnectionState,channel:channel.readyState,reports:await Promise.all([first,second].map(async peer=>[...await peer.getStats()].map(([,value])=>({type:value.type,state:value.state,candidateType:value.candidateType,protocol:value.protocol,mdns:value.address?.endsWith('.local'),requestsSent:value.requestsSent,responsesReceived:value.responsesReceived}))))}))()`);
+      throw new Error('Loopback WebRTC did not connect: '+JSON.stringify(diagnostics));
+    }
     const rejected=await evaluate(parsec,`window.__TAURI_INTERNALS__.invoke('get_configuration').then(()=>false,()=>true)`);
     assert.equal(rejected,true,'Remote Parsec page must not access settings');
     const rejectedWrite=await evaluate(parsec,`window.__TAURI_INTERNALS__.invoke('save_configuration',{input:${JSON.stringify(input)}}).then(()=>false,()=>true)`);
