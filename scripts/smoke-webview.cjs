@@ -114,7 +114,12 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
         if(target) {
           let sessionId=sessions.get(target.targetId);
           if(!sessionId) { ({sessionId}=await send('Target.attachToTarget',{targetId:target.targetId,flatten:true})); sessions.set(target.targetId,sessionId); }
-          return sessionId;
+          // CDP exposes the target URL before initialization/deferred scripts
+          // finish, especially on a slower CI runner. Wait for the real IPC
+          // bridge and document before issuing native commands.
+          const ready = await evaluate(sessionId,`!!window.__TAURI_INTERNALS__?.invoke && document.readyState==='complete' &&
+            (!document.getElementById('save') || (!document.getElementById('save').disabled && !!document.getElementById('version').textContent))`);
+          if(ready) return sessionId;
         }
         await delay(100);
       }
