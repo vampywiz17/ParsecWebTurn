@@ -196,7 +196,10 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     await evaluate(parsec,`for(const peer of [first,second]) {
       peer.smokeOriginalGetStats=peer.getStats.bind(peer);
       peer.getStats=async(...args)=>{
-        const report=await peer.smokeOriginalGetStats(...args);
+        const nativeReport=await peer.smokeOriginalGetStats(...args);
+        // RTCStatsReport.get() can return fresh dictionaries. Keep synthetic
+        // changes in our own Map rather than mutating a temporary dictionary.
+        const report=new Map([...nativeReport].map(([id,value])=>[id,{...value}]));
         const transport=[...report.values()].find(value=>value.type==='transport' && value.selectedCandidatePairId);
         const pair=transport && report.get(transport.selectedCandidatePairId);
         if(pair)Object.assign(report.get(pair.localCandidateId),{candidateType:'prflx',relayProtocol:'tls',url:'turns:relay.example.invalid:5349?transport=tcp'});
