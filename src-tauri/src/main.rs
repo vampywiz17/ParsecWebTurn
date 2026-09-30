@@ -31,6 +31,10 @@ struct AppState {
     auto_connect: AtomicBool,
 }
 
+// A shared WebView2 environment avoids an extra browser process for settings.
+// Every view using this data directory must have identical browser arguments.
+const BROWSER_ARGS: &str = "--autoplay-policy=no-user-gesture-required --disable-features=msWebOOUI,msPdfOOUI --disable-background-timer-throttling --disable-renderer-backgrounding";
+
 fn trusted_local(window: &WebviewWindow, label: &str) -> Result<(), String> {
     let url = window.url().map_err(|_| "Cannot check window origin")?;
     if window.label() != label || !local_url(&url) {
@@ -125,16 +129,23 @@ async fn open_parsec(
         );
     let profile = state.root.join("WebView2Profile");
     fs::create_dir_all(&profile).map_err(|e| format!("Cannot create WebView2 profile: {e}"))?;
-    WebviewWindowBuilder::new(app, "parsec", WebviewUrl::External("https://web.parsec.app/".parse().unwrap()))
-        .title("Parsec — ParsecWebTurn")
-        .inner_size(1280.0, 800.0)
-        .min_inner_size(800.0, 500.0)
-        .data_directory(profile)
-        .initialization_script(injection)
-        .additional_browser_args("--autoplay-policy=no-user-gesture-required --disable-features=msWebOOUI,msPdfOOUI --disable-background-timer-throttling --disable-renderer-backgrounding")
-        .general_autofill_enabled(false)
-        .on_navigation(|url| url.scheme() == "https")
-        .build().map_err(|e| format!("Cannot open Parsec. Ensure Microsoft Edge WebView2 Runtime is installed. {e}"))?;
+    WebviewWindowBuilder::new(
+        app,
+        "parsec",
+        WebviewUrl::External("https://web.parsec.app/".parse().unwrap()),
+    )
+    .title("Parsec — ParsecWebTurn")
+    .inner_size(1280.0, 800.0)
+    .min_inner_size(800.0, 500.0)
+    .data_directory(profile)
+    .initialization_script(injection)
+    .additional_browser_args(BROWSER_ARGS)
+    .general_autofill_enabled(false)
+    .on_navigation(|url| url.scheme() == "https")
+    .build()
+    .map_err(|e| {
+        format!("Cannot open Parsec. Ensure Microsoft Edge WebView2 Runtime is installed. {e}")
+    })?;
     if let Some(settings) = app.get_webview_window("main") {
         let _ = settings.hide();
     }
@@ -193,7 +204,8 @@ fn show_stats(app: &tauri::AppHandle) {
         .title("ParsecWebTurn — Connection stats")
         .inner_size(470.0, 680.0)
         .resizable(false)
-        .data_directory(state.root.join("SettingsProfile"))
+        .data_directory(state.root.join("WebView2Profile"))
+        .additional_browser_args(BROWSER_ARGS)
         .on_navigation(local_url)
         .build();
 }
@@ -230,7 +242,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .truncate(false)
         .open(root.join(".launcher.lock"))?;
     lock.try_lock_exclusive().map_err(|_| "ParsecWebTurn is already running in this directory. Open Connection settings from its menu.")?;
-    let settings_profile = root.join("SettingsProfile");
+    let settings_profile = root.join("WebView2Profile");
     fs::create_dir_all(&settings_profile)?;
     tauri::Builder::default()
         .manage(AppState {
@@ -266,6 +278,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .inner_size(780.0, 820.0)
                 .min_inner_size(660.0, 640.0)
                 .data_directory(settings_profile)
+                .additional_browser_args(BROWSER_ARGS)
+                .general_autofill_enabled(false)
                 .on_navigation(local_url)
                 .build()?;
             Ok(())

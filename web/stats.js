@@ -31,9 +31,10 @@ function summarizeStats(report, previous) {
   return {
     counters,
     sample: {
-      route: pair ? (local?.candidateType === 'relay' || remote?.candidateType === 'relay' ? 'relay' : 'direct') : null,
+      route: local?.candidateType === 'relay' || remote?.candidateType === 'relay' ? 'relay' :
+        (local?.candidateType && remote?.candidateType ? 'direct' : null),
       protocol: ['udp', 'tcp', 'tls'].includes(protocol) ? protocol : null,
-      rttMs: pair && Number.isFinite(pair.currentRoundTripTime) ? pair.currentRoundTripTime * 1000 : null,
+      rttMs: pair && finite(pair.currentRoundTripTime) !== null ? pair.currentRoundTripTime * 1000 : null,
       inboundMbps: counters ? rate('received') : null,
       outboundMbps: counters ? rate('sent') : null,
       fps: fps ?? null,

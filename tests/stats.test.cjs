@@ -51,6 +51,8 @@ test('missing metrics remain unknown rather than zero', () => {
   const result = context.summarizeStats(new Map(), null);
   for (const value of Object.values(result.sample)) assert.equal(value, null);
   assert.equal(context.aggregateStats([]).state, 'waiting');
+  const partial = report(); partial.delete('remote');
+  assert.equal(context.summarizeStats(partial, null).sample.route, null);
 });
 
 test('aggregates traffic while selecting the most active connected peer for RTT', () => {

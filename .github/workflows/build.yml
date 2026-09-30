@@ -35,3 +35,6 @@ jobs:
             dist/ParsecWebTurn-v*-win64.zip
             dist/SHA256SUMS.txt
           if-no-files-found: error
+      - name: Native WebView2 smoke test
+        shell: pwsh
+        run: node scripts/smoke-webview.cjs

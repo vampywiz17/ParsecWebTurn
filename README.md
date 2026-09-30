@@ -25,7 +25,7 @@ On subsequent launches, valid saved settings open Parsec automatically. Use `Par
 
 Keep your existing `settings.json` beside the new executable. The field names and Windows DPAPI / CurrentUser format remain compatible, so saved API tokens and TURN passwords continue to work under the same Windows account.
 
-Tauri uses a new `WebView2Profile` directory. The previous Edge `Profile` is not modified or imported; sign into Parsec again once. `SettingsProfile` stores the local settings webview's browser state. Keep these directories private. Only one app instance can use the same data directory at a time.
+Tauri uses a new `WebView2Profile` directory. The previous Edge `Profile` is not modified or imported; sign into Parsec again once. The settings and Parsec windows share a browser environment, with separate native permissions. Keep the profile private. Only one app instance can use the same data directory at a time.
 
 ## Cloudflare Realtime
 
@@ -91,6 +91,8 @@ rustup component add rustfmt clippy
 ```
 
 The script checks version consistency and formatting, runs Rust and JavaScript tests, runs Clippy, builds the embedded application and packages an explicit file allowlist. `src-tauri/Cargo.lock` locks dependencies. The Windows CI uses the same script; `v*` tags publish releases after successful validation.
+
+`node scripts/smoke-webview.cjs` tests the packaged app with an isolated WebView2 profile, a mock Parsec document and real loopback WebRTC traffic. It checks DPAPI saving, initialization order, traffic/RTT reporting and remote command isolation. The debugging port is enabled only in this test process; normal app launches do not expose it. CI runs this test before a release can be published.
 
 For development:
 
