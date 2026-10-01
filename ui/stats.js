@@ -22,7 +22,7 @@ async function update() {
       ...(stats.srtpCipher ? [['SRTP protection profile', stats.srtpCipher]] : []),
       ['App CPU (including WebView2)', metric(stats.appCpuPercent, '%')], ['WebView2 GPU process (busiest engine)', metric(stats.appGpuPercent, '%')],
       ['WebView2 GPU video decode', metric(stats.appGpuDecodePercent, '%')],
-      ['Audio codec', stats.audioCodec], ['Audio bitrate', metric(stats.audioBitrateKbps, 'kbps')],
+      ['Audio codec', stats.audioCodec], ['Configured audio bitrate', metric(stats.audioBitrateKbps, 'kbps')],
       ['Audio sample rate', stats.audioSampleRate ? `${stats.audioSampleRate} Hz` : null],
       ['Audio channels', stats.audioChannels], ['Audio source', stats.audioSource],
       ...(stats.mediaDiagnosticsEnabled ? [ ['Video codec', stats.codec], ['Decoder', stats.decoder], ['Profile', stats.videoProfile],

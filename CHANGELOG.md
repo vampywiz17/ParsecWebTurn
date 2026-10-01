@@ -8,7 +8,7 @@ All notable changes to this project will be documented in this file.
 
 - Display standard WebRTC transport encryption statistics: DTLS state, negotiated version and cipher suite, plus the SRTP protection profile when reported. Data-channel DTLS is distinguished from TURN TLS; missing telemetry remains unknown.
 - Measure the app and its WebView2 processes' CPU consumption using Windows process times. Show the WebView2 GPU processes' busiest engine and video-decode engine utilization when Windows GPU counters are available.
-- Display audio codec, measured encoded/payload bitrate, sample rate and channel count using standard WebRTC RTP statistics or WebCodecs decoder inputs. No audio frames are copied or closed by instrumentation.
+- Display audio codec, sample rate and channel count using standard WebRTC RTP statistics or WebCodecs decoder configuration. Keep configured metadata visible during silence, including before the first audio packet. The remote configured bitrate remains unknown when the receiving APIs do not expose it; instantaneous throughput is not substituted for it. No audio frames are copied or closed by instrumentation.
 
 ## [0.6.0] - 2026-10-01
 

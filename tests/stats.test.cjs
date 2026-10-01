@@ -84,17 +84,18 @@ test('ambiguous transports do not guess encryption and pair transportId links ar
   assert.equal(context.summarizeStats(data,null).sample.dtlsState,null);
 });
 
-test('RTP audio bitrate measures payload deltas and resets remain unknown', () => {
+test('RTP audio codec metadata survives silence and payload rate is not a configured bitrate', () => {
   const data=report();
   data.set('audio',{id:'audio',type:'inbound-rtp',kind:'audio',codecId:'opus',timestamp:1000,bytesReceived:100});
   data.set('opus',{type:'codec',mimeType:'audio/opus',clockRate:48000,channels:2});
   const first=context.summarizeStats(data,null);
   Object.assign(data.get('audio'),{timestamp:2000,bytesReceived:8100});
   const sample=context.summarizeStats(data,first.counters).sample;
-  assert.equal(sample.audioCodec,'audio/opus');assert.equal(sample.audioBitrateKbps,64);
-  assert.equal(sample.audioChannels,2);assert.equal(sample.audioSource,'WebRTC inbound audio payload');
+  assert.equal(sample.audioCodec,'audio/opus');assert.equal(sample.audioBitrateKbps,null);
+  assert.equal(sample.audioChannels,2);assert.equal(sample.audioSource,'WebRTC inbound audio codec');
   data.get('audio').bytesReceived=0;
   assert.equal(context.summarizeStats(data,first.counters).sample.audioBitrateKbps,null);
+  assert.equal(context.summarizeStats(data,first.counters).sample.audioCodec,'audio/opus');
 });
 
 test('aggregates traffic while selecting the most active connected peer for RTT', () => {

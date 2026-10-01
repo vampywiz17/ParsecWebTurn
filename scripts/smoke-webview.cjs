@@ -299,10 +299,15 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
         encoder.encode(frame);frame.close();
       },20);
     })()`);
-    for(let i=0;i<80;i++){sample=await invoke(stats,'get_stats');if(sample.audioCodec==='opus' && sample.audioBitrateKbps>0)break;await delay(100);}
+    for(let i=0;i<80;i++){sample=await invoke(stats,'get_stats');if(sample.audioCodec==='opus')break;await delay(100);}
     assert.equal(sample.audioCodec,'opus');assert.equal(sample.audioSampleRate,48000);assert.equal(sample.audioChannels,1);
-    assert.ok(sample.audioBitrateKbps>0 && sample.audioBitrateKbps<256,'Real encoded Opus input must produce measured bitrate');
-    assert.equal(sample.audioSource,'WebCodecs encoded audio');
+    assert.equal(sample.audioBitrateKbps,null,'Decoder inputs must not invent the remote configured bitrate');
+    assert.equal(sample.audioSource,'WebCodecs decoder configuration');
+    await evaluate(parsec,`clearInterval(window.smoke.audioTimer);window.smoke.audioEncoder.flush()`);
+    await delay(4500);
+    sample=await invoke(stats,'get_stats');
+    assert.equal(sample.audioCodec,'opus','Native audio metadata must survive silence');
+    assert.equal(sample.audioSampleRate,48000);assert.equal(sample.audioChannels,1);
     console.log('Native metrics: '+JSON.stringify({dtlsState:sample.dtlsState,tlsVersion:sample.tlsVersion,dtlsCipher:sample.dtlsCipher,
       cpu:sample.appCpuPercent,gpu:sample.appGpuPercent,gpuDecode:sample.appGpuDecodePercent,
       audioCodec:sample.audioCodec,audioKbps:sample.audioBitrateKbps}));

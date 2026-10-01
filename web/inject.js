@@ -72,7 +72,7 @@
         sample.fpsSource = 'WebCodecs decoder';
       } else if (sample.fps != null) sample.fpsSource = 'WebRTC inbound video';
       if (sample.state === 'connected' && !sample.audioSource) {
-        const audio = sampleDecodedAudio(performance.now());
+        const audio = sampleDecodedAudio();
         if (audio) Object.assign(sample, audio);
       }
       await window.__TAURI__.core.invoke('report_stats', { sample });

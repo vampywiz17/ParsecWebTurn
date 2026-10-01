@@ -112,7 +112,6 @@ function summarizeStats(report, previous, servers = [], selectedPair = null, can
     sent: finite(counter.bytesSent),
     frames: video && finite(video.framesDecoded),
     videoId: video && video.id,
-    audioId: audio?.id, audioBytes: audio && finite(audio.bytesReceived), audioTimestamp: audio?.timestamp,
   };
   const elapsed = previous && counters && counters.id === previous.id ? (counters.timestamp - previous.timestamp) / 1000 : 0;
   const rate = key => elapsed > 0 && counters[key] !== null && previous[key] !== null && counters[key] >= previous[key]
@@ -135,11 +134,9 @@ function summarizeStats(report, previous, servers = [], selectedPair = null, can
       dtlsCipher: securityName(securityTransport?.dtlsCipher),
       srtpCipher: securityName(securityTransport?.srtpCipher),
       audioCodec: audioCodec?.mimeType || null,
-      audioBitrateKbps: audio && previous?.audioId === audio.id && audio.timestamp > previous.audioTimestamp &&
-        Number.isFinite(audio.bytesReceived) && previous.audioBytes != null && audio.bytesReceived >= previous.audioBytes ?
-        (audio.bytesReceived - previous.audioBytes) * 8 / (audio.timestamp - previous.audioTimestamp) : null,
+      audioBitrateKbps: null, // Inbound statistics do not expose the remote encoder's configured target.
       audioSampleRate: audioCodec?.clockRate || null, audioChannels: audioCodec?.channels || null,
-      audioSource: audio ? 'WebRTC inbound audio payload' : null,
+      audioSource: audio ? 'WebRTC inbound audio codec' : null,
       rttMs: pair && finite(pair.currentRoundTripTime) !== null ? pair.currentRoundTripTime * 1000 : null,
       inboundMbps: counters ? rate('received') : null,
       outboundMbps: counters ? rate('sent') : null,

@@ -2,7 +2,7 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
-test('audio monitoring measures encoded inputs and preserves native configuration and ownership',()=>{
+test('audio configuration survives silence without inventing a target bitrate or changing frame ownership',()=>{
   let now=0;
   class Decoder {
     constructor(init){this.init=init;this.state='unconfigured';}
@@ -18,10 +18,19 @@ test('audio monitoring measures encoded inputs and preserves native configuratio
   decoder.configure(Object.freeze(Object.create({codec:'opus',sampleRate:48000,numberOfChannels:2})));
   assert.equal(decoder.init.output,output);
   const sample=()=>vm.runInContext(`sampleDecodedAudio(${now})`,context);
+  assert.equal(sample().audioCodec,'opus','Configuration is visible before any encoded audio arrives');
   decoder.decode({byteLength:8000});assert.equal(sample().audioBitrateKbps,null);
-  now=1000;decoder.decode({byteLength:8000});assert.equal(sample().audioBitrateKbps,64);
+  now=1000;decoder.decode({byteLength:8000});assert.equal(sample().audioBitrateKbps,null);
   assert.equal(sample().audioCodec,'opus');assert.equal(sample().audioSampleRate,48000);assert.equal(sample().audioChannels,2);
   assert.throws(()=>decoder.decode({invalid:true,byteLength:1e9}));
-  now=5000;assert.equal(sample(),null,'Stopped audio must not retain current bitrate');
-  decoder.reset();assert.equal(sample(),null);decoder.close();assert.equal(sample(),null);
+  now=5000;assert.equal(sample().audioCodec,'opus','Silence must retain configured audio metadata');
+  assert.equal(sample().audioSampleRate,48000);assert.equal(sample().audioChannels,2);
+  decoder.reset();assert.equal(sample(),null);
+  decoder.configure({codec:'aac',sampleRate:44100,numberOfChannels:1});
+  assert.equal(sample().audioCodec,'aac');assert.equal(sample().audioSampleRate,44100);assert.equal(sample().audioChannels,1);
+  const other=new window.AudioDecoder({output,error:()=>{}});
+  other.configure({codec:'opus',sampleRate:48000,numberOfChannels:2});
+  assert.equal(sample(),null,'Multiple configured decoders cannot be attributed to one stream');
+  other.close();assert.equal(sample().audioCodec,'aac');
+  decoder.close();assert.equal(sample(),null);
 });
