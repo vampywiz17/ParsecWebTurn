@@ -70,6 +70,8 @@ test('ambiguous nominated pairs never guess direct or relay', () => {
   assert.equal(context.summarizeStats(data, null).sample.route, null);
   data.get('other').selected = true;
   data.get('local').candidateType = 'relay';
+  assert.equal(context.summarizeStats(data,null).sample.route,null,'Nonstandard selected flag must not select a pair');
+  data.get('transport').selectedCandidatePairId='other';
   const selected = context.summarizeStats(data, null).sample;
   assert.equal(selected.route, 'relay');
   assert.equal(selected.localCandidateType, 'relay');

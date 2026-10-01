@@ -79,7 +79,9 @@ Open **Connection stats** from the native menu. The application samples `RTCPeer
 - Direct/relay route and transport of the most active connection.
 - Video FPS, codec, decoder, resolution and lost packets, when the web client exposes standard inbound-video statistics.
 
-The native WebView2 Media event API also supplies codec, decoder, hardware decoding, profile, backend and visible resolution, even when Parsec carries video through data channels. Decoder reconfiguration updates the displayed resolution. A document-start WebCodecs hook counts frames delivered by VideoDecoder when RTP video statistics are absent. This is decoded FPS, not display refresh rate; the original callback keeps ownership of every frame. No remote debugging port is opened for this collection.
+A document-start hook counts frames delivered through the public WebCodecs VideoDecoder API when RTP video statistics are absent. This is decoded FPS, not display refresh rate; the original callback keeps ownership of every frame. Native WebIDL callback validation, inherited/getter members and frozen inputs are preserved.
+
+**Detailed decoder diagnostics (experimental)** in Connection settings is an optional, disabled-by-default extension. It uses WebView2's documented DevTools protocol API and Chromium's experimental Media domain to supplement codec, decoder, hardware decoding, profile, backend and visible resolution. These are vendor diagnostics, not W3C WebRTC data, and availability/message formats can vary by runtime. Apply the setting on your next connection. Unavailable information remains unknown and Media failures do not block the standard statistics or connection. No remote debugging port is opened in the shipped application.
 
 Video packet loss is available only when inbound RTP statistics provide it. Parsec's data-channel video does not expose an equivalent counter: decoded/dropped frames, ICE checks and local send discards cannot establish end-to-end packet loss. Missing loss statistics remain unknown rather than zero.
 

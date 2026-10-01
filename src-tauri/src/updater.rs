@@ -159,7 +159,6 @@ pub async fn show(app: &tauri::AppHandle) -> Result<(), String> {
         .inner_size(620.0, 650.0)
         .min_inner_size(500.0, 440.0)
         .data_directory(root.join("WebView2Profile"))
-        .additional_browser_args(crate::BROWSER_ARGS)
         .on_navigation(crate::local_url)
         .build()
         .map(|_| ())

@@ -45,7 +45,7 @@ test('constructor preserves policy, constraints, inheritance and static methods'
   assert.ok(pc instanceof window.RTCPeerConnection);
   assert.equal(window.RTCPeerConnection.generateCertificate(), 'certificate');
   assert.equal(input.iceServers[0].urls, 'stun:original.invalid');
-  assert.equal(window.webkitRTCPeerConnection, window.RTCPeerConnection);
+  assert.equal(window.webkitRTCPeerConnection, NativePeerConnection,'The vendor-prefixed alias is left untouched');
 });
 
 test('later setConfiguration cannot replace the ICE override', () => {

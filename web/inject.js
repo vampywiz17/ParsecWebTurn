@@ -37,13 +37,12 @@
     }
   }
   window.RTCPeerConnection = PatchedRTCPeerConnection;
-  if (window.webkitRTCPeerConnection) window.webkitRTCPeerConnection = PatchedRTCPeerConnection;
   window.__parsecWebTurnPatched = true;
   console.log('[ParsecWebTurn] ICE override installed before Parsec startup; server count:', ICE_SERVERS.length);
 
   let sampling = false;
   setInterval(async () => {
-    if (sampling || !window.__TAURI_INTERNALS__) return;
+    if (sampling || !window.__TAURI__?.core?.invoke) return;
     sampling = true;
     try {
       const results = [];
@@ -71,7 +70,7 @@
         sample.fps = decodedFps;
         sample.fpsSource = 'WebCodecs decoder';
       } else if (sample.fps != null) sample.fpsSource = 'WebRTC inbound video';
-      await window.__TAURI_INTERNALS__.invoke('report_stats', { sample });
+      await window.__TAURI__.core.invoke('report_stats', { sample });
     } catch { /* Diagnostics must never interrupt a Parsec session. */ }
     finally { sampling = false; }
   }, 1000);

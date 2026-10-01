@@ -1,12 +1,13 @@
 'use strict';
 const $ = id => document.getElementById(id);
-const invoke = (command, args) => window.__TAURI_INTERNALS__.invoke(command, args);
+const invoke = (command, args) => window.__TAURI__.core.invoke(command, args);
 let busy = false;
 function panel() { $('cloudflare').hidden = $('provider').value !== 'cloudflare'; $('custom').hidden = $('provider').value !== 'custom'; }
 function showError(error) { $('error').textContent = String(error); $('error').hidden = false; $('status').textContent = ''; }
 function request() {
   return { provider: $('provider').value, customUrls: $('urls').value.split(/\r?\n/), customUsername: $('username').value,
     turnKeyId: $('key').value, ttl: Number($('ttl').value), cacheCredentials: $('cache').checked,
+    mediaDiagnostics: $('media-diagnostics').checked,
     apiToken: $('token').value, customPassword: $('password').value,
     forgetApiToken: $('forget-token').checked, forgetCustomPassword: $('forget-password').checked };
 }
@@ -15,6 +16,7 @@ async function load() {
   $('provider').value = config.provider;
   $('urls').value = config.customUrls.join('\n'); $('username').value = config.customUsername;
   $('key').value = config.turnKeyId; $('ttl').value = config.ttl; $('cache').checked = config.cacheCredentials;
+  $('media-diagnostics').checked = config.mediaDiagnostics;
   $('token').value = ''; $('password').value = ''; $('forget-token').checked = false; $('forget-password').checked = false;
   $('token').placeholder = config.hasApiToken ? 'Saved token · leave blank to keep' : 'Cloudflare TURN API token';
   $('password').placeholder = config.hasCustomPassword ? 'Saved password · leave blank to keep' : 'TURN password';

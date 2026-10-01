@@ -5,6 +5,7 @@
   "identifier": "app.parsecwebturn.desktop",
   "build": { "frontendDist": "../ui" },
   "app": {
+    "withGlobalTauri": true,
     "windows": [],
     "security": {
       "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src ipc: http://ipc.localhost",

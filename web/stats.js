@@ -75,7 +75,6 @@ function summarizeStats(report, previous, servers = [], selectedPair = null, can
   const transport = entries.find(entry => entry.type === 'transport' && entry.selectedCandidatePairId);
   const nominated = entries.filter(entry => entry.type === 'candidate-pair' && entry.nominated && entry.state === 'succeeded');
   const pair = (transport && report.get(transport.selectedCandidatePairId)) ||
-    entries.find(entry => entry.type === 'candidate-pair' && entry.selected === true && entry.state === 'succeeded') ||
     (nominated.length === 1 ? nominated[0] : null);
   const counter = pair || entries.find(entry => entry.type === 'transport' && Number.isFinite(entry.bytesReceived));
   const observedLocal = pair && report.get(pair.localCandidateId);
@@ -94,7 +93,7 @@ function summarizeStats(report, previous, servers = [], selectedPair = null, can
   if (route.route === 'direct' && (local?.correlated || remote?.correlated)) {
     route.routeEvidence = 'Selected endpoints matched non-relay ICE candidates';
   }
-  const video = entries.filter(entry => entry.type === 'inbound-rtp' && (entry.kind || entry.mediaType) === 'video')
+  const video = entries.filter(entry => entry.type === 'inbound-rtp' && entry.kind === 'video')
     .sort((a, b) => (b.bytesReceived || 0) - (a.bytesReceived || 0))[0];
   const codec = video && report.get(video.codecId);
   const finite = value => Number.isFinite(value) && value >= 0 ? value : null;

@@ -34,10 +34,6 @@ struct AppState {
     auto_connect: AtomicBool,
 }
 
-// A shared WebView2 environment avoids an extra browser process for settings.
-// Every view using this data directory must have identical browser arguments.
-const BROWSER_ARGS: &str = "--autoplay-policy=no-user-gesture-required --disable-features=msWebOOUI,msPdfOOUI --disable-background-timer-throttling --disable-renderer-backgrounding";
-
 fn trusted_local(window: &WebviewWindow, label: &str) -> Result<(), String> {
     let url = window.url().map_err(|_| "Cannot check window origin")?;
     if window.label() != label || !local_url(&url) {
@@ -100,7 +96,7 @@ async fn connect_saved(
     let _operation = state.operation.lock().await;
     let settings = Settings::load(&state.root)?;
     let servers = provider::resolve(&state.root, &settings).await?;
-    open_parsec(&app, &state, &servers).await
+    open_parsec(&app, &state, &servers, settings.media_diagnostics).await
 }
 
 #[tauri::command]
@@ -112,13 +108,17 @@ async fn connect_fallback(
     trusted_local(&window, "main")?;
     let _operation = state.operation.lock().await;
     let servers = provider::fallback(&state.root)?;
-    open_parsec(&app, &state, &servers).await
+    let diagnostics = Settings::load(&state.root)
+        .map(|s| s.media_diagnostics)
+        .unwrap_or(false);
+    open_parsec(&app, &state, &servers, diagnostics).await
 }
 
 async fn open_parsec(
     app: &tauri::AppHandle,
     state: &AppState,
     servers: &[ice::IceServer],
+    media_diagnostics: bool,
 ) -> Result<(), String> {
     if let Some(existing) = app.get_webview_window("parsec") {
         // User close exits the app. Reconnecting replaces the window internally
@@ -133,7 +133,9 @@ async fn open_parsec(
         }
     }
     *state.stats.lock().map_err(|_| "Statistics lock failed")? = LatestStats::default();
-    *state.media.lock().map_err(|_| "Media lock failed")? = media::MediaState::default();
+    if let Ok(mut media) = state.media.lock() {
+        *media = media::MediaState::default();
+    }
     let injection = include_str!("../../web/inject.js")
         .replace("__STATS_HELPER__", include_str!("../../web/stats.js"))
         .replace("__VIDEO_HELPER__", include_str!("../../web/video.js"))
@@ -156,14 +158,15 @@ async fn open_parsec(
     .min_inner_size(800.0, 500.0)
     .data_directory(profile)
     .initialization_script(injection)
-    .additional_browser_args(BROWSER_ARGS)
     .general_autofill_enabled(false)
     .on_navigation(|url| url.scheme() == "https")
     .build()
     .map_err(|e| {
         format!("Cannot open Parsec. Ensure Microsoft Edge WebView2 Runtime is installed. {e}")
     })?;
-    media::attach(&parsec, state.media.clone());
+    if media_diagnostics {
+        media::attach(&parsec, state.media.clone());
+    }
     if let Some(settings) = app.get_webview_window("main") {
         let _ = settings.hide();
     }
@@ -201,11 +204,9 @@ fn get_stats(window: WebviewWindow, state: State<'_, AppState>) -> Result<Connec
         .lock()
         .map_err(|_| "Statistics lock failed")?
         .snapshot();
-    state
-        .media
-        .lock()
-        .map_err(|_| "Media lock failed")?
-        .supplement(&mut sample);
+    if let Ok(media) = state.media.lock() {
+        media.supplement(&mut sample);
+    }
     Ok(sample)
 }
 
@@ -293,7 +294,6 @@ async fn show_stats(app: &tauri::AppHandle) -> Result<(), String> {
         .min_inner_size(430.0, 600.0)
         .resizable(true)
         .data_directory(state.root.join("WebView2Profile"))
-        .additional_browser_args(BROWSER_ARGS)
         .on_navigation(local_url)
         .build()
         .map(|_| ())
@@ -411,7 +411,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .inner_size(780.0, 820.0)
                 .min_inner_size(660.0, 640.0)
                 .data_directory(settings_profile)
-                .additional_browser_args(BROWSER_ARGS)
                 .general_autofill_enabled(false)
                 .on_navigation(local_url)
                 .build()?;

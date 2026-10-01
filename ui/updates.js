@@ -1,6 +1,6 @@
 'use strict';
 const $ = id => document.getElementById(id);
-const invoke = command => window.__TAURI_INTERNALS__.invoke(command);
+const invoke = command => window.__TAURI__.core.invoke(command);
 let polling = false;
 async function refresh() {
   if (polling) return;

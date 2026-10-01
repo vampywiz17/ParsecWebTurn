@@ -8,12 +8,12 @@
   let changingMode = false;
   for (const type of ['keydown', 'keyup']) {
     window.addEventListener(type, event => {
-      if (!recoveryKey(event) || !window.__TAURI_INTERNALS__) return;
+      if (!recoveryKey(event) || !window.__TAURI__?.core?.invoke) return;
       event.preventDefault();
       event.stopImmediatePropagation();
       if (type !== 'keydown' || event.repeat || changingMode) return;
       changingMode = true;
-      window.__TAURI_INTERNALS__.invoke('parsec_window_shortcut', { toggle: event.code === 'F11' })
+      window.__TAURI__.core.invoke('parsec_window_shortcut', { toggle: event.code === 'F11' })
         .catch(() => {}).finally(() => { changingMode = false; });
     }, true);
   }

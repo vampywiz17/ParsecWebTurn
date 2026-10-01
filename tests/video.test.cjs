@@ -29,3 +29,30 @@ test('WebCodecs FPS measures delivered frames without changing their ownership o
   assert.equal(vm.runInContext('sampleDecodedFps(5000)',context),30);
   decoder.close();assert.equal(vm.runInContext('sampleDecodedFps(6000)',context),null);
 });
+
+test('decoder instrumentation preserves inherited/frozen callbacks, native validation and callback capture',()=>{
+  class Decoder {
+    constructor(init) {
+      if (!arguments.length || init == null || !['object','function'].includes(typeof init)) throw new TypeError('Invalid init');
+      const error=init.error, output=init.output;
+      if(typeof error!=='function' || typeof output!=='function') throw new TypeError('Callbacks required');
+      this.output=output;this.state='configured';
+    }
+  }
+  const window={VideoDecoder:Decoder};
+  const context=vm.createContext({window});vm.runInContext(script,context);
+  const reads=[], delivered=[];
+  const prototype={get error(){reads.push('error');assert.equal(this,init);return()=>{};},
+    get output(){reads.push('output');assert.equal(this,init);return frame=>delivered.push(frame);}};
+  const init=Object.freeze(Object.create(prototype));
+  const decoder=new window.VideoDecoder(init);decoder.output('frame');
+  assert.deepEqual(reads,['error','output']);assert.deepEqual(delivered,['frame']);
+  const mutable={error:()=>{},output:frame=>delivered.push(frame)};
+  const captured=new window.VideoDecoder(mutable);
+  mutable.output=()=>{throw new Error('Native callbacks must be captured once');};
+  captured.output('captured');assert.equal(delivered[1],'captured');
+  for(const value of [undefined,null,1,'text',{}, {error:()=>{},output:42}]) {
+    assert.throws(()=>new window.VideoDecoder(value),TypeError);
+  }
+  assert.throws(()=>new window.VideoDecoder(),TypeError);
+});
