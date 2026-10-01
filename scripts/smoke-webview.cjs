@@ -204,7 +204,8 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     assert.equal(sample.dtlsState,'connected','Real data-channel transport must report connected DTLS');
     assert.match(sample.tlsVersion,/^[0-9A-F]{4}$/);
     assert.ok(sample.dtlsCipher?.startsWith('TLS_'),'Negotiated DTLS cipher must be reported');
-    assert.equal(sample.srtpCipher,null,'The data-channel fixture must not invent an SRTP profile');
+    const nativeProfiles=await evaluate(parsec,`(async()=>Promise.all([first,second].map(async peer=>[...await peer.getStats()].filter(([,value])=>value.type==='transport').map(([,value])=>value.srtpCipher ?? null))))()`);
+    assert.ok(nativeProfiles.flat().includes(sample.srtpCipher),'SRTP profile must match the native transport report');
     for(let i=0;i<30 && sample.appCpuPercent==null;i++) { await delay(100);sample=await invoke(stats,'get_stats'); }
     assert.ok(Number.isFinite(sample.appCpuPercent) && sample.appCpuPercent>=0 && sample.appCpuPercent<=100,'Native app-group CPU must be available');
     const compatibility = await evaluate(parsec,`(() => {
