@@ -4,7 +4,7 @@ A portable Windows application for **Parsec Web**, written in **Rust with Tauri 
 
 The connection can be direct when the network allows it, or use a TURN relay when needed. No VPN or driver installation is required. A TLS TURN endpoint on port 443 can help on restrictive networks, but the network must also permit Parsec's HTTPS/WebSocket services and the selected relay.
 
-<img width="1803" height="863" alt="image" src="https://github.com/user-attachments/assets/d2f2d812-1f3d-4a25-8ee9-92254c3334d2" />
+<img width="1807" height="864" alt="image" src="https://github.com/user-attachments/assets/8142cb6b-91bb-4be0-9284-3d04146ca0d8" />
 
 ## Requirements and first run
 
