@@ -168,15 +168,18 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
       // Exercise real WebView2 permission handling without a CDP permission grant.
       // Only the disposable CI desktop's clipboard is touched, never a user's.
       await send('Emulation.setFocusEmulationEnabled',{enabled:true},parsec);
+      // Seed from Windows, as a local user's copy operation would. A browser
+      // write/read round-trip can use a different clipboard on a headless runner.
+      execFileSync('powershell.exe',['-NoProfile','-Command',
+        "Set-Clipboard -Value 'ParsecWebTurn isolated clipboard test'"]);
       const clipboard=await evaluate(parsec,`(async()=>{
-        const original=await navigator.clipboard.readText();
-        try {
-          const marker='ParsecWebTurn isolated clipboard test';
-          await navigator.clipboard.writeText(marker);
-          return (await navigator.clipboard.readText())===marker;
-        } finally { await navigator.clipboard.writeText(original); }
+        const permission=await navigator.permissions.query({name:'clipboard-read'});
+        const text=await navigator.clipboard.readText();
+        return {permission:permission.state,length:text.length,
+          matches:text==='ParsecWebTurn isolated clipboard test'};
       })()`);
-      assert.equal(clipboard,true,'Parsec must read as well as write the native clipboard');
+      assert.equal(clipboard.permission,'granted','Parsec clipboard read must be permitted');
+      assert.equal(clipboard.matches,true,'Parsec must read the Windows clipboard: '+JSON.stringify(clipboard));
       await send('Emulation.setFocusEmulationEnabled',{enabled:false},parsec);
     }
     if(!smoke.connected) {
