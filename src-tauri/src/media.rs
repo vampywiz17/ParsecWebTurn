@@ -180,7 +180,7 @@ impl MediaState {
             sample.width = Some(width);
             sample.height = Some(height);
         }
-        sample.video_source = Some("Chromium Media".into());
+        sample.video_source = Some("Chromium Media (optional, experimental)".into());
     }
 }
 

@@ -7,6 +7,8 @@ const assert = require('node:assert/strict');
 const { spawn, execFileSync } = require('node:child_process');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const repository = path.resolve(__dirname, '..');
+// Synthetic tests must not contact GitHub or download an actual release.
+process.env.PARSECWEBTURN_NO_UPDATE_CHECK = '1';
 
 const page = `<!doctype html><html><body><h1>Isolated WebRTC smoke test</h1><script>
 window.smoke = { installedBeforePageScript: !!window.__parsecWebTurnPatched };
@@ -38,7 +40,7 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
   await new Promise(resolve => portServer.listen(0, '127.0.0.1', resolve));
   const port = portServer.address().port;
   await new Promise(resolve => portServer.close(resolve));
-  const browserArguments = `--remote-debugging-port=${port} --disable-features=msWebOOUI,msPdfOOUI,WebRtcHideLocalIpsWithMdns`;
+  const browserArguments = `--remote-debugging-port=${port} --disable-features=WebRtcHideLocalIpsWithMdns`;
   const ciPolicy = 'HKLM\\Software\\Policies\\Microsoft\\Edge\\WebView2\\AdditionalBrowserArguments';
   // WebView2 150+ ignores WEBVIEW2_* environment overrides for elevated hosts.
   // GitHub runners are elevated; apply Microsoft's documented HKLM alternative
@@ -108,7 +110,7 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
       if(result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
       return result.result.value;
     };
-    const invoke = (sessionId,command,args={}) => evaluate(sessionId,`window.__TAURI_INTERNALS__.invoke(${JSON.stringify(command)},${JSON.stringify(args)})`);
+    const invoke = (sessionId,command,args={}) => evaluate(sessionId,`window.__TAURI__.core.invoke(${JSON.stringify(command)},${JSON.stringify(args)})`);
     const find = async suffix => {
       for(let i=0;i<150;i++) {
         const {targetInfos} = await send('Target.getTargets');
@@ -120,7 +122,7 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
           // CDP exposes the target URL before initialization/deferred scripts
           // finish, especially on a slower CI runner. Wait for the real IPC
           // bridge and document before issuing native commands.
-          const ready = await evaluate(sessionId,`!!window.__TAURI_INTERNALS__?.invoke && document.readyState==='complete' &&
+          const ready = await evaluate(sessionId,`!!window.__TAURI__?.core?.invoke && document.readyState==='complete' &&
             (!document.getElementById('save') || (!document.getElementById('save').disabled && !!document.getElementById('version').textContent))`);
           if(ready) return sessionId;
         }
@@ -132,7 +134,8 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     const initial = await invoke(main,'get_configuration');
     assert.equal(initial.version,fs.readFileSync(path.join(repository,'VERSION'),'utf8').trim());
     assert.equal(initial.hasApiToken,false);
-    const input={provider:'custom',customUrls:['stun:127.0.0.1:9','turns:relay.example.invalid'],customUsername:'smoke-user',customPassword:'smoke-secret',
+    assert.equal(initial.mediaDiagnostics,false,'Vendor Media diagnostics are opt-in');
+    const input={provider:'custom',mediaDiagnostics:true,customUrls:['stun:127.0.0.1:9','turns:relay.example.invalid'],customUsername:'smoke-user',customPassword:'smoke-secret',
       turnKeyId:'',apiToken:'',cacheCredentials:false,ttl:86400};
     await invoke(main,'save_configuration',{input});
     const saved=await invoke(main,'get_configuration');
@@ -140,12 +143,13 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     assert.ok(!JSON.stringify(saved).includes('smoke-secret'));
     const disk=fs.readFileSync(path.join(root,'settings.json'),'utf8');
     assert.ok(!disk.includes('smoke-secret')); assert.ok(JSON.parse(disk).encryptedCustomPassword);
-    await evaluate(main,`document.getElementById('provider').value='custom';document.getElementById('urls').value=${JSON.stringify(input.customUrls.join('\n'))};document.getElementById('username').value='smoke-user-ui';document.getElementById('provider').dispatchEvent(new Event('change'));document.getElementById('save').click()`);
+    await evaluate(main,`document.getElementById('provider').value='custom';document.getElementById('urls').value=${JSON.stringify(input.customUrls.join('\n'))};document.getElementById('username').value='smoke-user-ui';document.getElementById('media-diagnostics').checked=true;document.getElementById('provider').dispatchEvent(new Event('change'));document.getElementById('save').click()`);
     let uiSaved = false;
     for(let i=0;i<100;i++) {uiSaved=await evaluate(main,`document.getElementById('status').textContent.startsWith('Settings saved')`);if(uiSaved)break;await delay(100);}
     assert.equal(uiSaved,true,'The real settings form must save successfully');
     const uiConfig = await invoke(main,'get_configuration');
     assert.equal(uiConfig.customUsername,'smoke-user-ui');
+    assert.equal(uiConfig.mediaDiagnostics,true,'Vendor diagnostics require explicit opt-in');
     assert.equal(uiConfig.hasCustomPassword,true,'Blank password field must retain the saved secret');
     if(process.env.PARSECWEBTURN_SCREENSHOTS) {
       const {data}=await send('Page.captureScreenshot',{},main);
@@ -170,19 +174,23 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     await send('Input.dispatchKeyEvent',{type:'keyDown',key:'W',code:'KeyW',windowsVirtualKeyCode:87,modifiers:10},parsec);
     await send('Input.dispatchKeyEvent',{type:'keyUp',key:'W',code:'KeyW',windowsVirtualKeyCode:87,modifiers:10},parsec);
     await delay(300);
-    const recovered = await evaluate(parsec,`window.__TAURI_INTERNALS__.invoke('parsec_window_shortcut',{toggle:true})`);
+    const recovered = await evaluate(parsec,`window.__TAURI__.core.invoke('parsec_window_shortcut',{toggle:true})`);
     assert.equal(recovered.fullscreen,true,'Ctrl+Shift+W must restore the focused WebView before toggling fullscreen again');
     assert.equal(recovered.menuVisible,false);
     // If Ctrl+Shift+W restored windowed mode, this toggle enters fullscreen again.
     // Verify the native state from the local interface before returning windowed.
     const windowedMode = await invoke(main,'set_parsec_window_mode',{fullscreen:false});
     assert.equal(windowedMode.fullscreen,false); assert.equal(windowedMode.menuVisible,true); assert.equal(windowedMode.decorated,true);
-    const rejected=await evaluate(parsec,`window.__TAURI_INTERNALS__.invoke('get_configuration').then(()=>false,()=>true)`);
+    const rejected=await evaluate(parsec,`window.__TAURI__.core.invoke('get_configuration').then(()=>false,()=>true)`);
     assert.equal(rejected,true,'Remote Parsec page must not access settings');
-    const rejectedWrite=await evaluate(parsec,`window.__TAURI_INTERNALS__.invoke('save_configuration',{input:${JSON.stringify(input)}}).then(()=>false,()=>true)`);
+    const rejectedWrite=await evaluate(parsec,`window.__TAURI__.core.invoke('save_configuration',{input:${JSON.stringify(input)}}).then(()=>false,()=>true)`);
     assert.equal(rejectedWrite,true,'Remote Parsec page must not modify settings');
-    const rejectedShow=await evaluate(parsec,`window.__TAURI_INTERNALS__.invoke('show_configuration').then(()=>false,()=>true)`);
+    const rejectedShow=await evaluate(parsec,`window.__TAURI__.core.invoke('show_configuration').then(()=>false,()=>true)`);
     assert.equal(rejectedShow,true,'Remote Parsec page must not reveal settings');
+    for (const command of ['get_update','check_update','open_update_download','dismiss_update','install_update']) {
+      const denied=await evaluate(parsec,`window.__TAURI__.core.invoke(${JSON.stringify(command)}).then(()=>false,()=>true)`);
+      assert.equal(denied,true,`Remote page must not invoke ${command}`);
+    }
     await evaluate(main,`document.getElementById('stats').click()`);
     const stats=await find('/stats.html');
     let sample;
@@ -262,13 +270,25 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
         encoder.encode(frame,{keyFrame:timestamp===50000});frame.close();
       },50);
     })()`);
-    for(let i=0;i<100;i++){sample=await invoke(stats,'get_stats');if(sample.videoSource==='Chromium Media' && sample.codec==='VP8' && sample.decoder && sample.width===64 && sample.height===64)break;await delay(100);}
+    for(let i=0;i<100;i++){sample=await invoke(stats,'get_stats');if(sample.videoSource==='Chromium Media (optional, experimental)' && sample.codec==='VP8' && sample.decoder && sample.width===64 && sample.height===64)break;await delay(100);}
     if(!sample.decoder) console.log('Synthetic video Media events: '+JSON.stringify(mediaEvents));
-    assert.equal(sample.videoSource,'Chromium Media','Native Media events must supplement data-channel WebRTC statistics');
+    assert.equal(sample.videoSource,'Chromium Media (optional, experimental)','Native Media events must supplement data-channel WebRTC statistics');
     assert.equal(sample.codec,'VP8'); assert.ok(sample.decoder); assert.equal(sample.width,64); assert.equal(sample.height,64);
     for(let i=0;i<100;i++){sample=await invoke(stats,'get_stats');if(sample.fps>5 && sample.fpsSource==='WebCodecs decoder')break;await delay(100);}
     assert.ok(sample.fps>5 && sample.fps<100,'Real decoded frames must produce a plausible FPS rate: '+sample.fps);
     assert.equal(sample.fpsSource,'WebCodecs decoder');assert.equal(sample.packetsLost,null,'Data-channel traffic does not expose RTP packet loss');
+    assert.equal(sample.mediaDiagnosticsEnabled,true);
+    await invoke(main,'save_configuration',{input:{...input,mediaDiagnostics:false}});
+    assert.equal((await invoke(stats,'get_stats')).mediaDiagnosticsEnabled,false);
+    for(let i=0;i<30;i++) {
+      const rows=await evaluate(stats,`Array.from(document.querySelectorAll('#details > div'),row=>row.textContent)`);
+      if(!rows.some(row=>/^(Video codec|Decoder|Profile|Decoder backend|Hardware decode|Video source|Resolution):/.test(row))) {
+        assert.ok(rows.some(row=>row.startsWith('FPS source:')),'FPS statistics remain visible');
+        break;
+      }
+      assert.ok(i<29,'Disabled diagnostic rows must disappear from the open stats window');
+      await delay(100);
+    }
     if(process.env.PARSECWEBTURN_SCREENSHOTS) {await delay(1200);const {data}=await send('Page.captureScreenshot',{},stats);fs.writeFileSync(path.join(repository,'tauri-stats.png'),Buffer.from(data,'base64'));}
     assert.equal(errors.length,0,String(errors));
     // Reconnect replaces a native window internally; this must not exit the app.

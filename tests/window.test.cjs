@@ -18,7 +18,7 @@ test('Parsec cannot enter fullscreen automatically or lock recovery keys', async
 test('window recovery captures the shortcut before Parsec and ignores repeats', async () => {
   const handlers={},calls=[];
   const window={addEventListener(type,handler,capture){assert.equal(capture,true);handlers[type]=handler;},
-    __TAURI_INTERNALS__:{invoke:async(command,args)=>calls.push({command,...args})}};
+    __TAURI__:{core:{invoke:async(command,args)=>calls.push({command,...args})}}};
   vm.runInNewContext(script,{location:{origin:'https://web.parsec.app'},Element:{prototype:{}},navigator:{},window});
   const event={code:'KeyW',ctrlKey:true,shiftKey:true,preventDefault(){this.prevented=true;},stopImmediatePropagation(){this.stopped=true;}};
   handlers.keydown(event);handlers.keydown({...event,repeat:true});handlers.keyup(event);

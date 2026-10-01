@@ -4,12 +4,25 @@ const decodedVideos = new Map();
 if (window.VideoDecoder) {
   const NativeVideoDecoder = window.VideoDecoder;
   class MeasuredVideoDecoder extends NativeVideoDecoder {
-    constructor(init) {
+    constructor(...args) {
       const counter = { frames: 0, previous: null };
-      super({ ...init, output(frame) {
-        counter.frames++;
-        return Reflect.apply(init.output, this, [frame]);
-      } });
+      const init = args[0];
+      if (init != null && ['object', 'function'].includes(typeof init)) {
+        // Preserve native WebIDL member reads, inherited callbacks, getter order
+        // and errors. Capture the callback at construction, as the native API does.
+        args[0] = new Proxy(Object.create(null), {
+          get(_target, key) {
+            const value = Reflect.get(init, key, init);
+            if (key !== 'output' || typeof value !== 'function') return value;
+            return function(frame) {
+              'use strict';
+              counter.frames++;
+              return Reflect.apply(value, this, [frame]);
+            };
+          },
+        });
+      }
+      super(...args);
       decodedVideos.set(this, counter);
     }
     reset() {

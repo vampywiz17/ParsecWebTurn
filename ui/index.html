@@ -27,6 +27,8 @@
         <p class="hint">STUN-only setups can leave credentials empty. A TURN REST shared secret is not a client password.</p>
       </div>
     </section>
+    <label class="check"><input type="checkbox" id="media-diagnostics"> Detailed decoder diagnostics (experimental)</label>
+    <p class="hint">Optional WebView2 diagnostics for decoder and hardware details. Availability varies by runtime. Applies on your next connection.</p>
     <p id="error" class="error" role="alert" hidden></p>
     <p id="status" class="status" aria-live="polite"></p>
     <footer><p class="hint">Saved secrets protected by your Windows account.<br>Direct connections remain available; TURN helps when needed.</p><div class="actions"><button id="save" type="button" class="secondary">Save</button><button id="connect" type="submit">Save &amp; connect</button></div></footer>

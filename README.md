@@ -21,6 +21,14 @@ Web assets and the ICE override are embedded in the executable. There is no brow
 
 On subsequent launches, valid saved settings open Parsec automatically. Use `ParsecWebTurn.exe --settings` or `/settings` to start with the settings window instead. `--data-dir <directory>` selects a different portable configuration/profile directory.
 
+## Application updates
+
+On startup the application checks the latest stable GitHub release metadata in the background and notifies you when a newer version is available. The update window shows release notes and **Download ZIP from GitHub** opens the official release ZIP's direct HTTPS link in your default browser. **App → Check for updates** checks manually and shows network/rate-limit errors; background failures do not interrupt startup.
+
+The app does not download EXEs, create an update helper, replace itself or restart for updates. Download and extract the ZIP, close the app, and replace only `ParsecWebTurn.exe` manually. Keep `settings.json` and `WebView2Profile` to retain credentials and the Parsec sign-in. Your browser and your organization's download controls handle the download. An organization may still block unsigned software or GitHub downloads; this feature does not bypass those policies. Published `SHA256SUMS.txt` checksums establish file integrity, not publisher identity.
+
+Set `PARSECWEBTURN_NO_UPDATE_CHECK=1` to skip automatic checks; the menu check remains available. Pre-update-notification releases such as v0.5.0 need one manual EXE upgrade to gain version notifications.
+
 ## Upgrading from v0.4.0
 
 Keep your existing `settings.json` beside the new executable. The field names and Windows DPAPI / CurrentUser format remain compatible, so saved API tokens and TURN passwords continue to work under the same Windows account.
@@ -71,7 +79,9 @@ Open **Connection stats** from the native menu. The application samples `RTCPeer
 - Direct/relay route and transport of the most active connection.
 - Video FPS, codec, decoder, resolution and lost packets, when the web client exposes standard inbound-video statistics.
 
-The native WebView2 Media event API also supplies codec, decoder, hardware decoding, profile, backend and visible resolution, even when Parsec carries video through data channels. Decoder reconfiguration updates the displayed resolution. A document-start WebCodecs hook counts frames delivered by VideoDecoder when RTP video statistics are absent. This is decoded FPS, not display refresh rate; the original callback keeps ownership of every frame. No remote debugging port is opened for this collection.
+A document-start hook counts frames delivered through the public WebCodecs VideoDecoder API when RTP video statistics are absent. This is decoded FPS, not display refresh rate; the original callback keeps ownership of every frame. Native WebIDL callback validation, inherited/getter members and frozen inputs are preserved.
+
+**Detailed decoder diagnostics (experimental)** in Connection settings is an optional, disabled-by-default extension. It uses WebView2's documented DevTools protocol API and Chromium's experimental Media domain to supplement codec, decoder, hardware decoding, profile, backend and visible resolution. These are vendor diagnostics, not W3C WebRTC data, and availability/message formats can vary by runtime. Apply the setting on your next connection. Unavailable information remains unknown and Media failures do not block the standard statistics or connection. No remote debugging port is opened in the shipped application.
 
 Video packet loss is available only when inbound RTP statistics provide it. Parsec's data-channel video does not expose an equivalent counter: decoded/dropped frames, ICE checks and local send discards cannot establish end-to-end packet loss. Missing loss statistics remain unknown rather than zero.
 
@@ -79,7 +89,9 @@ Route describes the selected ICE candidates, whose local/remote types are displa
 
 Relay detection checks the selected candidate types **and the selected local TURN transport**. Chromium can rename a local relay candidate to peer-reflexive (`prflx`) while preserving `relayProtocol` and its TURN URL; this still confirms relay use. The selected server URL is matched to the configured TURN endpoints with default port/transport normalization. The panel shows route evidence, whether our configured TURN is in use, the matched server and the TURN transport separately from the ICE transport. A remote-only relay does not mean our configured TURN is used.
 
-If report selection is ambiguous, the data-channel ICE transport's `getSelectedCandidatePair()` supplies route information without guessing another pair's RTT. Peer-reflexive candidates without relay evidence remain **Unverified (peer-reflexive)**. Merely gathering a relay candidate or reaching a TURN server does not prove that the stream uses it. A TURN URL on a STUN-derived candidate is also insufficient. No connection policy or live session is changed to test routing.
+If report selection is ambiguous, the data-channel ICE transport's `getSelectedCandidatePair()` supplies route information without guessing another pair's RTT. When the report identifies a pair, both complete endpoints must match before transport data can enrich it. Peer-reflexive candidates can also be correlated against gathered local/remote candidates using exact address, port and protocol matches; conflicting ICE generations or ambiguous origins remain unverified. Positive TURN evidence always wins. A confirmed **Direct — no TURN** route can run through a VPN underneath WebRTC; this label describes TURN use, not the physical network path. Candidate addresses are used only inside the WebView and are not exported in statistics.
+
+Merely gathering a relay candidate or reaching a TURN server does not prove that the stream uses it. A TURN URL on a STUN-derived candidate is also insufficient. No connection policy or live session is changed to test routing.
 
 Parsec starts in a normal window. The application owns fullscreen: **F11** toggles it, **Ctrl+Shift+W** restores windowed mode, and the settings screen has a recovery button. Document-start capture handlers reserve these shortcuts even when the Parsec canvas has focus and the native menu is hidden. Automatic HTML fullscreen and locking Escape/F11/KeyW are blocked. The **App** and **View** native submenus remain separate from Parsec's controls; the menu is hidden during fullscreen.
 

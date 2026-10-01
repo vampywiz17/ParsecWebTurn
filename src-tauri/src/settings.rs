@@ -15,6 +15,7 @@ pub struct Settings {
     pub turn_key_id: String,
     pub encrypted_api_token: String,
     pub cache_credentials: bool,
+    pub media_diagnostics: bool,
     pub ttl: u32,
 }
 
@@ -28,6 +29,7 @@ impl Default for Settings {
             turn_key_id: String::new(),
             encrypted_api_token: String::new(),
             cache_credentials: false,
+            media_diagnostics: false,
             ttl: DEFAULT_TTL,
         }
     }
@@ -99,6 +101,7 @@ pub struct SettingsView {
     pub custom_username: String,
     pub turn_key_id: String,
     pub cache_credentials: bool,
+    pub media_diagnostics: bool,
     pub ttl: u32,
     pub has_api_token: bool,
     pub has_custom_password: bool,
@@ -115,6 +118,7 @@ impl SettingsView {
             custom_username: settings.custom_username,
             turn_key_id: settings.turn_key_id,
             cache_credentials: settings.cache_credentials,
+            media_diagnostics: settings.media_diagnostics,
             ttl: settings.ttl,
             has_api_token: !settings.encrypted_api_token.is_empty(),
             has_custom_password: !settings.encrypted_custom_password.is_empty(),
@@ -133,6 +137,8 @@ pub struct SaveRequest {
     pub custom_username: String,
     pub turn_key_id: String,
     pub cache_credentials: bool,
+    #[serde(default)]
+    pub media_diagnostics: bool,
     pub ttl: u32,
     // Blank means retain the encrypted secret; forgetting is explicit.
     pub api_token: String,
@@ -159,6 +165,7 @@ pub fn save(root: &Path, input: SaveRequest) -> Result<Settings, String> {
     settings.custom_username = input.custom_username.trim().to_owned();
     settings.turn_key_id = input.turn_key_id.trim().to_owned();
     settings.cache_credentials = input.cache_credentials;
+    settings.media_diagnostics = input.media_diagnostics;
     settings.ttl = input.ttl;
     if input.forget_api_token {
         settings.encrypted_api_token.clear();
@@ -200,6 +207,10 @@ mod tests {
         let settings = Settings::load(root.path()).unwrap();
         assert_eq!(settings.provider, "cloudflare");
         assert_eq!(settings.ttl, DEFAULT_TTL);
+        assert!(
+            !settings.media_diagnostics,
+            "Legacy settings must not opt into vendor diagnostics"
+        );
         assert_eq!(settings.secret().unwrap(), "legacy-token");
         settings.validate(&settings.secret().unwrap()).unwrap();
     }
@@ -218,6 +229,7 @@ mod tests {
             custom_urls: vec![" turns:example.com:443?transport=tcp ".into()],
             custom_username: "user".into(),
             turn_key_id: "key".into(),
+            media_diagnostics: false,
             ttl: DEFAULT_TTL,
             cache_credentials: false,
             api_token: String::new(),

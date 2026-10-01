@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0] - 2026-10-01
+
+### Added
+
+- Background GitHub stable-release notifications and App → Check for updates.
+- Native update window with release notes and a direct link to the official Windows ZIP, opened in the default browser only after a click.
+- Bounded metadata-only HTTPS checks, stable numeric version comparison and exact repository ZIP link validation.
+
+### Changed
+
+- Hide detailed video statistics, including codec and resolution, when optional Media diagnostics are disabled; saved preference changes apply to their visibility immediately.
+- Audit the runtime against public web specifications and documented platform APIs; record ongoing requirements in AGENTS.md and findings in docs/STANDARDS.md.
+- Replace private Tauri frontend IPC access with the documented global core API; keep native capability restrictions.
+- Make experimental Chromium Media diagnostics explicit opt-in, disabled for both new and legacy settings. Standard WebRTC/WebCodecs telemetry remains the baseline.
+- Remove production Chromium launch switches and legacy vendor-prefixed WebRTC/statistics fallbacks.
+- Preserve native WebCodecs callback dictionary conversion, inherited/frozen callbacks and callback capture semantics.
+- Update notifications do not download or run executables, create a helper, replace the app or restart it. Updates are installed manually and follow the browser's organization policies.
+- Correlate selected ICE endpoints with the ICE transport and gathered local/remote candidates to identify additional direct paths, including VPN connections. Positive TURN evidence retains priority; incomplete or ambiguous evidence stays unverified.
+- Label confirmed direct routes as "Direct — no TURN"; VPN routing underneath WebRTC does not imply TURN use. Candidate addresses remain inside the WebView and are not included in telemetry.
+
 ## [0.5.0] - 2026-09-30
 
 ### Changed
