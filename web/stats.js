@@ -31,7 +31,46 @@ function routeDetails(local, remote, servers = []) {
   };
 }
 
-function summarizeStats(report, previous, servers = [], selectedPair = null) {
+// Match only complete endpoints on the same ICE generation. Never infer routing
+// from a VPN interface name, candidate priority, TURN DNS or unused candidates.
+function sameEndpoint(a, b) {
+  return typeof a?.address === 'string' && a.address.length > 0 &&
+    typeof b?.address === 'string' && a.address.toLowerCase() === b.address.toLowerCase() &&
+    Number.isInteger(a.port) && a.port > 0 && a.port === b.port &&
+    ['udp', 'tcp'].includes(a.protocol) && a.protocol === b.protocol &&
+    (!a.usernameFragment || !b.usernameFragment || a.usernameFragment === b.usernameFragment);
+}
+
+function iceCandidate(candidate) {
+  return candidate && { ...candidate, candidateType: candidate.type,
+    address: candidate.address, port: candidate.port, protocol: candidate.protocol,
+    usernameFragment: candidate.usernameFragment, relayProtocol: candidate.relayProtocol,
+    url: candidate.url };
+}
+
+function resolveCandidate(stats, selected, gathered) {
+  const current = stats || selected;
+  if (!current) return null;
+  const matched = selected && (!stats || sameEndpoint(stats, selected)) ? selected : null;
+  // Positive relay evidence always wins, including Chromium's prflx relayProtocol.
+  const isRelay = candidate => candidate?.candidateType === 'relay' ||
+    ['udp', 'tcp', 'tls'].includes(candidate?.relayProtocol);
+  if (isRelay(current)) return current;
+  if (isRelay(matched)) return { ...current, ...matched };
+  if (['host', 'srflx'].includes(current.candidateType)) return current;
+  if (matched && ['host', 'srflx'].includes(matched.candidateType)) {
+    return { ...current, ...matched, correlated: true };
+  }
+  const matches = gathered.filter(candidate => sameEndpoint(current, candidate));
+  const relay = matches.find(isRelay);
+  if (relay) return { ...current, ...relay, correlated: true };
+  if (matches.length && matches.every(candidate => ['host', 'srflx'].includes(candidate.candidateType))) {
+    return { ...current, ...matches[0], correlated: true };
+  }
+  return current;
+}
+
+function summarizeStats(report, previous, servers = [], selectedPair = null, candidates = {}) {
   const entries = [...report.values()];
   const transport = entries.find(entry => entry.type === 'transport' && entry.selectedCandidatePairId);
   const nominated = entries.filter(entry => entry.type === 'candidate-pair' && entry.nominated && entry.state === 'succeeded');
@@ -39,14 +78,22 @@ function summarizeStats(report, previous, servers = [], selectedPair = null) {
     entries.find(entry => entry.type === 'candidate-pair' && entry.selected === true && entry.state === 'succeeded') ||
     (nominated.length === 1 ? nominated[0] : null);
   const counter = pair || entries.find(entry => entry.type === 'transport' && Number.isFinite(entry.bytesReceived));
-  // Use the ICE transport's selected pair only if getStats cannot identify one.
-  const local = pair ? report.get(pair.localCandidateId) : selectedPair?.local && {
-    candidateType: selectedPair.local.type, protocol: selectedPair.local.protocol,
-    relayProtocol: selectedPair.local.relayProtocol, url: selectedPair.local.url,
-  };
-  const remote = pair ? report.get(pair.remoteCandidateId) : selectedPair?.remote && {
-    candidateType: selectedPair.remote.type, protocol: selectedPair.remote.protocol,
-  };
+  const observedLocal = pair && report.get(pair.localCandidateId);
+  const observedRemote = pair && report.get(pair.remoteCandidateId);
+  const selectedLocal = iceCandidate(selectedPair?.local);
+  const selectedRemote = iceCandidate(selectedPair?.remote);
+  // Both endpoints must match before enriching a report pair: selection can
+  // change while asynchronous getStats is running.
+  const samePair = !pair || (sameEndpoint(observedLocal, selectedLocal) &&
+    sameEndpoint(observedRemote, selectedRemote));
+  const local = resolveCandidate(observedLocal, samePair ? selectedLocal : null,
+    (candidates.local || []).map(iceCandidate));
+  const remote = resolveCandidate(observedRemote, samePair ? selectedRemote : null,
+    (candidates.remote || []).map(iceCandidate));
+  const route = routeDetails(local, remote, servers);
+  if (route.route === 'direct' && (local?.correlated || remote?.correlated)) {
+    route.routeEvidence = 'Selected endpoints matched non-relay ICE candidates';
+  }
   const video = entries.filter(entry => entry.type === 'inbound-rtp' && (entry.kind || entry.mediaType) === 'video')
     .sort((a, b) => (b.bytesReceived || 0) - (a.bytesReceived || 0))[0];
   const codec = video && report.get(video.codecId);
@@ -71,9 +118,9 @@ function summarizeStats(report, previous, servers = [], selectedPair = null) {
   return {
     counters,
     sample: {
-      localCandidateType: local?.candidateType || null,
-      remoteCandidateType: remote?.candidateType || null,
-      ...routeDetails(local, remote, servers),
+      localCandidateType: observedLocal?.candidateType || (samePair && selectedLocal?.candidateType) || null,
+      remoteCandidateType: observedRemote?.candidateType || (samePair && selectedRemote?.candidateType) || null,
+      ...route,
       protocol: ['udp', 'tcp', 'tls'].includes(protocol) ? protocol : null,
       rttMs: pair && finite(pair.currentRoundTripTime) !== null ? pair.currentRoundTripTime * 1000 : null,
       inboundMbps: counters ? rate('received') : null,

@@ -3,7 +3,7 @@ fn main() {
         tauri_build::AppManifest::new().commands(&[
             "get_update",
             "check_update",
-            "install_update",
+            "open_update_download",
             "dismiss_update",
             "show_configuration",
             "get_configuration",

@@ -9,7 +9,7 @@ async function update() {
     $('state').textContent = stats.stale ? 'Updates paused · last sample is stale' : `${stats.state} · ${stats.peerConnections} WebRTC connection(s)`;
     $('rtt').textContent = metric(stats.rttMs, 'ms'); $('fps').textContent = metric(stats.fps, 'fps', 0);
     $('inbound').textContent = metric(stats.inboundMbps, 'Mbps', 2); $('outbound').textContent = metric(stats.outboundMbps, 'Mbps', 2);
-    const route = stats.route ?? (stats.localCandidateType === 'prflx' || stats.remoteCandidateType === 'prflx'
+    const route = (stats.route === 'direct' ? 'Direct — no TURN' : stats.route) ?? (stats.localCandidateType === 'prflx' || stats.remoteCandidateType === 'prflx'
       ? 'Unverified (peer-reflexive)' : 'Unknown');
     const rows = [ ['ICE route', route], ['Route evidence', stats.routeEvidence],
       ['Configured TURN in use', stats.configuredTurnUsed == null ? null : (stats.configuredTurnUsed ? 'Yes' : 'No')],

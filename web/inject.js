@@ -51,8 +51,15 @@
         if (peer.connectionState === 'closed') { peers.delete(peer); continue; }
         try {
           let selectedPair = null;
-          try { selectedPair = peer.sctp?.transport?.iceTransport?.getSelectedCandidatePair?.(); } catch {}
-          const normalized = summarizeStats(await peer.getStats(), previous, ICE_SERVERS, selectedPair);
+          let candidates = {};
+          const report = await peer.getStats();
+          try {
+            const transport = peer.sctp?.transport?.iceTransport;
+            selectedPair = transport?.getSelectedCandidatePair?.();
+            candidates = { local: transport?.getLocalCandidates?.() || [],
+              remote: transport?.getRemoteCandidates?.() || [] };
+          } catch {}
+          const normalized = summarizeStats(report, previous, ICE_SERVERS, selectedPair, candidates);
           peers.set(peer, normalized.counters);
           const state = peer.connectionState || (peer.iceConnectionState === 'completed' ? 'connected' : peer.iceConnectionState) || 'new';
           results.push({ state, sample: normalized.sample });

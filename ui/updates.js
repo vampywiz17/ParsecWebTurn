@@ -10,7 +10,8 @@ async function refresh() {
     $('version').textContent = `Installed: v${update.currentVersion}${update.version ? ` · Available: ${update.version}` : ''}`;
     $('status').textContent = update.message;
     $('check').disabled = update.busy;
-    $('install').hidden = update.status !== 'ready';
+    $('download').hidden = update.status !== 'available';
+    $('download').disabled = update.busy;
     $('notes').textContent = update.notes;
     $('notes-title').hidden = !update.notes;
   } catch (error) { $('error').hidden = false; $('error').textContent = String(error); }
@@ -22,10 +23,11 @@ $('check').addEventListener('click', async () => {
   catch (error) { $('error').hidden = false; $('error').textContent = String(error); }
   await refresh();
 });
-$('install').addEventListener('click', async () => {
-  $('install').disabled = true;
-  try { await invoke('install_update'); }
-  catch (error) { $('error').hidden = false; $('error').textContent = String(error); $('install').disabled = false; }
+$('download').addEventListener('click', async () => {
+  $('download').disabled = true;
+  try { await invoke('open_update_download'); }
+  catch (error) { $('error').hidden = false; $('error').textContent = String(error); }
+  finally { $('download').disabled = false; }
 });
 $('later').addEventListener('click', () => invoke('dismiss_update'));
 setInterval(refresh, 1000);

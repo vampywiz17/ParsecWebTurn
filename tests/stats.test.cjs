@@ -133,3 +133,61 @@ test('remote-only relay does not claim our configured TURN server is used', () =
   assert.equal(sample.route,'relay');assert.equal(sample.configuredTurnUsed,false);
   assert.equal(sample.routeEvidence,'Selected remote relay candidate');
 });
+
+function endpoints(data) {
+  Object.assign(data.get('local'), {candidateType:'prflx',address:'10.8.0.2',port:5100,protocol:'udp',usernameFragment:'generation'});
+  Object.assign(data.get('remote'), {candidateType:'prflx',address:'10.8.0.3',port:5200,protocol:'udp',usernameFragment:'remote-generation'});
+  return {local:{...data.get('local'),type:'host'},remote:{...data.get('remote'),type:'host'}};
+}
+
+test('matching selected transport endpoints confirm non-TURN VPN paths without exporting addresses', () => {
+  const data=report();const selected=endpoints(data);
+  const sample=context.summarizeStats(data,null,[],selected).sample;
+  assert.equal(sample.route,'direct');assert.equal(sample.configuredTurnUsed,false);
+  assert.equal(sample.routeEvidence,'Selected endpoints matched non-relay ICE candidates');
+  assert.equal(sample.localCandidateType,'prflx','Preserve the raw diagnostic type');
+  assert.equal(sample.remoteCandidateType,'prflx');
+  assert.equal(sample.rttMs,24);
+  assert.ok(!JSON.stringify(sample).includes('10.8.'));
+  assert.ok(!JSON.stringify(sample).includes('generation'));
+});
+
+test('exact gathered endpoint matches can resolve peer-reflexive routes', () => {
+  const data=report();const selected=endpoints(data);
+  const candidates={local:[selected.local],remote:[selected.remote]};
+  assert.equal(context.summarizeStats(data,null,[],null,candidates).sample.route,'direct');
+  candidates.local.push({type:'relay',address:'203.0.113.5',port:6000,protocol:'udp'});
+  assert.equal(context.summarizeStats(data,null,[],null,candidates).sample.route,'direct','Unused TURN does not change the selected route');
+  candidates.remote=[];
+  assert.equal(context.summarizeStats(data,null,[],null,candidates).sample.route,null,'A local match alone does not prove both ends');
+});
+
+test('mismatched pair snapshots and incomplete endpoints never prove direct', () => {
+  for(const mutate of [pair=>pair.remote.port++,pair=>pair.local.protocol='tcp',
+    pair=>pair.local.usernameFragment='old-generation',pair=>delete pair.remote.address]) {
+    const data=report();const selected=endpoints(data);mutate(selected);
+    assert.equal(context.summarizeStats(data,null,[],selected).sample.route,null);
+  }
+  const data=report();const selected=endpoints(data);
+  delete data.get('remote').address;
+  assert.equal(context.summarizeStats(data,null,[],selected).sample.route,null);
+});
+
+test('positive TURN evidence wins over non-relay endpoint correlation', () => {
+  const data=report();const selected=endpoints(data);
+  Object.assign(data.get('local'),{relayProtocol:'tls',url:'turns:relay.example'});
+  const sample=context.summarizeStats(data,null,[{urls:['turns:relay.example']}],selected).sample;
+  assert.equal(sample.route,'relay');assert.equal(sample.configuredTurnUsed,true);
+  assert.equal(sample.routeEvidence,'Selected local TURN transport');
+  delete data.get('local').relayProtocol;delete data.get('local').url;
+  const candidates={local:[selected.local,{...selected.local,type:'relay',relayProtocol:'tls',url:'turns:relay.example'}],remote:[selected.remote]};
+  assert.equal(context.summarizeStats(data,null,[],null,candidates).sample.route,'relay');
+});
+
+test('an exact gathered match with unknown origin stays unverified', () => {
+  const data=report();const selected=endpoints(data);
+  const candidates={local:[selected.local,{...selected.local,type:'prflx'}],remote:[selected.remote]};
+  assert.equal(context.summarizeStats(data,null,[],null,candidates).sample.route,null);
+  candidates.local=[{...selected.local,usernameFragment:'previous-generation'}];
+  assert.equal(context.summarizeStats(data,null,[],null,candidates).sample.route,null);
+});

@@ -23,11 +23,11 @@ On subsequent launches, valid saved settings open Parsec automatically. Use `Par
 
 ## Application updates
 
-On startup the application checks the latest stable GitHub release in the background. A newer version is downloaded automatically and verified against GitHub's SHA-256 asset digest and the release's `SHA256SUMS.txt`. The update window shows release notes; choose **Restart and install** when ready. This disconnects an active Parsec session. **Later** leaves the current session running. **App → Check for updates** checks manually and also shows network/rate-limit errors; background failures do not interrupt startup.
+On startup the application checks the latest stable GitHub release metadata in the background and notifies you when a newer version is available. The update window shows release notes and **Download ZIP from GitHub** opens the official release ZIP's direct HTTPS link in your default browser. **App → Check for updates** checks manually and shows network/rate-limit errors; background failures do not interrupt startup.
 
-The portable updater replaces only the executable, retaining its current filename, configuration directory and browser profile. It requires a writable application directory and no elevated rights. The previous EXE is kept as `previous.exe` inside a `.parsec-update-*` directory beside the app for recovery; that directory may be deleted once the update is working and the helper has exited. These checks establish integrity through GitHub HTTPS and release metadata, not a separate publisher signature.
+The app does not download EXEs, create an update helper, replace itself or restart for updates. Download and extract the ZIP, close the app, and replace only `ParsecWebTurn.exe` manually. Keep `settings.json` and `WebView2Profile` to retain credentials and the Parsec sign-in. Your browser and your organization's download controls handle the download. An organization may still block unsigned software or GitHub downloads; this feature does not bypass those policies. Published `SHA256SUMS.txt` checksums establish file integrity, not publisher identity.
 
-Set `PARSECWEBTURN_NO_UPDATE_CHECK=1` to skip automatic checks; the menu check remains available. Pre-updater releases such as v0.5.0 need one manual EXE upgrade before in-app updates become available.
+Set `PARSECWEBTURN_NO_UPDATE_CHECK=1` to skip automatic checks; the menu check remains available. Pre-update-notification releases such as v0.5.0 need one manual EXE upgrade to gain version notifications.
 
 ## Upgrading from v0.4.0
 

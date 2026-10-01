@@ -319,9 +319,9 @@ async fn check_update(app: tauri::AppHandle, window: WebviewWindow) -> Result<()
 }
 
 #[tauri::command]
-fn install_update(app: tauri::AppHandle, window: WebviewWindow) -> Result<(), String> {
+fn open_update_download(app: tauri::AppHandle, window: WebviewWindow) -> Result<(), String> {
     trusted_local(&window, "updates")?;
-    updater::install(&app)
+    updater::open_download(&app)
 }
 
 #[tauri::command]
@@ -370,7 +370,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .invoke_handler(tauri::generate_handler![
             get_update,
             check_update,
-            install_update,
+            open_update_download,
             dismiss_update,
             show_configuration,
             get_configuration,
@@ -487,11 +487,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn main() {
-    let result = if std::env::args().nth(1).as_deref() == Some("--apply-update") {
-        updater::apply().map_err(|e| -> Box<dyn std::error::Error> { e.into() })
-    } else {
-        run()
-    };
+    let result = run();
     if let Err(error) = result {
         eprintln!("ParsecWebTurn startup failed: {error}");
         #[link(name = "user32")]

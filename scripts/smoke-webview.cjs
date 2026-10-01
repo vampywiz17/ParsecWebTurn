@@ -185,7 +185,7 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     assert.equal(rejectedWrite,true,'Remote Parsec page must not modify settings');
     const rejectedShow=await evaluate(parsec,`window.__TAURI_INTERNALS__.invoke('show_configuration').then(()=>false,()=>true)`);
     assert.equal(rejectedShow,true,'Remote Parsec page must not reveal settings');
-    for (const command of ['get_update','check_update','install_update','dismiss_update']) {
+    for (const command of ['get_update','check_update','open_update_download','dismiss_update','install_update']) {
       const denied=await evaluate(parsec,`window.__TAURI_INTERNALS__.invoke(${JSON.stringify(command)}).then(()=>false,()=>true)`);
       assert.equal(denied,true,`Remote page must not invoke ${command}`);
     }
@@ -290,10 +290,7 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',
       path.join(repository,'scripts/test-startup.ps1'),'-ExecutablePath',path.resolve(process.argv[2] || path.join(repository,'ParsecWebTurn.exe')),
       '-SavedProfile',root],{windowsHide:true,stdio:['ignore','pipe','pipe']});
-    execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',
-      path.join(repository,'scripts/test-update.ps1'),'-ExecutablePath',path.resolve(process.argv[2] || path.join(repository,'ParsecWebTurn.exe')),
-      '-SavedProfile',root],{windowsHide:true,stdio:['ignore','pipe','pipe']});
-    console.log('PASS: native WebView2 settings, DPAPI save, WebIDL compatibility, WebRTC traffic/RTT, decoded FPS, window recovery, remote IPC isolation, reconnect, X-button app exit, startup visibility and portable update replacement/restart');
+    console.log('PASS: native WebView2 settings, DPAPI save, WebIDL compatibility, WebRTC traffic/RTT, decoded FPS, window recovery, remote IPC isolation, reconnect, X-button app exit and startup visibility');
   } finally {
     socket?.close();
     if(child.exitCode===null) child.kill();

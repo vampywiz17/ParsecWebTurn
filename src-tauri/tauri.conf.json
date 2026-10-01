@@ -12,7 +12,7 @@
         {
           "identifier": "updates",
           "windows": ["updates"],
-          "permissions": ["allow-get-update", "allow-check-update", "allow-install-update", "allow-dismiss-update"]
+          "permissions": ["allow-get-update", "allow-check-update", "allow-open-update-download", "allow-dismiss-update"]
         },
         {
           "identifier": "settings",

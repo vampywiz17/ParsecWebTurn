@@ -6,10 +6,15 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Background GitHub stable-release checks and automatic EXE downloads, plus App → Check for updates.
-- Native update window with release notes and explicit Restart and install approval; active sessions continue until approval.
-- Bounded HTTPS downloads restricted to this repository's release assets, checked against GitHub SHA-256 metadata and SHA256SUMS.txt before use.
-- Portable Rust update helper waits for exit, replaces the EXE in its original directory, preserves data-dir/settings launch options and keeps a recovery copy. Replacement/launch failures restore the previous executable when possible.
+- Background GitHub stable-release notifications and App → Check for updates.
+- Native update window with release notes and a direct link to the official Windows ZIP, opened in the default browser only after a click.
+- Bounded metadata-only HTTPS checks, stable numeric version comparison and exact repository ZIP link validation.
+
+### Changed
+
+- Update notifications do not download or run executables, create a helper, replace the app or restart it. Updates are installed manually and follow the browser's organization policies.
+- Correlate selected ICE endpoints with the ICE transport and gathered local/remote candidates to identify additional direct paths, including VPN connections. Positive TURN evidence retains priority; incomplete or ambiguous evidence stays unverified.
+- Label confirmed direct routes as "Direct — no TURN"; VPN routing underneath WebRTC does not imply TURN use. Candidate addresses remain inside the WebView and are not included in telemetry.
 
 ## [0.5.0] - 2026-09-30
 
