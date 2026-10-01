@@ -277,6 +277,18 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     for(let i=0;i<100;i++){sample=await invoke(stats,'get_stats');if(sample.fps>5 && sample.fpsSource==='WebCodecs decoder')break;await delay(100);}
     assert.ok(sample.fps>5 && sample.fps<100,'Real decoded frames must produce a plausible FPS rate: '+sample.fps);
     assert.equal(sample.fpsSource,'WebCodecs decoder');assert.equal(sample.packetsLost,null,'Data-channel traffic does not expose RTP packet loss');
+    assert.equal(sample.mediaDiagnosticsEnabled,true);
+    await invoke(main,'save_configuration',{input:{...input,mediaDiagnostics:false}});
+    assert.equal((await invoke(stats,'get_stats')).mediaDiagnosticsEnabled,false);
+    for(let i=0;i<30;i++) {
+      const rows=await evaluate(stats,`Array.from(document.querySelectorAll('#details > div'),row=>row.textContent)`);
+      if(!rows.some(row=>/^(Decoder|Profile|Decoder backend|Hardware decode|Video source):/.test(row))) {
+        assert.ok(rows.some(row=>row.startsWith('Video codec:')),'Standard video statistics remain visible');
+        break;
+      }
+      assert.ok(i<29,'Disabled diagnostic rows must disappear from the open stats window');
+      await delay(100);
+    }
     if(process.env.PARSECWEBTURN_SCREENSHOTS) {await delay(1200);const {data}=await send('Page.captureScreenshot',{},stats);fs.writeFileSync(path.join(repository,'tauri-stats.png'),Buffer.from(data,'base64'));}
     assert.equal(errors.length,0,String(errors));
     // Reconnect replaces a native window internally; this must not exit the app.

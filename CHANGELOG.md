@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Hide detailed decoder statistics when optional Media diagnostics are disabled; saved preference changes apply to their visibility immediately.
 - Audit the runtime against public web specifications and documented platform APIs; record ongoing requirements in AGENTS.md and findings in docs/STANDARDS.md.
 - Replace private Tauri frontend IPC access with the documented global core API; keep native capability restrictions.
 - Make experimental Chromium Media diagnostics explicit opt-in, disabled for both new and legacy settings. Standard WebRTC/WebCodecs telemetry remains the baseline.

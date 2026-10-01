@@ -204,8 +204,13 @@ fn get_stats(window: WebviewWindow, state: State<'_, AppState>) -> Result<Connec
         .lock()
         .map_err(|_| "Statistics lock failed")?
         .snapshot();
-    if let Ok(media) = state.media.lock() {
-        media.supplement(&mut sample);
+    sample.media_diagnostics_enabled = Settings::load(&state.root)
+        .map(|settings| settings.media_diagnostics)
+        .unwrap_or(false);
+    if sample.media_diagnostics_enabled {
+        if let Ok(media) = state.media.lock() {
+            media.supplement(&mut sample);
+        }
     }
     Ok(sample)
 }

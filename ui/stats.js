@@ -15,9 +15,11 @@ async function update() {
       ['Configured TURN in use', stats.configuredTurnUsed == null ? 'Unknown — insufficient evidence' : (stats.configuredTurnUsed ? 'Yes' : 'No')],
       ...(stats.turnServer ? [['TURN server', stats.turnServer]] : []),
       ...(stats.turnProtocol ? [['TURN transport', stats.turnProtocol]] : []),
-      ['Local candidate', stats.localCandidateType], ['Remote candidate', stats.remoteCandidateType], ['ICE transport', stats.protocol], ['Video codec', stats.codec], ['Decoder', stats.decoder],
-      ['Profile', stats.videoProfile], ['Decoder backend', stats.decoderBackend], ['Hardware decode', stats.hardwareDecode == null ? null : (stats.hardwareDecode ? 'Yes' : 'No')],
-      ['Video source', stats.videoSource], ['FPS source', stats.fpsSource], ['Resolution', stats.width && stats.height ? `${stats.width} × ${stats.height}` : null],
+      ['Local candidate', stats.localCandidateType], ['Remote candidate', stats.remoteCandidateType], ['ICE transport', stats.protocol], ['Video codec', stats.codec],
+      ...(stats.mediaDiagnosticsEnabled ? [ ['Decoder', stats.decoder], ['Profile', stats.videoProfile],
+        ['Decoder backend', stats.decoderBackend], ['Hardware decode', stats.hardwareDecode == null ? null : (stats.hardwareDecode ? 'Yes' : 'No')],
+        ['Video source', stats.videoSource] ] : []),
+      ['FPS source', stats.fpsSource], ['Resolution', stats.width && stats.height ? `${stats.width} × ${stats.height}` : null],
       ['Video packets lost', stats.packetsLost ?? (stats.fpsSource === 'WebCodecs decoder' ? 'Not exposed for data-channel video' : null)] ];
     $('details').replaceChildren(...rows.map(([label, value]) => { const row = document.createElement('div'); row.textContent = `${label}: ${value ?? 'Not reported'}`; return row; }));
   } catch { $('state').textContent = 'Statistics unavailable'; }

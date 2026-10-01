@@ -23,6 +23,8 @@ pub struct ConnectionStats {
     pub video_profile: Option<String>,
     pub decoder_backend: Option<String>,
     pub hardware_decode: Option<bool>,
+    #[serde(default)]
+    pub media_diagnostics_enabled: bool,
     pub video_source: Option<String>,
     pub width: Option<u32>,
     pub height: Option<u32>,
