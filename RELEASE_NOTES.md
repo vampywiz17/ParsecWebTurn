@@ -7,6 +7,7 @@ ParsecWebTurn v0.6.0 adds update notifications and improves connection-route dia
 - Confirmed direct routes are labeled **Direct — no TURN**. This describes WebRTC routing; a VPN may carry the connection underneath it.
 - Update-window commands remain restricted to the trusted local window.
 - Use the documented Tauri core IPC API and standard WebRTC/WebCodecs telemetry by default. Detailed Chromium Media decoder diagnostics are experimental, optional and disabled by default; enable them in Connection settings before reconnecting when needed.
+- Hide codec, resolution, decoder, profile, backend, hardware decoding and video-source rows while detailed diagnostics are disabled. Saved visibility changes also apply to an already open statistics window; FPS and network metrics remain visible.
 - Remove production browser switches and legacy vendor-prefixed WebRTC/statistics fallbacks. The standards audit and ongoing development requirements are documented in the repository.
 
 Download **ParsecWebTurn-v0.6.0-win64.zip**, extract it to a writable directory, and run `ParsecWebTurn.exe`. **Microsoft Edge WebView2 Runtime must already be installed.** No VPN or administrator rights are required when the runtime is present and the app directory is writable.
