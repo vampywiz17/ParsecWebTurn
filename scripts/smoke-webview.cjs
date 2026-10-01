@@ -171,11 +171,14 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     if(process.env.GITHUB_ACTIONS==='true') {
       // Exercise real WebView2 permission handling without a CDP permission grant.
       // Only the disposable CI desktop's clipboard is touched, never a user's.
-      await send('Emulation.setFocusEmulationEnabled',{enabled:true},parsec);
+      await invoke(main,'set_parsec_window_mode',{fullscreen:false});
+      await send('Page.bringToFront',{},parsec);
       // Seed from Windows, as a local user's copy operation would. A browser
       // write/read round-trip can use a different clipboard on a headless runner.
       execFileSync('powershell.exe',['-NoProfile','-Command',
         "Set-Clipboard -Value 'ParsecWebTurn isolated clipboard test'"]);
+      const windowsClipboard=execFileSync('powershell.exe',['-NoProfile','-Command','Get-Clipboard -Raw'],{encoding:'utf8'}).trim();
+      assert.equal(windowsClipboard,'ParsecWebTurn isolated clipboard test','Windows clipboard fixture must contain text');
       const clipboard=await evaluate(parsec,`(async()=>{
         const permission=await navigator.permissions.query({name:'clipboard-read'});
         const text=await navigator.clipboard.readText();
@@ -184,7 +187,6 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
       })()`);
       // A non-persisted host grant need not change Permissions.query's state.
       assert.equal(clipboard.matches,true,'Parsec must read the Windows clipboard: '+JSON.stringify(clipboard));
-      await send('Emulation.setFocusEmulationEnabled',{enabled:false},parsec);
     }
     if(!smoke.connected) {
       const diagnostics = await evaluate(parsec,`(async()=>({error:window.smoke.error,first:first.connectionState,second:second.connectionState,firstIce:first.iceConnectionState,secondIce:second.iceConnectionState,channel:channel.readyState,reports:await Promise.all([first,second].map(async peer=>[...await peer.getStats()].map(([,value])=>({type:value.type,state:value.state,candidateType:value.candidateType,protocol:value.protocol,mdns:value.address?.endsWith('.local'),requestsSent:value.requestsSent,responsesReceived:value.responsesReceived}))))}))()`);
