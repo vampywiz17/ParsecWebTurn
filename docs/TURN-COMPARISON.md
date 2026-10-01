@@ -10,6 +10,13 @@ with the Cloudflare configuration. ExpressTURN has a separate STUN URL and a
 `turn:` URL with neither an explicit transport nor a `turns:` URL. The exact
 ExpressTURN hostnames and ports have not been supplied.
 
+The user subsequently tested Cloudflare STUN with ExpressTURN TURN on the same
+VPN and again obtained a direct connection. This weakens the hypothesis that
+the Cloudflare STUN endpoint alone causes the difference. The remaining
+comparison is the TURN provider/URL set, including its offered transports and
+the resulting candidate/check timing. It does not yet isolate Cloudflare UDP
+TURN from its additional TCP/TLS URLs.
+
 The app's custom provider passes the configured URLs through the common ICE
 validator. Its Cloudflare provider passes the credential API's URLs through the
 same validator, excluding browser-blocked port 53. Neither path changes
