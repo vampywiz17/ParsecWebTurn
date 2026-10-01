@@ -22,6 +22,7 @@
   const peers = new Map();
   __STATS_HELPER__
   __VIDEO_HELPER__
+  __AUDIO_HELPER__
 
   class PatchedRTCPeerConnection extends OriginalRTCPeerConnection {
     constructor(config = {}, constraints) {
@@ -70,6 +71,10 @@
         sample.fps = decodedFps;
         sample.fpsSource = 'WebCodecs decoder';
       } else if (sample.fps != null) sample.fpsSource = 'WebRTC inbound video';
+      if (sample.state === 'connected' && !sample.audioSource) {
+        const audio = sampleDecodedAudio(performance.now());
+        if (audio) Object.assign(sample, audio);
+      }
       await window.__TAURI__.core.invoke('report_stats', { sample });
     } catch { /* Diagnostics must never interrupt a Parsec session. */ }
     finally { sampling = false; }

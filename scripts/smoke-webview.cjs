@@ -201,6 +201,12 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     assert.equal(sample.codec,null,'Data-channel-only video metadata must stay unknown');
     assert.equal(sample.fps,null);
     assert.equal(sample.stale,false);
+    assert.equal(sample.dtlsState,'connected','Real data-channel transport must report connected DTLS');
+    assert.match(sample.tlsVersion,/^[0-9A-F]{4}$/);
+    assert.ok(sample.dtlsCipher?.startsWith('TLS_'),'Negotiated DTLS cipher must be reported');
+    assert.equal(sample.srtpCipher,null,'The data-channel fixture must not invent an SRTP profile');
+    for(let i=0;i<30 && sample.appCpuPercent==null;i++) { await delay(100);sample=await invoke(stats,'get_stats'); }
+    assert.ok(Number.isFinite(sample.appCpuPercent) && sample.appCpuPercent>=0 && sample.appCpuPercent<=100,'Native app-group CPU must be available');
     const compatibility = await evaluate(parsec,`(() => {
       const Native = Object.getPrototypeOf(window.RTCPeerConnection);
       const inspect = (Constructor, config, setter=false) => {
@@ -277,6 +283,25 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     for(let i=0;i<100;i++){sample=await invoke(stats,'get_stats');if(sample.fps>5 && sample.fpsSource==='WebCodecs decoder')break;await delay(100);}
     assert.ok(sample.fps>5 && sample.fps<100,'Real decoded frames must produce a plausible FPS rate: '+sample.fps);
     assert.equal(sample.fpsSource,'WebCodecs decoder');assert.equal(sample.packetsLost,null,'Data-channel traffic does not expose RTP packet loss');
+    await evaluate(parsec,`(async()=>{
+      const config={codec:'opus',sampleRate:48000,numberOfChannels:1,bitrate:64000};
+      if(!(await AudioEncoder.isConfigSupported(config)).supported)throw Error('Opus encoder unavailable');
+      const decoder=new AudioDecoder({output:frame=>frame.close(),error:error=>{window.smoke.audioError=String(error);}});
+      decoder.configure(config);
+      const encoder=new AudioEncoder({output:chunk=>decoder.decode(chunk),error:error=>{window.smoke.audioError=String(error);}});
+      encoder.configure(config);window.smoke.audioDecoder=decoder;window.smoke.audioEncoder=encoder;
+      let timestamp=0;
+      window.smoke.audioTimer=setInterval(()=>{
+        if(encoder.encodeQueueSize>2)return;
+        const data=new Float32Array(960);for(let i=0;i<data.length;i++)data[i]=.1*Math.sin((timestamp/1e6+i/48000)*440*2*Math.PI);
+        const frame=new AudioData({format:'f32-planar',sampleRate:48000,numberOfFrames:960,numberOfChannels:1,timestamp:timestamp+=20000,data});
+        encoder.encode(frame);frame.close();
+      },20);
+    })()`);
+    for(let i=0;i<80;i++){sample=await invoke(stats,'get_stats');if(sample.audioCodec==='opus' && sample.audioBitrateKbps>0)break;await delay(100);}
+    assert.equal(sample.audioCodec,'opus');assert.equal(sample.audioSampleRate,48000);assert.equal(sample.audioChannels,1);
+    assert.ok(sample.audioBitrateKbps>0 && sample.audioBitrateKbps<256,'Real encoded Opus input must produce measured bitrate');
+    assert.equal(sample.audioSource,'WebCodecs encoded audio');
     assert.equal(sample.mediaDiagnosticsEnabled,true);
     await invoke(main,'save_configuration',{input:{...input,mediaDiagnostics:false}});
     assert.equal((await invoke(stats,'get_stats')).mediaDiagnosticsEnabled,false);

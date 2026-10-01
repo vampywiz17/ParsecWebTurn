@@ -28,6 +28,7 @@ function setup({ available = true, legacy = true, origin = 'https://web.parsec.a
   const script = fs.readFileSync(path.join(__dirname, '../web/inject.js'), 'utf8')
     .replace('__STATS_HELPER__', fs.readFileSync(path.join(__dirname, '../web/stats.js'), 'utf8'))
     .replace('__VIDEO_HELPER__', fs.readFileSync(path.join(__dirname, '../web/video.js'), 'utf8'))
+    .replace('__AUDIO_HELPER__', fs.readFileSync(path.join(__dirname, '../web/audio.js'), 'utf8'))
     .replace('__ICE_SERVERS__', JSON.stringify(servers));
   vm.runInContext(script, context);
   return { window, logs, context, script, NativePeerConnection, servers };

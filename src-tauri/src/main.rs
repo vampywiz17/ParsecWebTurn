@@ -2,6 +2,7 @@
 
 mod ice;
 mod media;
+mod performance;
 mod provider;
 mod settings;
 mod stats;
@@ -32,6 +33,7 @@ struct AppState {
     stats: Mutex<LatestStats>,
     media: Arc<Mutex<media::MediaState>>,
     auto_connect: AtomicBool,
+    performance: Arc<Mutex<performance::Sampler>>,
 }
 
 fn trusted_local(window: &WebviewWindow, label: &str) -> Result<(), String> {
@@ -139,6 +141,7 @@ async fn open_parsec(
     let injection = include_str!("../../web/inject.js")
         .replace("__STATS_HELPER__", include_str!("../../web/stats.js"))
         .replace("__VIDEO_HELPER__", include_str!("../../web/video.js"))
+        .replace("__AUDIO_HELPER__", include_str!("../../web/audio.js"))
         .replace(
             "__ICE_SERVERS__",
             &serde_json::to_string(servers).map_err(|_| "Cannot encode ICE servers")?,
@@ -197,19 +200,41 @@ fn report_stats(
 }
 
 #[tauri::command]
-fn get_stats(window: WebviewWindow, state: State<'_, AppState>) -> Result<ConnectionStats, String> {
+async fn get_stats(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+) -> Result<ConnectionStats, String> {
     trusted_local(&window, "stats")?;
     let mut sample = state
         .stats
         .lock()
         .map_err(|_| "Statistics lock failed")?
         .snapshot();
+    // Host performance is measured natively, never trusted from the remote page.
+    sample.app_cpu_percent = None;
+    sample.app_gpu_percent = None;
+    sample.app_gpu_decode_percent = None;
     sample.media_diagnostics_enabled = Settings::load(&state.root)
         .map(|settings| settings.media_diagnostics)
         .unwrap_or(false);
     if sample.media_diagnostics_enabled {
         if let Ok(media) = state.media.lock() {
             media.supplement(&mut sample);
+        }
+    }
+    if let Some(processes) = performance::processes(&window).await {
+        let sampler = state.performance.clone();
+        if let Ok(Some((cpu, gpu, decode))) = tauri::async_runtime::spawn_blocking(move || {
+            sampler
+                .lock()
+                .ok()
+                .map(|mut sampler| sampler.sample(&processes))
+        })
+        .await
+        {
+            sample.app_cpu_percent = cpu;
+            sample.app_gpu_percent = gpu;
+            sample.app_gpu_decode_percent = decode;
         }
     }
     Ok(sample)
@@ -371,6 +396,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             stats: Mutex::new(LatestStats::default()),
             media: Arc::new(Mutex::new(media::MediaState::default())),
             auto_connect: AtomicBool::new(!force_settings),
+            performance: Arc::new(Mutex::new(performance::Sampler::default())),
         })
         .invoke_handler(tauri::generate_handler![
             get_update,

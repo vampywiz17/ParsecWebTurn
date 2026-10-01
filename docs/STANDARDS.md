@@ -20,6 +20,8 @@ The baseline uses public web specifications and documented platform APIs. The us
 
 ## Internal ICE diagnostic investigation
 
+Post-v0.6.0 additions on dev use RTCTransportStats.dtlsState/tlsVersion/dtlsCipher/srtpCipher for encryption, and inbound RTP statistics or public WebCodecs AudioDecoder input sizes/configuration for audio metrics. Missing SRTP does not imply missing data-channel DTLS encryption; certificates and keys are not exported. Native performance readings use documented WebView2 Environment8.GetProcessInfos, Windows GetProcessTimes and PDH GPU Engine counters. CPU covers the app plus its WebView2 environment; GPU covers only processes of kind GPU. The GPU summary is the busiest reported adapter/engine, with a separate video-decode reading. Absent counters/permission/runtime support remain unknown. CPU is normalized across all logical processors. No browser flags, shell commands or private diagnostics are used for these features.
+
 An isolated two-peer, data-channel/video fixture was run with WebView2 `Edg/154.0.4258.48`. The internal `edge://webrtc-internals/` page opened and saw both synthetic connections. `chrome://webrtc-internals/` resolved to the Edge equivalent. No real account or user profile was inspected.
 
 The official CDP domain definitions expose no dedicated public ICE/WebRTC transport-diagnostics domain. The observed runtime Schema domain list also exposed no ICE domain; that list is not treated as an exhaustive capability proof. The runtime returned no matching webrtc/p2p/ice tracing categories for this probe.
