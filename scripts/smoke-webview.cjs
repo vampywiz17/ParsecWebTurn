@@ -302,6 +302,9 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     assert.equal(sample.audioCodec,'opus');assert.equal(sample.audioSampleRate,48000);assert.equal(sample.audioChannels,1);
     assert.ok(sample.audioBitrateKbps>0 && sample.audioBitrateKbps<256,'Real encoded Opus input must produce measured bitrate');
     assert.equal(sample.audioSource,'WebCodecs encoded audio');
+    console.log('Native metrics: '+JSON.stringify({dtlsState:sample.dtlsState,tlsVersion:sample.tlsVersion,dtlsCipher:sample.dtlsCipher,
+      cpu:sample.appCpuPercent,gpu:sample.appGpuPercent,gpuDecode:sample.appGpuDecodePercent,
+      audioCodec:sample.audioCodec,audioKbps:sample.audioBitrateKbps}));
     assert.equal(sample.mediaDiagnosticsEnabled,true);
     await invoke(main,'save_configuration',{input:{...input,mediaDiagnostics:false}});
     assert.equal((await invoke(stats,'get_stats')).mediaDiagnosticsEnabled,false);

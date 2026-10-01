@@ -216,4 +216,35 @@ mod tests {
         assert!(latest.snapshot().stale);
         assert_eq!(latest.snapshot().rtt_ms, None);
     }
+
+    #[test]
+    fn encryption_and_audio_validate_and_expire_without_claiming_current_security() {
+        let mut value = ConnectionStats {
+            state: "connected".into(),
+            dtls_state: Some("connected".into()),
+            tls_version: Some("FEFD".into()),
+            dtls_cipher: Some("TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256".into()),
+            audio_codec: Some("opus".into()),
+            audio_bitrate_kbps: Some(64.0),
+            audio_sample_rate: Some(48000),
+            audio_channels: Some(2),
+            ..Default::default()
+        };
+        value.validate().unwrap();
+        value.dtls_cipher = Some("bad\nvalue".into());
+        assert!(value.validate().is_err());
+        value.dtls_cipher = None;
+        value.audio_channels = Some(100);
+        assert!(value.validate().is_err());
+        value.audio_channels = Some(2);
+        let latest = LatestStats {
+            value,
+            received: Some(Instant::now() - std::time::Duration::from_secs(6)),
+        };
+        let sample = latest.snapshot();
+        assert!(sample.stale);
+        assert!(sample.dtls_state.is_none());
+        assert!(sample.tls_version.is_none());
+        assert!(sample.audio_bitrate_kbps.is_none());
+    }
 }

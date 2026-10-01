@@ -19,7 +19,7 @@ if (window.AudioDecoder) {
       const result = super.configure(...args);
       const counter = decodedAudio.get(this);
       Object.assign(counter, { codec: observed.codec, sampleRate: observed.sampleRate,
-        channels: observed.numberOfChannels, previous: null });
+        channels: observed.numberOfChannels, previous: null, lastInput: null });
       return result;
     }
     decode(...args) {
@@ -57,6 +57,8 @@ function sampleDecodedAudio(now) {
   if (active.length !== 1) return null; // Do not attribute mixed decoders to one stream.
   const audio = active[0];
   return { audioCodec: typeof audio.codec === 'string' && /^[A-Za-z0-9_.-]{1,128}$/.test(audio.codec) ? audio.codec : null,
-    audioBitrateKbps: audio.bitrate, audioSampleRate: audio.sampleRate || null,
-    audioChannels: audio.channels || null, audioSource: 'WebCodecs encoded audio' };
+    audioBitrateKbps: audio.bitrate,
+    audioSampleRate: Number.isInteger(audio.sampleRate) && audio.sampleRate > 0 && audio.sampleRate <= 768000 ? audio.sampleRate : null,
+    audioChannels: Number.isInteger(audio.channels) && audio.channels > 0 && audio.channels <= 32 ? audio.channels : null,
+    audioSource: 'WebCodecs encoded audio' };
 }

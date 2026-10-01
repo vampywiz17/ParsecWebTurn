@@ -145,7 +145,7 @@ impl Sampler {
                 let address = item.szName.0 as usize;
                 let start = buffer.as_ptr() as usize;
                 let end = start + buffer.len() * 8;
-                if address < start || address >= end || address % 2 != 0 {
+                if address < start || address >= end || !address.is_multiple_of(2) {
                     continue;
                 }
                 let name = std::slice::from_raw_parts(item.szName.0, (end - address) / 2);
