@@ -282,8 +282,8 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     assert.equal((await invoke(stats,'get_stats')).mediaDiagnosticsEnabled,false);
     for(let i=0;i<30;i++) {
       const rows=await evaluate(stats,`Array.from(document.querySelectorAll('#details > div'),row=>row.textContent)`);
-      if(!rows.some(row=>/^(Decoder|Profile|Decoder backend|Hardware decode|Video source):/.test(row))) {
-        assert.ok(rows.some(row=>row.startsWith('Video codec:')),'Standard video statistics remain visible');
+      if(!rows.some(row=>/^(Video codec|Decoder|Profile|Decoder backend|Hardware decode|Video source|Resolution):/.test(row))) {
+        assert.ok(rows.some(row=>row.startsWith('FPS source:')),'FPS statistics remain visible');
         break;
       }
       assert.ok(i<29,'Disabled diagnostic rows must disappear from the open stats window');
