@@ -24,6 +24,17 @@
   __VIDEO_HELPER__
   __AUDIO_HELPER__
 
+  // Explicitly requested snapshots only: standard stats, without endpoints,
+  // server credentials, SDP or a dependency on Parsec's private internals.
+  window.parsecWebTurnIceDiagnostics = async () => Promise.all(
+    [...peers.keys()].slice(0, 8).map(async peer => {
+      try {
+        return { policy: peer.getConfiguration().iceTransportPolicy,
+          gatheringState: peer.iceGatheringState, connectionState: peer.iceConnectionState,
+          ...iceDiagnosticSnapshot(await peer.getStats()) };
+      } catch { return { unavailable: true }; }
+    }));
+
   class PatchedRTCPeerConnection extends OriginalRTCPeerConnection {
     constructor(config = {}, constraints) {
       super(patchConfig(config), constraints);

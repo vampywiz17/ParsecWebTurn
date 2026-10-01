@@ -5,6 +5,26 @@ const vm = require('node:vm');
 const context = vm.createContext({});
 vm.runInContext(fs.readFileSync(require('node:path').join(__dirname, '../web/stats.js'), 'utf8'), context);
 
+test('explicit ICE snapshot preserves check evidence and excludes endpoint and credential data', () => {
+  const stats = report({relay:true});
+  Object.assign(stats.get('local'),{address:'192.0.2.55',url:'turn:private.example',username:'secret-user',priority:100,relayProtocol:'tls'});
+  Object.assign(stats.get('pair'),{nominated:true,requestsSent:3,responsesReceived:2});
+  stats.get('transport').iceRole='controlling';
+  stats.set('direct',{id:'direct',type:'candidate-pair',state:'failed',localCandidateId:'remote',remoteCandidateId:'remote',requestsSent:4,responsesReceived:0});
+  const snapshot=context.iceDiagnosticSnapshot(stats);
+  assert.equal(snapshot.pairs[0].selected,true);
+  assert.equal(snapshot.pairs[0].local.relayProtocol,'tls');
+  assert.equal(snapshot.pairs[0].requestsSent,3);
+  assert.equal(snapshot.pairs[1].state,'failed');
+  assert.equal(snapshot.pairs[1].responsesReceived,0);
+  assert.equal(snapshot.iceRoles[0],'controlling');
+  assert.equal(snapshot.pairs[1].nominated,null);
+  assert.ok(!/192\.0\.2|private\.example|secret-user/.test(JSON.stringify(snapshot)));
+  for(let i=0;i<100;i++)stats.set('extra'+i,{id:'extra'+i,type:'candidate-pair'});
+  assert.equal(context.iceDiagnosticSnapshot(stats).pairs.length,64);
+  assert.equal(context.iceDiagnosticSnapshot(stats).totalPairs,102);
+});
+
 function report({ timestamp = 1000, received = 100, sent = 50, relay = false, video = false, id = 'pair' } = {}) {
   const values = [
     { id: 'transport', type: 'transport', selectedCandidatePairId: id },

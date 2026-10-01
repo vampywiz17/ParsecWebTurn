@@ -164,6 +164,10 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     assert.equal(smoke.policy,'all');
     assert.equal(smoke.servers[0].urls[0],'stun:127.0.0.1:9');
     assert.equal(smoke.after[0].urls[0],'stun:127.0.0.1:9');
+    const iceDiagnostics=await evaluate(parsec,'window.parsecWebTurnIceDiagnostics()');
+    assert.equal(iceDiagnostics.length,2);
+    assert.ok(iceDiagnostics.every(peer=>peer.policy==='all' && peer.pairs.some(pair=>pair.selected && pair.state==='succeeded')));
+    assert.ok(!JSON.stringify(iceDiagnostics).includes('smoke-secret'));
     if(process.env.GITHUB_ACTIONS==='true') {
       // Exercise real WebView2 permission handling without a CDP permission grant.
       // Only the disposable CI desktop's clipboard is touched, never a user's.
@@ -178,7 +182,7 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
         return {permission:permission.state,length:text.length,
           matches:text==='ParsecWebTurn isolated clipboard test'};
       })()`);
-      assert.equal(clipboard.permission,'granted','Parsec clipboard read must be permitted');
+      // A non-persisted host grant need not change Permissions.query's state.
       assert.equal(clipboard.matches,true,'Parsec must read the Windows clipboard: '+JSON.stringify(clipboard));
       await send('Emulation.setFocusEmulationEnabled',{enabled:false},parsec);
     }

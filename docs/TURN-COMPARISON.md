@@ -17,6 +17,33 @@ comparison is the TURN provider/URL set, including its offered transports and
 the resulting candidate/check timing. It does not yet isolate Cloudflare UDP
 TURN from its additional TCP/TLS URLs.
 
+The user then reported manually configuring only the Cloudflare TURN 3478
+endpoint and obtaining relay even with the VPN. This means the full multiport
+TCP/TLS URL list is not necessary to reproduce the behavior. Confirm the exact
+URI/transport when collecting a diagnostic report. Also verify that the current
+ExpressTURN credentials actually yield a working relay path when direct access
+is unavailable; otherwise its apparent direct preference could be absence of a
+usable relay alternative rather than different selection among working paths.
+
+The user confirmed that the current ExpressTURN configuration relays successfully
+without the VPN. Both providers therefore offer working relay service; the
+working-direct/selected-relay difference remains provider-dependent.
+
+For each connected session, open the app's developer console and run:
+
+```js
+console.log(JSON.stringify(await window.parsecWebTurnIceDiagnostics(), null, 2));
+```
+
+This explicitly requested snapshot uses getConfiguration/getStats only. It
+includes the client policy, ICE role, pair selection/check state, candidate
+type/priority/transport and check/traffic counters. It excludes endpoint
+addresses, URLs, credentials, SDP and certificates. At most eight connections
+and 64 pairs per connection are returned, with selected pairs first. Missing
+fields remain null. A succeeded direct pair with relay selected is different
+evidence from a failed direct pair; a single snapshot cannot reconstruct all
+candidate arrival times or prove why nomination occurred.
+
 The app's custom provider passes the configured URLs through the common ICE
 validator. Its Cloudflare provider passes the credential API's URLs through the
 same validator, excluding browser-blocked port 53. Neither path changes
