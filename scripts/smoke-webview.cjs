@@ -164,6 +164,21 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     assert.equal(smoke.policy,'all');
     assert.equal(smoke.servers[0].urls[0],'stun:127.0.0.1:9');
     assert.equal(smoke.after[0].urls[0],'stun:127.0.0.1:9');
+    if(process.env.GITHUB_ACTIONS==='true') {
+      // Exercise real WebView2 permission handling without a CDP permission grant.
+      // Only the disposable CI desktop's clipboard is touched, never a user's.
+      await send('Emulation.setFocusEmulationEnabled',{enabled:true},parsec);
+      const clipboard=await evaluate(parsec,`(async()=>{
+        const original=await navigator.clipboard.readText();
+        try {
+          const marker='ParsecWebTurn isolated clipboard test';
+          await navigator.clipboard.writeText(marker);
+          return (await navigator.clipboard.readText())===marker;
+        } finally { await navigator.clipboard.writeText(original); }
+      })()`);
+      assert.equal(clipboard,true,'Parsec must read as well as write the native clipboard');
+      await send('Emulation.setFocusEmulationEnabled',{enabled:false},parsec);
+    }
     if(!smoke.connected) {
       const diagnostics = await evaluate(parsec,`(async()=>({error:window.smoke.error,first:first.connectionState,second:second.connectionState,firstIce:first.iceConnectionState,secondIce:second.iceConnectionState,channel:channel.readyState,reports:await Promise.all([first,second].map(async peer=>[...await peer.getStats()].map(([,value])=>({type:value.type,state:value.state,candidateType:value.candidateType,protocol:value.protocol,mdns:value.address?.endsWith('.local'),requestsSent:value.requestsSent,responsesReceived:value.responsesReceived}))))}))()`);
       throw new Error('Loopback WebRTC did not connect: '+JSON.stringify(diagnostics));

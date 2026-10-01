@@ -10,6 +10,11 @@ All notable changes to this project will be documented in this file.
 - Measure the app and its WebView2 processes' CPU consumption using Windows process times. Show the WebView2 GPU processes' busiest engine and video-decode engine utilization when Windows GPU counters are available.
 - Display audio codec, sample rate and channel count using standard WebRTC RTP statistics or WebCodecs decoder configuration. Keep configured metadata visible during silence, including before the first audio packet. The remote configured bitrate remains unknown when the receiving APIs do not expose it; instantaneous throughput is not substituted for it. No audio frames are copied or closed by instrumentation.
 
+### Fixed
+
+- Allow the Parsec web client to read the Windows clipboard for local-to-remote paste, in addition to its existing remote-to-local clipboard writes. Use the documented WebView2 permission event, require both requesting and top-level origins to be exactly https://web.parsec.app, and do not persist permission grants.
+- Clarify that ICE selects the direct or TURN path when both are available; merely configuring TURN neither forces relay nor guarantees direct-first selection. Provider-dependent selection does not change the client's ICE policy.
+
 ## [0.6.0] - 2026-10-01
 
 ### Added

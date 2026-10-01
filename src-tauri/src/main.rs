@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod clipboard;
 mod ice;
 mod media;
 mod performance;
@@ -167,6 +168,10 @@ async fn open_parsec(
     .map_err(|e| {
         format!("Cannot open Parsec. Ensure Microsoft Edge WebView2 Runtime is installed. {e}")
     })?;
+    if let Err(error) = clipboard::attach(&parsec).await {
+        let _ = parsec.destroy();
+        return Err(error);
+    }
     if media_diagnostics {
         media::attach(&parsec, state.media.clone());
     }
