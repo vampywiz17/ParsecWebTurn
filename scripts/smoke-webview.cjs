@@ -183,7 +183,8 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
         return {permission:permission.state,length:text.length,
           matches:text==='ParsecWebTurn isolated clipboard test'};
       })()`);
-      // A non-persisted host grant need not change Permissions.query's state.
+      // The supported origin-specific profile grant must be observable without CDP grants.
+      assert.equal(clipboard.permission,'granted','Parsec clipboard permission must be granted by the host');
       assert.equal(clipboard.matches,true,'Parsec must read the Windows clipboard: '+JSON.stringify(clipboard));
     }
     if(!smoke.connected) {

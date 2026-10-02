@@ -16,7 +16,7 @@ All notable changes to this project will be documented in this file.
 
 - Remove temporary ICE console diagnostics and abandoned automatic TURN-restart experiments from development builds. Keep connection statistics and automated regression tests.
 
-- Configure origin-scoped clipboard-read permission using the documented WebView2 permission event. Require both requesting and top-level origins to be exactly https://web.parsec.app and do not persist grants. Local-to-remote paste remains under investigation: the CI native clipboard fixture still reads empty text despite verified Windows clipboard content; this is not a confirmed end-to-end fix.
+- Replace request-only clipboard grants with the documented WebView2 profile permission API for the exact https://web.parsec.app origin. Request-only grants returned empty Clipboard API text even though normal Ctrl+V worked. Await the origin-specific profile grant; keep browser clipboard and focus checks, without injecting a clipboard replacement. End-to-end remote paste still requires a real-host check.
 - Clarify that ICE selects the direct or TURN path when both are available; merely configuring TURN neither forces relay nor guarantees direct-first selection. Provider-dependent selection does not change the client's ICE policy.
 
 ## [0.6.0] - 2026-10-01
