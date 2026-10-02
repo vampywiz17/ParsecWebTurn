@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Separate STUN and custom TURN address fields, migrate legacy mixed address lists, and add an explicit STUN-only option. Cloudflare STUN-only uses its public STUN endpoint without generating TURN credentials; custom STUN overrides also work with Cloudflare TURN. TURN selection remains native ICE behavior, without automatic restart or priority changes.
+
 - Add an explicitly requested, bounded developer-console ICE snapshot using standard WebRTC configuration/statistics APIs. Include candidate-pair check and selection evidence without endpoint addresses, URLs, credentials or SDP; preserve automatic connection policy.
 
 - Display standard WebRTC transport encryption statistics: DTLS state, negotiated version and cipher suite, plus the SRTP protection profile when reported. Data-channel DTLS is distinguished from TURN TLS; missing telemetry remains unknown.

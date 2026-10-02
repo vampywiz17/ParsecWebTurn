@@ -110,10 +110,13 @@ async fn connect_fallback(
 ) -> Result<(), String> {
     trusted_local(&window, "main")?;
     let _operation = state.operation.lock().await;
-    let servers = provider::fallback(&state.root)?;
-    let diagnostics = Settings::load(&state.root)
-        .map(|s| s.media_diagnostics)
-        .unwrap_or(false);
+    let settings = Settings::load(&state.root).ok();
+    let servers = if settings.as_ref().is_some_and(|s| s.stun_only) {
+        settings.as_ref().unwrap().custom_servers("")?
+    } else {
+        provider::fallback(&state.root)?
+    };
+    let diagnostics = settings.map(|s| s.media_diagnostics).unwrap_or(false);
     open_parsec(&app, &state, &servers, diagnostics).await
 }
 

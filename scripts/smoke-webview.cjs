@@ -143,7 +143,9 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     assert.ok(!JSON.stringify(saved).includes('smoke-secret'));
     const disk=fs.readFileSync(path.join(root,'settings.json'),'utf8');
     assert.ok(!disk.includes('smoke-secret')); assert.ok(JSON.parse(disk).encryptedCustomPassword);
-    await evaluate(main,`document.getElementById('provider').value='custom';document.getElementById('urls').value=${JSON.stringify(input.customUrls.join('\n'))};document.getElementById('username').value='smoke-user-ui';document.getElementById('media-diagnostics').checked=true;document.getElementById('provider').dispatchEvent(new Event('change'));document.getElementById('save').click()`);
+    assert.deepEqual(saved.stunUrls,['stun:127.0.0.1:9'],'Legacy mixed URLs migrate into the STUN field');
+    assert.deepEqual(saved.turnUrls,['turns:relay.example.invalid'],'Legacy mixed URLs migrate into the TURN field');
+    await evaluate(main,`document.getElementById('provider').value='custom';document.getElementById('stun-urls').value='stun:127.0.0.1:9';document.getElementById('turn-urls').value='turns:relay.example.invalid';document.getElementById('username').value='smoke-user-ui';document.getElementById('media-diagnostics').checked=true;document.getElementById('provider').dispatchEvent(new Event('change'));document.getElementById('save').click()`);
     let uiSaved = false;
     for(let i=0;i<100;i++) {uiSaved=await evaluate(main,`document.getElementById('status').textContent.startsWith('Settings saved')`);if(uiSaved)break;await delay(100);}
     assert.equal(uiSaved,true,'The real settings form must save successfully');
