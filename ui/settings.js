@@ -2,10 +2,13 @@
 const $ = id => document.getElementById(id);
 const invoke = (command, args) => window.__TAURI__.core.invoke(command, args);
 let busy = false;
-function panel() { $('cloudflare').hidden = $('provider').value !== 'cloudflare'; $('custom').hidden = $('provider').value !== 'custom'; }
+function panel() {
+  $('cloudflare').hidden = $('provider').value !== 'cloudflare'; $('custom').hidden = $('provider').value !== 'custom';
+  for (const field of document.querySelectorAll('[data-turn-setting]')) field.disabled = $('stun-only').checked;
+}
 function showError(error) { $('error').textContent = String(error); $('error').hidden = false; $('status').textContent = ''; }
 function request() {
-  return { provider: $('provider').value, customUrls: $('urls').value.split(/\r?\n/), customUsername: $('username').value,
+  return { provider: $('provider').value, stunUrls: $('stun-urls').value.split(/\r?\n/), turnUrls: $('turn-urls').value.split(/\r?\n/), stunOnly: $('stun-only').checked, customUsername: $('username').value,
     turnKeyId: $('key').value, ttl: Number($('ttl').value), cacheCredentials: $('cache').checked,
     mediaDiagnostics: $('media-diagnostics').checked,
     apiToken: $('token').value, customPassword: $('password').value,
@@ -14,7 +17,7 @@ function request() {
 async function load() {
   const config = await invoke('get_configuration');
   $('provider').value = config.provider;
-  $('urls').value = config.customUrls.join('\n'); $('username').value = config.customUsername;
+  $('stun-urls').value = config.stunUrls.join('\n'); $('turn-urls').value = config.turnUrls.join('\n'); $('stun-only').checked = config.stunOnly; $('username').value = config.customUsername;
   $('key').value = config.turnKeyId; $('ttl').value = config.ttl; $('cache').checked = config.cacheCredentials;
   $('media-diagnostics').checked = config.mediaDiagnostics;
   $('token').value = ''; $('password').value = ''; $('forget-token').checked = false; $('forget-password').checked = false;
@@ -44,6 +47,7 @@ async function save(connect) {
   if (connect) { await invoke('connect_saved'); $('status').textContent = 'Parsec opened. Return here using Connection settings in the app menu.'; }
 }
 $('provider').addEventListener('change', panel);
+$('stun-only').addEventListener('change', panel);
 $('windowed').addEventListener('click', () => action(async () => { await invoke('set_parsec_window_mode', {fullscreen:false}); $('status').textContent='Parsec restored to windowed mode. Use F11 to toggle fullscreen.'; }));
 $('stats').addEventListener('click', () => action(() => invoke('open_stats')));
 $('save').addEventListener('click', () => action(() => save(false)));

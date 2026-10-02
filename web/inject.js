@@ -22,6 +22,7 @@
   const peers = new Map();
   __STATS_HELPER__
   __VIDEO_HELPER__
+  __AUDIO_HELPER__
 
   class PatchedRTCPeerConnection extends OriginalRTCPeerConnection {
     constructor(config = {}, constraints) {
@@ -38,7 +39,6 @@
   }
   window.RTCPeerConnection = PatchedRTCPeerConnection;
   window.__parsecWebTurnPatched = true;
-  console.log('[ParsecWebTurn] ICE override installed before Parsec startup; server count:', ICE_SERVERS.length);
 
   let sampling = false;
   setInterval(async () => {
@@ -70,6 +70,10 @@
         sample.fps = decodedFps;
         sample.fpsSource = 'WebCodecs decoder';
       } else if (sample.fps != null) sample.fpsSource = 'WebRTC inbound video';
+      if (sample.state === 'connected' && !sample.audioSource) {
+        const audio = sampleDecodedAudio();
+        if (audio) Object.assign(sample, audio);
+      }
       await window.__TAURI__.core.invoke('report_stats', { sample });
     } catch { /* Diagnostics must never interrupt a Parsec session. */ }
     finally { sampling = false; }

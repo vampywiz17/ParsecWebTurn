@@ -1,19 +1,15 @@
-ParsecWebTurn v0.6.0 adds update notifications and improves connection-route diagnostics.
+ParsecWebTurn v0.7.0 adds explicit STUN-only connections and expands connection statistics.
 
-- Background checks for the latest stable GitHub release and **App → Check for updates**.
-- Release notes in an integrated window. **Download ZIP from GitHub** opens the official release ZIP in your default browser; the app only fetches release metadata.
-- No automatic EXE downloads, update helper, self-replacement or update restart. Your current session continues, and browser/organization download policies apply.
-- More direct paths can be identified by matching the selected ICE endpoints against transport and gathered-candidate information, including VPN paths. Positive TURN evidence wins; insufficient information remains unverified.
-- Confirmed direct routes are labeled **Direct — no TURN**. This describes WebRTC routing; a VPN may carry the connection underneath it.
-- Update-window commands remain restricted to the trusted local window.
-- Use the documented Tauri core IPC API and standard WebRTC/WebCodecs telemetry by default. Detailed Chromium Media decoder diagnostics are experimental, optional and disabled by default; enable them in Connection settings before reconnecting when needed.
-- Hide codec, resolution, decoder, profile, backend, hardware decoding and video-source rows while detailed diagnostics are disabled. Saved visibility changes also apply to an already open statistics window; FPS and network metrics remain visible.
-- Remove production browser switches and legacy vendor-prefixed WebRTC/statistics fallbacks. The standards audit and ongoing development requirements are documented in the repository.
+- Separate STUN and custom TURN address fields. Existing mixed address lists migrate automatically.
+- **STUN only — no TURN relay** supports direct LAN/VPN/internet connections without offering a TURN relay. With Cloudflare selected and no custom STUN address, it uses Cloudflare's public STUN endpoint without an API token or generated TURN credentials.
+- Custom STUN addresses can also be used alongside Cloudflare's generated TURN configuration. When TURN is enabled, native ICE selects the route; a reachable direct path does not guarantee that ICE selects it.
+- Connection statistics include reported DTLS state, version, cipher and SRTP profile, plus application/WebView2 CPU and WebView2 GPU utilization when available.
+- Audio codec, sample rate and channel metadata remain visible after detection, including during silence. The sender's configured bitrate remains unknown when receiving APIs do not expose it; measured throughput is not substituted for it.
+- Grant clipboard-read permission for the exact Parsec web origin through Microsoft's documented WebView2 profile API. Windows clipboard reads now pass the native test.
+- Remove temporary ICE console diagnostics and abandoned automatic TURN-restart experiments. No automatic direct-first reconnection is included.
 
-Download **ParsecWebTurn-v0.6.0-win64.zip**, extract it to a writable directory, and run `ParsecWebTurn.exe`. **Microsoft Edge WebView2 Runtime must already be installed.** No VPN or administrator rights are required when the runtime is present and the app directory is writable.
+**Known limitation:** client-to-host clipboard paste remains broken in the tested Parsec session and also reproduces in standalone Edge. The WebView2 permission fix does not resolve Parsec's end-to-end clipboard synchronization. HEVC driver issues and long-session freezing are not claimed to be fixed.
 
-**Upgrading:** close the app and replace only the EXE manually. Keep `settings.json` and `WebView2Profile` to retain saved credentials and the Parsec sign-in. Version notifications do not install the update for you.
+Download **ParsecWebTurn-v0.7.0-win64.zip**, extract it to a writable directory, and run `ParsecWebTurn.exe`. **Microsoft Edge WebView2 Runtime must be installed.** Ordinary use requires no administrator rights when the runtime is present; network connectivity depends on the selected STUN/TURN configuration.
 
-Background check failures do not interrupt startup. Use the menu check to see network or GitHub rate-limit errors. Set `PARSECWEBTURN_NO_UPDATE_CHECK=1` to disable automatic checks; manual checks remain available. Organizational policies may still block GitHub downloads or unsigned binaries.
-
-The normal direct/TURN fallback policy remains unchanged. This release does not claim to resolve HEVC driver bugs or long-session freezing.
+**Upgrading:** close the app and replace the EXE. Keep `settings.json` and `WebView2Profile` to preserve configuration, encrypted credentials and Parsec sign-in. Update notifications remain metadata-only; ZIP downloads and installation are manual.

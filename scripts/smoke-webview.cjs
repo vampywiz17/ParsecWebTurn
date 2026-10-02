@@ -143,7 +143,9 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     assert.ok(!JSON.stringify(saved).includes('smoke-secret'));
     const disk=fs.readFileSync(path.join(root,'settings.json'),'utf8');
     assert.ok(!disk.includes('smoke-secret')); assert.ok(JSON.parse(disk).encryptedCustomPassword);
-    await evaluate(main,`document.getElementById('provider').value='custom';document.getElementById('urls').value=${JSON.stringify(input.customUrls.join('\n'))};document.getElementById('username').value='smoke-user-ui';document.getElementById('media-diagnostics').checked=true;document.getElementById('provider').dispatchEvent(new Event('change'));document.getElementById('save').click()`);
+    assert.deepEqual(saved.stunUrls,['stun:127.0.0.1:9'],'Legacy mixed URLs migrate into the STUN field');
+    assert.deepEqual(saved.turnUrls,['turns:relay.example.invalid'],'Legacy mixed URLs migrate into the TURN field');
+    await evaluate(main,`document.getElementById('provider').value='custom';document.getElementById('stun-urls').value='stun:127.0.0.1:9';document.getElementById('turn-urls').value='turns:relay.example.invalid';document.getElementById('username').value='smoke-user-ui';document.getElementById('media-diagnostics').checked=true;document.getElementById('provider').dispatchEvent(new Event('change'));document.getElementById('save').click()`);
     let uiSaved = false;
     for(let i=0;i<100;i++) {uiSaved=await evaluate(main,`document.getElementById('status').textContent.startsWith('Settings saved')`);if(uiSaved)break;await delay(100);}
     assert.equal(uiSaved,true,'The real settings form must save successfully');
@@ -164,6 +166,27 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     assert.equal(smoke.policy,'all');
     assert.equal(smoke.servers[0].urls[0],'stun:127.0.0.1:9');
     assert.equal(smoke.after[0].urls[0],'stun:127.0.0.1:9');
+    if(process.env.GITHUB_ACTIONS==='true') {
+      // Exercise real WebView2 permission handling without a CDP permission grant.
+      // Only the disposable CI desktop's clipboard is touched, never a user's.
+      await invoke(main,'set_parsec_window_mode',{fullscreen:false});
+      await send('Page.bringToFront',{},parsec);
+      // Seed from Windows, as a local user's copy operation would. A browser
+      // write/read round-trip can use a different clipboard on a headless runner.
+      execFileSync('powershell.exe',['-NoProfile','-Command',
+        "Set-Clipboard -Value 'ParsecWebTurn isolated clipboard test'"]);
+      const windowsClipboard=execFileSync('powershell.exe',['-NoProfile','-Command','Get-Clipboard -Raw'],{encoding:'utf8'}).trim();
+      assert.equal(windowsClipboard,'ParsecWebTurn isolated clipboard test','Windows clipboard fixture must contain text');
+      const clipboard=await evaluate(parsec,`(async()=>{
+        const permission=await navigator.permissions.query({name:'clipboard-read'});
+        const text=await navigator.clipboard.readText();
+        return {permission:permission.state,length:text.length,
+          matches:text==='ParsecWebTurn isolated clipboard test'};
+      })()`);
+      // The supported origin-specific profile grant must be observable without CDP grants.
+      assert.equal(clipboard.permission,'granted','Parsec clipboard permission must be granted by the host');
+      assert.equal(clipboard.matches,true,'Parsec must read the Windows clipboard: '+JSON.stringify(clipboard));
+    }
     if(!smoke.connected) {
       const diagnostics = await evaluate(parsec,`(async()=>({error:window.smoke.error,first:first.connectionState,second:second.connectionState,firstIce:first.iceConnectionState,secondIce:second.iceConnectionState,channel:channel.readyState,reports:await Promise.all([first,second].map(async peer=>[...await peer.getStats()].map(([,value])=>({type:value.type,state:value.state,candidateType:value.candidateType,protocol:value.protocol,mdns:value.address?.endsWith('.local'),requestsSent:value.requestsSent,responsesReceived:value.responsesReceived}))))}))()`);
       throw new Error('Loopback WebRTC did not connect: '+JSON.stringify(diagnostics));
@@ -201,6 +224,13 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     assert.equal(sample.codec,null,'Data-channel-only video metadata must stay unknown');
     assert.equal(sample.fps,null);
     assert.equal(sample.stale,false);
+    assert.equal(sample.dtlsState,'connected','Real data-channel transport must report connected DTLS');
+    assert.match(sample.tlsVersion,/^[0-9A-F]{4}$/);
+    assert.ok(sample.dtlsCipher?.startsWith('TLS_'),'Negotiated DTLS cipher must be reported');
+    const nativeProfiles=await evaluate(parsec,`(async()=>Promise.all([first,second].map(async peer=>[...await peer.getStats()].filter(([,value])=>value.type==='transport').map(([,value])=>value.srtpCipher ?? null))))()`);
+    assert.ok(nativeProfiles.flat().includes(sample.srtpCipher),'SRTP profile must match the native transport report');
+    for(let i=0;i<30 && sample.appCpuPercent==null;i++) { await delay(100);sample=await invoke(stats,'get_stats'); }
+    assert.ok(Number.isFinite(sample.appCpuPercent) && sample.appCpuPercent>=0 && sample.appCpuPercent<=100,'Native app-group CPU must be available');
     const compatibility = await evaluate(parsec,`(() => {
       const Native = Object.getPrototypeOf(window.RTCPeerConnection);
       const inspect = (Constructor, config, setter=false) => {
@@ -277,6 +307,33 @@ await second.setLocalDescription(await second.createAnswer()); await gather(seco
     for(let i=0;i<100;i++){sample=await invoke(stats,'get_stats');if(sample.fps>5 && sample.fpsSource==='WebCodecs decoder')break;await delay(100);}
     assert.ok(sample.fps>5 && sample.fps<100,'Real decoded frames must produce a plausible FPS rate: '+sample.fps);
     assert.equal(sample.fpsSource,'WebCodecs decoder');assert.equal(sample.packetsLost,null,'Data-channel traffic does not expose RTP packet loss');
+    await evaluate(parsec,`(async()=>{
+      const config={codec:'opus',sampleRate:48000,numberOfChannels:1,bitrate:64000};
+      if(!(await AudioEncoder.isConfigSupported(config)).supported)throw Error('Opus encoder unavailable');
+      const decoder=new AudioDecoder({output:frame=>frame.close(),error:error=>{window.smoke.audioError=String(error);}});
+      decoder.configure(config);
+      const encoder=new AudioEncoder({output:chunk=>decoder.decode(chunk),error:error=>{window.smoke.audioError=String(error);}});
+      encoder.configure(config);window.smoke.audioDecoder=decoder;window.smoke.audioEncoder=encoder;
+      let timestamp=0;
+      window.smoke.audioTimer=setInterval(()=>{
+        if(encoder.encodeQueueSize>2)return;
+        const data=new Float32Array(960);for(let i=0;i<data.length;i++)data[i]=.1*Math.sin((timestamp/1e6+i/48000)*440*2*Math.PI);
+        const frame=new AudioData({format:'f32-planar',sampleRate:48000,numberOfFrames:960,numberOfChannels:1,timestamp:timestamp+=20000,data});
+        encoder.encode(frame);frame.close();
+      },20);
+    })()`);
+    for(let i=0;i<80;i++){sample=await invoke(stats,'get_stats');if(sample.audioCodec==='opus')break;await delay(100);}
+    assert.equal(sample.audioCodec,'opus');assert.equal(sample.audioSampleRate,48000);assert.equal(sample.audioChannels,1);
+    assert.equal(sample.audioBitrateKbps,null,'Decoder inputs must not invent the remote configured bitrate');
+    assert.equal(sample.audioSource,'WebCodecs decoder configuration');
+    await evaluate(parsec,`clearInterval(window.smoke.audioTimer);window.smoke.audioEncoder.flush()`);
+    await delay(4500);
+    sample=await invoke(stats,'get_stats');
+    assert.equal(sample.audioCodec,'opus','Native audio metadata must survive silence');
+    assert.equal(sample.audioSampleRate,48000);assert.equal(sample.audioChannels,1);
+    console.log('Native metrics: '+JSON.stringify({dtlsState:sample.dtlsState,tlsVersion:sample.tlsVersion,dtlsCipher:sample.dtlsCipher,
+      cpu:sample.appCpuPercent,gpu:sample.appGpuPercent,gpuDecode:sample.appGpuDecodePercent,
+      audioCodec:sample.audioCodec,audioKbps:sample.audioBitrateKbps}));
     assert.equal(sample.mediaDiagnosticsEnabled,true);
     await invoke(main,'save_configuration',{input:{...input,mediaDiagnostics:false}});
     assert.equal((await invoke(stats,'get_stats')).mediaDiagnosticsEnabled,false);

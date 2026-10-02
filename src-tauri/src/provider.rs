@@ -112,12 +112,12 @@ pub async fn request(endpoint: &str, token: &str, ttl: u32) -> Result<Vec<IceSer
 pub async fn resolve(root: &Path, settings: &Settings) -> Result<Vec<IceServer>, String> {
     let secret = settings.secret()?;
     settings.validate(&secret)?;
-    if settings.provider == "custom" {
-        return ice::custom(&settings.custom_urls, &settings.custom_username, &secret);
+    if settings.stun_only || settings.provider == "custom" {
+        return settings.custom_servers(&secret);
     }
     if settings.cache_credentials {
         if let Some(servers) = cached(root, settings, &secret) {
-            return Ok(servers);
+            return configured_stun(settings, servers);
         }
     }
     let issued_at = Utc::now();
@@ -129,7 +129,23 @@ pub async fn resolve(root: &Path, settings: &Settings) -> Result<Vec<IceServer>,
     if settings.cache_credentials {
         let _ = save_cache(root, settings, &secret, &servers, issued_at);
     }
-    Ok(servers)
+    configured_stun(settings, servers)
+}
+
+fn configured_stun(settings: &Settings, servers: Vec<IceServer>) -> Result<Vec<IceServer>, String> {
+    if settings.stun_urls.is_empty() {
+        return Ok(servers);
+    }
+    let mut result = ice::custom(&settings.stun_urls, "", "")?;
+    for mut server in servers {
+        server
+            .urls
+            .retain(|url| url.starts_with("turn:") || url.starts_with("turns:"));
+        if !server.urls.is_empty() {
+            result.push(server);
+        }
+    }
+    Ok(result)
 }
 
 pub fn fallback(root: &Path) -> Result<Vec<IceServer>, String> {
@@ -146,6 +162,39 @@ mod tests {
     use super::*;
     use crate::settings::DEFAULT_TTL;
     use std::io::{Read, Write};
+
+    #[tokio::test]
+    async fn cloudflare_stun_only_does_not_generate_or_cache_turn_credentials() {
+        let root = tempfile::tempdir().unwrap();
+        let settings = Settings {
+            stun_only: true,
+            cache_credentials: true,
+            ..Default::default()
+        };
+        let servers = resolve(root.path(), &settings).await.unwrap();
+        assert_eq!(servers[0].urls, ["stun:stun.cloudflare.com:3478"]);
+        assert!(!root.path().join(".turn-cache.json").exists());
+    }
+
+    #[test]
+    fn cloudflare_stun_override_replaces_only_stun_and_preserves_turn_credentials() {
+        let settings = Settings {
+            stun_urls: vec!["stun:replacement.example:3478".into()],
+            ..Default::default()
+        };
+        let original = ice::custom(
+            &["stun:old.example".into(), "turn:relay.example".into()],
+            "user",
+            "password",
+        )
+        .unwrap();
+        let result = configured_stun(&settings, original).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].urls, ["stun:replacement.example:3478"]);
+        assert!(result[0].credential.is_empty());
+        assert_eq!(result[1].urls, ["turn:relay.example"]);
+        assert_eq!(result[1].credential, "password");
+    }
 
     #[test]
     fn cache_expiry_clock_rollback_and_token_changes() {
@@ -176,7 +225,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let s = Settings {
             provider: "custom".into(),
-            custom_urls: vec!["turns:example.com:443?transport=tcp".into()],
+            turn_urls: vec!["turns:example.com:443?transport=tcp".into()],
             custom_username: "user".into(),
             encrypted_custom_password: storage::protect("pass").unwrap(),
             ..Default::default()

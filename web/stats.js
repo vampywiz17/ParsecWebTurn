@@ -76,6 +76,11 @@ function summarizeStats(report, previous, servers = [], selectedPair = null, can
   const nominated = entries.filter(entry => entry.type === 'candidate-pair' && entry.nominated && entry.state === 'succeeded');
   const pair = (transport && report.get(transport.selectedCandidatePairId)) ||
     (nominated.length === 1 ? nominated[0] : null);
+  const transports = entries.filter(entry => entry.type === 'transport');
+  const linked = pair?.transportId && report.get(pair.transportId);
+  const securityTransport = transport || (linked?.type === 'transport' ? linked :
+    (transports.length === 1 && !transports[0].selectedCandidatePairId ? transports[0] : null));
+  const securityName = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value) ? value : null;
   const counter = pair || entries.find(entry => entry.type === 'transport' && Number.isFinite(entry.bytesReceived));
   const observedLocal = pair && report.get(pair.localCandidateId);
   const observedRemote = pair && report.get(pair.remoteCandidateId);
@@ -96,6 +101,9 @@ function summarizeStats(report, previous, servers = [], selectedPair = null, can
   const video = entries.filter(entry => entry.type === 'inbound-rtp' && entry.kind === 'video')
     .sort((a, b) => (b.bytesReceived || 0) - (a.bytesReceived || 0))[0];
   const codec = video && report.get(video.codecId);
+  const audio = entries.filter(entry => entry.type === 'inbound-rtp' && entry.kind === 'audio')
+    .sort((a,b) => (b.bytesReceived || 0) - (a.bytesReceived || 0))[0];
+  const audioCodec = audio && report.get(audio.codecId);
   const finite = value => Number.isFinite(value) && value >= 0 ? value : null;
   const counters = counter && {
     id: counter.id,
@@ -121,6 +129,14 @@ function summarizeStats(report, previous, servers = [], selectedPair = null, can
       remoteCandidateType: observedRemote?.candidateType || (samePair && selectedRemote?.candidateType) || null,
       ...route,
       protocol: ['udp', 'tcp', 'tls'].includes(protocol) ? protocol : null,
+      dtlsState: ['new', 'connecting', 'connected', 'closed', 'failed'].includes(securityTransport?.dtlsState) ? securityTransport.dtlsState : null,
+      tlsVersion: typeof securityTransport?.tlsVersion === 'string' && /^[0-9A-F]{4}$/.test(securityTransport.tlsVersion) ? securityTransport.tlsVersion : null,
+      dtlsCipher: securityName(securityTransport?.dtlsCipher),
+      srtpCipher: securityName(securityTransport?.srtpCipher),
+      audioCodec: audioCodec?.mimeType || null,
+      audioBitrateKbps: null, // Inbound statistics do not expose the remote encoder's configured target.
+      audioSampleRate: audioCodec?.clockRate || null, audioChannels: audioCodec?.channels || null,
+      audioSource: audio ? 'WebRTC inbound audio codec' : null,
       rttMs: pair && finite(pair.currentRoundTripTime) !== null ? pair.currentRoundTripTime * 1000 : null,
       inboundMbps: counters ? rate('received') : null,
       outboundMbps: counters ? rate('sent') : null,

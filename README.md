@@ -17,6 +17,16 @@ The WebView2 runtime is **separate from the Microsoft Edge browser**. Windows 11
 1. Extract the release ZIP to a writable directory.
 2. Run `ParsecWebTurn.exe`.
 3. Choose Cloudflare Realtime or Custom server, enter the relay details, and click **Save & connect**.
+
+STUN and TURN addresses have separate fields. A custom configuration can contain
+only STUN URLs, without TURN credentials. **STUN only — no TURN relay** ignores
+all configured TURN servers; with Cloudflare selected and the STUN field empty,
+it uses `stun:stun.cloudflare.com:3478` without an API token or credential request.
+An explicit STUN address also overrides Cloudflare's STUN addresses while keeping
+its generated TURN credentials when relay is enabled. STUN-only can work over
+LAN, VPN or a reachable internet path, but has no relay fallback. Configuring TURN
+allows relay selection even when a direct path exists. This setting takes effect
+on the next connection; it preserves the client's ICE transport policy.
 4. Sign into Parsec inside the application.
 
 Web assets and the ICE override are embedded in the executable. There is no browser extension to install or `extension` directory to copy. The native app menu provides **Connection settings**, **Connection stats**, **Developer tools** and **Exit**. Settings can be saved without interrupting an active connection; **Save & connect** replaces the current session.

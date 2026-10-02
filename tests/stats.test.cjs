@@ -55,6 +55,49 @@ test('missing metrics remain unknown rather than zero', () => {
   assert.equal(context.summarizeStats(partial, null).sample.route, null);
 });
 
+test('encryption comes from the selected transport without certificates or TURN TLS inference', () => {
+  const data=report({relay:true});
+  Object.assign(data.get('local'),{relayProtocol:'tls'});
+  data.set('unused',{id:'unused',type:'transport',dtlsState:'connected',dtlsCipher:'UNUSED'});
+  Object.assign(data.get('transport'),{dtlsState:'connected',tlsVersion:'FEFD',
+    dtlsCipher:'TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256',localCertificateId:'secret-cert'});
+  data.set('secret-cert',{type:'certificate',base64Certificate:'private-certificate'});
+  const sample=context.summarizeStats(data,null).sample;
+  assert.equal(sample.dtlsState,'connected');assert.equal(sample.tlsVersion,'FEFD');
+  assert.equal(sample.dtlsCipher,'TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256');
+  assert.equal(sample.srtpCipher,null,'Data channels do not require SRTP');
+  assert.ok(!JSON.stringify(sample).includes('private-certificate'));
+  delete data.get('transport').dtlsCipher;delete data.get('transport').tlsVersion;
+  assert.equal(context.summarizeStats(data,null).sample.dtlsCipher,null,'TURN TLS is not a DTLS cipher');
+  Object.assign(data.get('transport'),{srtpCipher:'SRTP_AEAD_AES_128_GCM',dtlsCipher:'bad\nvalue',tlsVersion:'wrong'});
+  const invalid=context.summarizeStats(data,null).sample;
+  assert.equal(invalid.srtpCipher,'SRTP_AEAD_AES_128_GCM');assert.equal(invalid.dtlsCipher,null);assert.equal(invalid.tlsVersion,null);
+});
+
+test('ambiguous transports do not guess encryption and pair transportId links are respected', () => {
+  const data=report();delete data.get('transport').selectedCandidatePairId;
+  data.get('pair').nominated=true;data.get('pair').transportId='transport';
+  data.get('transport').dtlsState='connected';
+  data.set('other',{id:'other',type:'transport',dtlsState:'failed'});
+  assert.equal(context.summarizeStats(data,null).sample.dtlsState,'connected');
+  delete data.get('pair').transportId;
+  assert.equal(context.summarizeStats(data,null).sample.dtlsState,null);
+});
+
+test('RTP audio codec metadata survives silence and payload rate is not a configured bitrate', () => {
+  const data=report();
+  data.set('audio',{id:'audio',type:'inbound-rtp',kind:'audio',codecId:'opus',timestamp:1000,bytesReceived:100});
+  data.set('opus',{type:'codec',mimeType:'audio/opus',clockRate:48000,channels:2});
+  const first=context.summarizeStats(data,null);
+  Object.assign(data.get('audio'),{timestamp:2000,bytesReceived:8100});
+  const sample=context.summarizeStats(data,first.counters).sample;
+  assert.equal(sample.audioCodec,'audio/opus');assert.equal(sample.audioBitrateKbps,null);
+  assert.equal(sample.audioChannels,2);assert.equal(sample.audioSource,'WebRTC inbound audio codec');
+  data.get('audio').bytesReceived=0;
+  assert.equal(context.summarizeStats(data,first.counters).sample.audioBitrateKbps,null);
+  assert.equal(context.summarizeStats(data,first.counters).sample.audioCodec,'audio/opus');
+});
+
 test('aggregates traffic while selecting the most active connected peer for RTT', () => {
   const sample = (state, inboundMbps, rttMs) => ({state,sample:{inboundMbps,outboundMbps:1,rttMs}});
   const result = context.aggregateStats([sample('connected',3,20),sample('connected',2,30),sample('failed',100,100)]);

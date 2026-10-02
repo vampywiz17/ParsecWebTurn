@@ -1,6 +1,6 @@
 [package]
 name = "parsec-web-turn"
-version = "0.6.0"
+version = "0.7.0"
 description = "Portable Parsec Web client with custom TURN support"
 edition = "2021"
 rust-version = "1.90"
@@ -23,7 +23,7 @@ tempfile = "3"
 fs2 = "0.4"
 url = "2"
 webview2-com = "0.39.1"
-windows = { version = "0.62", features = ["Win32_Foundation"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_System_Performance"] }
 
 [features]
 default = ["custom-protocol"]

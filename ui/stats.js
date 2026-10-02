@@ -1,6 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const metric = (value, unit, digits = 1) => Number.isFinite(value) ? `${value.toFixed(digits)} ${unit}` : '—';
+const dtlsVersion = value => value ? `${({FEFF:'DTLS 1.0',FEFD:'DTLS 1.2',FEFC:'DTLS 1.3'})[value] || 'Unknown version'} (0x${value})` : null;
 let busy = false;
 async function update() {
   if (busy) return; busy = true;
@@ -16,6 +17,14 @@ async function update() {
       ...(stats.turnServer ? [['TURN server', stats.turnServer]] : []),
       ...(stats.turnProtocol ? [['TURN transport', stats.turnProtocol]] : []),
       ['Local candidate', stats.localCandidateType], ['Remote candidate', stats.remoteCandidateType], ['ICE transport', stats.protocol],
+      ['WebRTC DTLS state', stats.dtlsState],
+      ['DTLS version', dtlsVersion(stats.tlsVersion)], ['DTLS cipher suite', stats.dtlsCipher],
+      ...(stats.srtpCipher ? [['SRTP protection profile', stats.srtpCipher]] : []),
+      ['App CPU (including WebView2)', metric(stats.appCpuPercent, '%')], ['WebView2 GPU process (busiest engine)', metric(stats.appGpuPercent, '%')],
+      ['WebView2 GPU video decode', metric(stats.appGpuDecodePercent, '%')],
+      ['Audio codec', stats.audioCodec], ['Configured audio bitrate', metric(stats.audioBitrateKbps, 'kbps')],
+      ['Audio sample rate', stats.audioSampleRate ? `${stats.audioSampleRate} Hz` : null],
+      ['Audio channels', stats.audioChannels], ['Audio source', stats.audioSource],
       ...(stats.mediaDiagnosticsEnabled ? [ ['Video codec', stats.codec], ['Decoder', stats.decoder], ['Profile', stats.videoProfile],
         ['Decoder backend', stats.decoderBackend], ['Hardware decode', stats.hardwareDecode == null ? null : (stats.hardwareDecode ? 'Yes' : 'No')],
         ['Video source', stats.videoSource], ['Resolution', stats.width && stats.height ? `${stats.width} × ${stats.height}` : null] ] : []),
