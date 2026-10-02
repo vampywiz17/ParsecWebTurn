@@ -19,15 +19,9 @@ The baseline uses public web specifications and documented platform APIs. The us
 | Browser launch configuration | WebView2 defaults | Removed production autoplay/background-throttling/private Edge feature switches. No production remote debugging port, disabled mDNS privacy or browser-security override is configured. |
 | Native development smoke | CDP in a disposable synthetic profile | Debugging and the mDNS test override are confined to development fixtures, never packaged application launch behavior. CI's documented per-EXE WebView2 policy workaround is confined to the disposable runner and removed afterwards. |
 
-## Internal ICE diagnostic investigation
+## Statistics and performance additions
 
 Post-v0.6.0 additions on dev use RTCTransportStats.dtlsState/tlsVersion/dtlsCipher/srtpCipher for encryption, and inbound RTP codec statistics or public WebCodecs AudioDecoder configuration for audio metadata. Configured metadata remains visible during silence until reset, close or reconfiguration. AudioDecoderConfig and inbound RTP statistics do not expose the remote encoder target bitrate; the configured bitrate stays unknown rather than substituting measured throughput or an SDP bitrate ceiling. Missing SRTP does not imply missing data-channel DTLS encryption; certificates and keys are not exported. Native performance readings use documented WebView2 Environment8.GetProcessInfos, Windows GetProcessTimes and PDH GPU Engine counters. CPU covers the app plus its WebView2 environment; GPU covers only processes of kind GPU. The GPU summary is the busiest reported adapter/engine, with a separate video-decode reading. Absent counters/permission/runtime support remain unknown. CPU is normalized across all logical processors. No browser flags, shell commands or private diagnostics are used for these features.
-
-An isolated two-peer, data-channel/video fixture was run with WebView2 `Edg/154.0.4258.48`. The internal `edge://webrtc-internals/` page opened and saw both synthetic connections. `chrome://webrtc-internals/` resolved to the Edge equivalent. No real account or user profile was inspected.
-
-The official CDP domain definitions expose no dedicated public ICE/WebRTC transport-diagnostics domain. The observed runtime Schema domain list also exposed no ICE domain; that list is not treated as an exhaustive capability proof. The runtime returned no matching webrtc/p2p/ice tracing categories for this probe.
-
-Chromium's WebRTC Internals stats collection calls the standard native stats collector. The internal UI also has browser-specific update/event/recording mechanisms; its page globals and chrome.send messages are not a supported application API. No page scraping or private message calls have been integrated into the shipped application. This investigation does not establish a new supported method for proving the user's VPN path direct. It does not assume that every internal dump is identical to the web-visible report or that missing relay data excludes TURN.
 
 ## Sources and limits
 
@@ -37,6 +31,5 @@ Chromium's WebRTC Internals stats collection calls the standard native stats col
 - [Tauri core API](https://v2.tauri.app/reference/javascript/api/namespacecore/) and [withGlobalTauri configuration](https://v2.tauri.app/reference/config/#withglobaltauri).
 - [WebView2 DevTools protocol](https://learn.microsoft.com/en-us/microsoft-edge/webview2/how-to/chromium-devtools-protocol) and [browser flags guidance](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/webview-features-flags).
 - [Official experimental Media definition](https://github.com/ChromeDevTools/devtools-protocol/blob/master/pdl/domains/Media.pdl) and [CDP domain definitions](https://github.com/ChromeDevTools/devtools-protocol/tree/master/pdl/domains).
-- [Chromium WebRTC Internals collection](https://chromium.googlesource.com/chromium/src/+/main/content/browser/webrtc/webrtc_internals.cc) and [PeerConnectionTracker](https://chromium.googlesource.com/chromium/src/third_party/+/refs/heads/main/blink/renderer/modules/peerconnection/peer_connection_tracker.cc).
 
 Standards-track drafts, optional fields and documented vendor APIs are identified separately; this audit does not claim that every feature is a final W3C standard or portable to every browser. Actual VPN/remote-TURN ambiguity still needs data from the affected connection. Unknown remains unknown.

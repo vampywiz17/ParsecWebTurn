@@ -150,28 +150,6 @@ function summarizeStats(report, previous, servers = [], selectedPair = null, can
   };
 }
 
-function iceDiagnosticSnapshot(report) {
-  const values = [...report.values()];
-  const transports = values.filter(value => value.type === 'transport');
-  const selected = new Set(transports.map(value => value.selectedCandidatePairId).filter(Boolean));
-  const candidate = id => {
-    const value = report.get(id);
-    return value ? { type: value.candidateType ?? null, protocol: value.protocol ?? null,
-      relayProtocol: value.relayProtocol ?? null, priority: value.priority ?? null } : null;
-  };
-  const pairs = values.filter(value => value.type === 'candidate-pair');
-  pairs.sort((a, b) => Number(selected.has(b.id)) - Number(selected.has(a.id)));
-  return { iceRoles: transports.map(value => value.iceRole ?? null),
-    totalPairs: pairs.length, pairs: pairs.slice(0, 64).map(value => ({
-      selected: selected.has(value.id), state: value.state ?? null,
-      nominated: value.nominated ?? null, local: candidate(value.localCandidateId),
-      remote: candidate(value.remoteCandidateId), requestsSent: value.requestsSent ?? null,
-      responsesReceived: value.responsesReceived ?? null,
-      bytesSent: value.bytesSent ?? null, bytesReceived: value.bytesReceived ?? null,
-      roundTripTime: value.currentRoundTripTime ?? null,
-    })) };
-}
-
 function aggregateStats(results) {
   if (!results.length) return { state: 'waiting', peerConnections: 0 };
   const active = results.filter(result => result.state === 'connected');

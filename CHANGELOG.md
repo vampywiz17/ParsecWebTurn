@@ -8,13 +8,13 @@ All notable changes to this project will be documented in this file.
 
 - Separate STUN and custom TURN address fields, migrate legacy mixed address lists, and add an explicit STUN-only option. Cloudflare STUN-only uses its public STUN endpoint without generating TURN credentials; custom STUN overrides also work with Cloudflare TURN. TURN selection remains native ICE behavior, without automatic restart or priority changes.
 
-- Add an explicitly requested, bounded developer-console ICE snapshot using standard WebRTC configuration/statistics APIs. Include candidate-pair check and selection evidence without endpoint addresses, URLs, credentials or SDP; preserve automatic connection policy.
-
 - Display standard WebRTC transport encryption statistics: DTLS state, negotiated version and cipher suite, plus the SRTP protection profile when reported. Data-channel DTLS is distinguished from TURN TLS; missing telemetry remains unknown.
 - Measure the app and its WebView2 processes' CPU consumption using Windows process times. Show the WebView2 GPU processes' busiest engine and video-decode engine utilization when Windows GPU counters are available.
 - Display audio codec, sample rate and channel count using standard WebRTC RTP statistics or WebCodecs decoder configuration. Keep configured metadata visible during silence, including before the first audio packet. The remote configured bitrate remains unknown when the receiving APIs do not expose it; instantaneous throughput is not substituted for it. No audio frames are copied or closed by instrumentation.
 
 ### Fixed
+
+- Remove temporary ICE console diagnostics and abandoned automatic TURN-restart experiments from development builds. Keep connection statistics and automated regression tests.
 
 - Configure origin-scoped clipboard-read permission using the documented WebView2 permission event. Require both requesting and top-level origins to be exactly https://web.parsec.app and do not persist grants. Local-to-remote paste remains under investigation: the CI native clipboard fixture still reads empty text despite verified Windows clipboard content; this is not a confirmed end-to-end fix.
 - Clarify that ICE selects the direct or TURN path when both are available; merely configuring TURN neither forces relay nor guarantees direct-first selection. Provider-dependent selection does not change the client's ICE policy.
