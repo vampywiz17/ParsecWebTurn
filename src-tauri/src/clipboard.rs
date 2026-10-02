@@ -26,7 +26,6 @@ pub async fn attach(window: &tauri::WebviewWindow) -> Result<(), String> {
                     COREWEBVIEW2_PERMISSION_STATE_ALLOW,
                     &SetPermissionStateCompletedHandler::create(Box::new(move |error| {
                         let result = error
-                            .ok()
                             .map_err(|_| "Cannot grant Parsec clipboard permission".to_string());
                         let _ = grant_send.send(result);
                         Ok(())
