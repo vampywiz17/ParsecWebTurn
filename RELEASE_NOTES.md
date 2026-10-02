@@ -5,8 +5,7 @@ ParsecWebTurn v0.7.0 adds explicit STUN-only connections and expands connection 
 - Custom STUN addresses can also be used alongside Cloudflare's generated TURN configuration. When TURN is enabled, native ICE selects the route; a reachable direct path does not guarantee that ICE selects it.
 - Connection statistics include reported DTLS state, version, cipher and SRTP profile, plus application/WebView2 CPU and WebView2 GPU utilization when available.
 - Audio codec, sample rate and channel metadata remain visible after detection, including during silence. The sender's configured bitrate remains unknown when receiving APIs do not expose it; measured throughput is not substituted for it.
-- Grant clipboard-read permission for the exact Parsec web origin through Microsoft's documented WebView2 profile API. Windows clipboard reads now pass the native test.
-- Remove temporary ICE console diagnostics and abandoned automatic TURN-restart experiments. No automatic direct-first reconnection is included.
+- Grant clipboard-read permission for the exact Parsec web origin through Microsoft's documented WebView2 profile API.
 
 **Known limitation:** client-to-host clipboard paste remains broken in the tested Parsec session and also reproduces in standalone Edge. The WebView2 permission fix does not resolve Parsec's end-to-end clipboard synchronization. HEVC driver issues and long-session freezing are not claimed to be fixed.
 

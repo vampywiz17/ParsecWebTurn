@@ -8,18 +8,20 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Separate STUN and custom TURN address fields, migrate legacy mixed address lists, and add an explicit STUN-only option. Cloudflare STUN-only uses its public STUN endpoint without generating TURN credentials; custom STUN overrides also work with Cloudflare TURN. TURN selection remains native ICE behavior, without automatic restart or priority changes.
-
-- Display standard WebRTC transport encryption statistics: DTLS state, negotiated version and cipher suite, plus the SRTP protection profile when reported. Data-channel DTLS is distinguished from TURN TLS; missing telemetry remains unknown.
-- Measure the app and its WebView2 processes' CPU consumption using Windows process times. Show the WebView2 GPU processes' busiest engine and video-decode engine utilization when Windows GPU counters are available.
-- Display audio codec, sample rate and channel count using standard WebRTC RTP statistics or WebCodecs decoder configuration. Keep configured metadata visible during silence, including before the first audio packet. The remote configured bitrate remains unknown when the receiving APIs do not expose it; instantaneous throughput is not substituted for it. No audio frames are copied or closed by instrumentation.
+- Separate STUN and custom TURN address fields with automatic migration of existing mixed address lists.
+- Add **STUN only — no TURN relay** for direct connections. Cloudflare mode can use its public STUN endpoint without an API token or TURN credential generation. Custom STUN addresses also work alongside Cloudflare TURN.
+- Show reported WebRTC DTLS state, version, cipher suite and SRTP protection profile in Connection stats.
+- Show CPU usage for the application and its WebView2 processes, plus WebView2 GPU engine and video-decode utilization when available.
+- Show detected audio codec, sample rate and channel count, retaining these values during silence. The sender's configured bitrate remains unknown when the receiving APIs do not expose it.
 
 ### Fixed
 
-- Remove temporary ICE console diagnostics and abandoned automatic TURN-restart experiments from development builds. Keep connection statistics and automated regression tests.
+- Configure clipboard-read permission for the exact Parsec web origin using the documented WebView2 profile API, fixing empty local Clipboard API reads.
 
-- Replace request-only clipboard grants with the documented WebView2 profile permission API for the exact https://web.parsec.app origin. Request-only grants returned empty Clipboard API text even though normal Ctrl+V worked. Await the origin-specific profile grant; keep browser clipboard and focus checks, without injecting a clipboard replacement. Client-to-host paste still fails in a real session and also reproduces in standalone Edge; this is not a confirmed fix for Parsec clipboard synchronization.
-- Clarify that ICE selects the direct or TURN path when both are available; merely configuring TURN neither forces relay nor guarantees direct-first selection. Provider-dependent selection does not change the client's ICE policy.
+### Known limitations
+
+- Client-to-host paste still fails in the tested Parsec session and also reproduces in standalone Edge. The clipboard permission change does not resolve Parsec's end-to-end clipboard synchronization.
+- With TURN enabled, native ICE selects the connection route; a reachable direct path does not guarantee that it selects a direct connection. Use STUN-only when TURN must be excluded.
 
 ## [0.6.0] - 2026-10-01
 
