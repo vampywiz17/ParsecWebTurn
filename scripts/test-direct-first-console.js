@@ -34,9 +34,11 @@
   }
   function tryFallback() {
     const live = [...peers].filter(r => r.peer.iceConnectionState !== 'closed');
-    if (fallback || !live.length || live.some(r => !r.eligible || r.peer.iceConnectionState !== 'failed')) return;
+    const initialAttemptUnavailable = record => record.peer.iceConnectionState === 'failed'
+      || (record.peer.iceConnectionState === 'disconnected' && !record.everConnected);
+    if (fallback || !live.length || live.some(r => !r.eligible || !initialAttemptUnavailable(r))) return;
     fallback = true;
-    emit(null, 'all-live-peers-failed:enable-TURN');
+    emit(null, 'initial-attempt-unavailable:enable-TURN');
     for (const record of live) {
       const peer = record.peer;
       try {
@@ -51,7 +53,8 @@
     construct(target, args, newTarget) {
       const peer = Reflect.construct(target, args, newTarget);
       const config = peer.getConfiguration();
-      const record = { id: nextId++, peer, servers: config.iceServers, eligible: false, local: null, remote: null };
+      const record = { id: nextId++, peer, servers: config.iceServers, eligible: false, local: null, remote: null,
+        everConnected: ['connected', 'completed'].includes(peer.iceConnectionState) };
       peers.add(record);
       const stun = config.iceServers.flatMap(server => {
         const urls = (Array.isArray(server.urls) ? server.urls : [server.urls]).filter(u => /^stuns?:/i.test(u));
@@ -75,6 +78,7 @@
       });
       peer.addEventListener('negotiationneeded', () => emit(record, 'negotiationneeded', { phase: fallback ? 'turn' : 'stun' }));
       peer.addEventListener('iceconnectionstatechange', () => {
+        if (['connected', 'completed'].includes(peer.iceConnectionState)) record.everConnected = true;
         emit(record, 'ice-state', { state: peer.iceConnectionState });
         tryFallback();
       });

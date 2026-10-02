@@ -43,6 +43,16 @@ test('terminal failure restores TURN and requests restart, but never fabricates 
   const log=JSON.stringify(window.parsecDirectFirstTest.records);
   assert.match(log,/negotiationneeded/);assert.doesNotMatch(log,/private-user|private-password|example.invalid/);
 });
+test('initial disconnected immediately tries TURN without waiting for terminal failure', () => {
+  const {newPeer,servers}=setup();const peer=newPeer();peer.state('checking');peer.state('disconnected');
+  assert.deepEqual(peer.getConfiguration().iceServers,servers);assert.equal(peer.restarts,1);
+  assert.equal(peer.offers,0);
+});
+test('initial disconnected cannot interrupt a second peer that is still checking', () => {
+  const {newPeer}=setup();const a=newPeer(),b=newPeer();a.state('disconnected');b.state('checking');
+  assert.equal(a.restarts,0);assert.equal(b.restarts,0);
+  b.state('disconnected');assert.equal(a.restarts,1);assert.equal(b.restarts,1);
+});
 test('another checking peer prevents premature fallback; an automatic new attempt gets TURN', () => {
   const {newPeer,servers}=setup();const a=newPeer(),b=newPeer();a.state('failed');b.state('checking');
   assert.equal(a.restarts,0);b.state('failed');assert.equal(a.restarts,1);assert.equal(b.restarts,1);
