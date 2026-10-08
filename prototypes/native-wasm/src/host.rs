@@ -266,7 +266,7 @@ pub fn dispatch(
                 stat[0] = if int(args, 0)? == 3 { 3 } else { 2 };
                 let rights: u64 = match int(args, 0)? {
                     0 => 2,
-                    3 => 8192 | 262144,
+                    3 => 512 | 1024 | 8192 | 262144 | 524288,
                     _ => 64,
                 };
                 stat[8..16].copy_from_slice(&rights.to_le_bytes());
@@ -291,10 +291,27 @@ pub fn dispatch(
             }
         }
         "fd_fdstat_set_flags" => {
-            if (0..=2).contains(&int(args, 0)?) {
+            let fd = ptr(args, 0)?;
+            let flags = ptr(args, 1)?;
+            if flags & !1 != 0 {
+                28
+            } else if fd <= 2 {
                 0
             } else {
-                8
+                let fs = caller.data().filesystem.clone();
+                let mut fs = fs
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("virtual filesystem lock poisoned"))?;
+                if let Some(h) = fs.handles.get_mut(&fd) {
+                    if h.rights & 8 == 0 {
+                        76
+                    } else {
+                        h.flags = flags as u16;
+                        0
+                    }
+                } else {
+                    8
+                }
             }
         }
         "fd_write" => {

@@ -54,9 +54,9 @@ impl VirtualFs {
         if flags & !1 != 0 || oflags & !15 != 0 {
             return Err(INVAL);
         }
-        if oflags & 9 != 0 && rights & 64 == 0 {
-            return Err(NOTCAPABLE);
-        }
+        // Creation/truncation is authorized by the parent directory's path
+        // capabilities, not FD_WRITE on the newly opened descriptor. In
+        // particular, a guest may create its lock file with a read-only fd.
         if oflags & 2 != 0 || self.directories.contains(&path) {
             return Err(INVAL);
         }
@@ -161,6 +161,7 @@ mod tests {
         let mut fs = VirtualFs::default();
         assert_eq!(fs.open(b"profile.json", 0, 2, 0), Err(NOENT));
         assert_eq!(fs.open(b"../host-file", 1, 64, 0), Err(NOTCAPABLE));
+        assert!(fs.open(b"lock", 1, 2, 0).is_ok());
         let fd = fs.open(b"test", 1, 2 | 4 | 64, 0).unwrap();
         fs.write(fd, b"example").unwrap();
         fs.seek(fd, 0, 0).unwrap();

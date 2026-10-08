@@ -63,7 +63,9 @@ Use the retained audit copy or audit and explicitly pin the replacement.
 - At most eight native WASM threads may be created during a bootstrap run.
   The legacy WASI-threads adapter is snapshot-specific, not a claim of support
   for every WASI threading proposal. No indefinite host-side waits are implemented.
-- Captured stdout is limited to 64 KiB. Only import names/counts are traced, not arguments.
+- Captured stdout is limited to 64 KiB. Import tracing records names/counts;
+  offline filesystem diagnostics additionally record at most 32 guest virtual
+  path requests with their WASI error codes, never file contents or host paths.
 - Missing bridges and WASM errors are represented in `start_error`/`host.boundary`
   and the per-thread `threads` records. A thread error interrupts other running
   guest loops; blocked atomic waits remain subject to the process deadline.
