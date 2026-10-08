@@ -22,6 +22,8 @@ pub struct HostState {
     #[serde(skip)]
     pub http_failure: Option<&'static str>,
     #[serde(skip)]
+    pub websocket: std::sync::Arc<crate::websocket::Network>,
+    #[serde(skip)]
     pub started: Instant,
     pub calls: BTreeMap<String, u64>,
     pub boundary: Option<String>,
@@ -49,6 +51,7 @@ impl HostState {
             backend: Default::default(),
             http: Default::default(),
             http_failure: None,
+            websocket: Default::default(),
             started: Instant::now(),
             calls: BTreeMap::new(),
             boundary: None,
@@ -75,6 +78,11 @@ pub fn implemented(module: &str, name: &str) -> bool {
             name,
             "flock"
                 | "MTY_HttpRequest"
+                | "MTY_WebSocketConnect"
+                | "MTY_WebSocketRead"
+                | "MTY_WebSocketWrite"
+                | "MTY_WebSocketDestroy"
+                | "MTY_WebSocketGetCloseCode"
                 | "web_get_hostname"
                 | "web_platform"
                 | "web_set_key"
@@ -186,6 +194,9 @@ pub fn dispatch(
         bail!("native bridge not implemented: {id}");
     }
     let m = caller.data().memory.clone();
+    if module == "env" && name.starts_with("MTY_WebSocket") {
+        return crate::websocket::dispatch(&mut caller, name, args, results);
+    }
     if module == "env" && name == "MTY_HttpRequest" {
         return crate::http::dispatch(&mut caller, args, results);
     }

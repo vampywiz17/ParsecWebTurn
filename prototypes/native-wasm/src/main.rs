@@ -17,6 +17,8 @@ mod session_probe;
 mod signaling;
 mod threads;
 mod transport;
+mod websocket;
+mod websocket_probe;
 #[cfg(windows)]
 mod window;
 
@@ -120,12 +122,15 @@ fn run() -> Result<()> {
             | "guest-control-probe"
             | "guest-buffer-probe"
             | "guest-http-probe"
+            | "guest-websocket-probe"
     ) {
         let path = args.next().map(PathBuf::from);
         if args.next().is_some() {
             bail!("too many arguments");
         }
-        let report = if mode == "guest-http-probe" {
+        let report = if mode == "guest-websocket-probe" {
+            websocket_probe::probe()?
+        } else if mode == "guest-http-probe" {
             http_probe::probe()?
         } else if mode == "guest-buffer-probe" {
             session_probe::buffer_probe()?
@@ -171,6 +176,7 @@ fn run() -> Result<()> {
                   parsec-native-wasm guest-control-probe [report.json]\n\
                   parsec-native-wasm guest-buffer-probe [report.json]\n\
                   parsec-native-wasm guest-http-probe [report.json]\n\
+                  parsec-native-wasm guest-websocket-probe [report.json]\n\
                   WASM UI remains offline; probes use native peers. No browser, login or decoded remote video.\n\
                   boot reports the first unimplemented bridge; it is not a connected client."
         );
@@ -398,6 +404,7 @@ fn instantiate_with_runtime(
     host.filesystem = runtime.filesystem.clone();
     host.backend = runtime.backend.clone();
     host.http = runtime.http.clone();
+    host.websocket = runtime.websocket.clone();
     host.started = runtime.started;
     #[cfg(windows)]
     {
@@ -543,9 +550,9 @@ mod tests {
             &engine,
             r#"(module
             (import "env" "memory" (memory 1 1 shared))
-            (import "env" "MTY_WebSocketConnect" (func $connect (param i32 i32 i32 i32 i32) (result i32)))
+            (import "env" "MTY_DecompressImage" (func $connect (param i32 i32 i32 i32) (result i32)))
             (func (export "probe") (result i32)
-                i32.const 0 i32.const 0 i32.const 0 i32.const 0 i32.const 0 call $connect))"#,
+                i32.const 0 i32.const 0 i32.const 0 i32.const 0 call $connect))"#,
         )
         .unwrap();
         let (mut store, instance) = instantiate(&engine, &module).unwrap();
@@ -556,7 +563,7 @@ mod tests {
             .is_err());
         assert_eq!(
             store.data().boundary.as_deref(),
-            Some("env::MTY_WebSocketConnect")
+            Some("env::MTY_DecompressImage")
         );
     }
 

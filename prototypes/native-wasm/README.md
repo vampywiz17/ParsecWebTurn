@@ -5,6 +5,16 @@ Parsec WASM binary and supplies host imports in Rust using Wasmtime. It does not
 link Tauri, WebView2, a JavaScript engine, or a browser. The production app is
 not changed and this directory is not part of its build or releases.
 
+## Native WebSocket imports stage M3g
+
+`guest-websocket-probe [report.json]` runs the five pinned Matoya WebSocket
+imports through a controlled WASM fixture and local native server. It verifies
+Unicode/empty messages, ping/pong, application keepalive, read timeout and
+buffer retry, close/status handling, message bounds and handle destruction.
+The normal original-core modes remain offline. This is signaling transport,
+not authenticated original-guest signaling or a real Parsec host connection.
+Read [M3g details](../../docs/NATIVE_M3G.md).
+
 ## Native HTTP import stage M3f
 
 `guest-http-probe [report.json]` exercises the pinned `MTY_HttpRequest` import

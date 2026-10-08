@@ -93,6 +93,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Native guest HTTP import failed' }
           $http = Get-Content "$artifact/guest-http.json" -Raw | ConvertFrom-Json
           if ($http.requests_verified -ne 9 -or !$http.binary_response_verified -or !$http.body_read_timeout_verified -or !$http.allocation_failure_cleanup_verified -or !$http.redirect_not_followed_verified -or !$http.offline_policy_verified -or !$http.server_closed -or $http.authentication_integrated -or $http.external_requests_enabled) { throw 'Incorrect guest HTTP proof' }
+          & $exe guest-websocket-probe "$artifact/guest-websocket.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Native guest WebSocket imports failed' }
+          $websocket = Get-Content "$artifact/guest-websocket.json" -Raw | ConvertFrom-Json
+          if ($websocket.fixture_connections_verified -ne 4 -or !$websocket.unicode_roundtrip_verified -or !$websocket.rfc_ping_pong_verified -or !$websocket.application_keepalive_verified -or !$websocket.destroy_cleanup_verified -or !$websocket.upgrade_failure_verified -or !$websocket.message_limit_verified -or !$websocket.server_closed -or $websocket.authentication_integrated -or $websocket.external_requests_enabled) { throw 'Incorrect guest WebSocket proof' }
           $boot.host | ConvertTo-Json -Depth 5
           $boot.threads | ConvertTo-Json -Depth 5
           $boot.start_error
