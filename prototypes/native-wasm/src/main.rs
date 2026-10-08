@@ -82,7 +82,21 @@ struct Report {
 }
 
 fn main() {
-    if let Err(error) = run() {
+    // The native compiler can require more stack in diagnostic Rust builds.
+    // Reserve a bounded runtime-thread stack; the main thread only waits.
+    // Wasmtime's guest stack/fuel/epoch limits remain independently enforced.
+    let outcome = std::thread::Builder::new()
+        .name("parsec-native-runtime".into())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(run)
+        .map_err(anyhow::Error::from)
+        .and_then(|thread| {
+            thread
+                .join()
+                .map_err(|_| anyhow::anyhow!("Native runtime thread panicked"))
+        })
+        .and_then(|result| result);
+    if let Err(error) = outcome {
         eprintln!("{error:#}");
         std::process::exit(1);
     }

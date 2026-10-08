@@ -76,6 +76,21 @@ impl Graphics {
                 ReleaseDC(window.handle(), dc);
                 bail!("WGL bootstrap failed");
             }
+            let extensions = wgl_extensions(dc).unwrap_or_default();
+            let has = |name: &str| extensions.split_ascii_whitespace().any(|e| e == name);
+            if ![
+                "WGL_ARB_pixel_format",
+                "WGL_ARB_create_context",
+                "WGL_ARB_create_context_profile",
+            ]
+            .into_iter()
+            .all(has)
+            {
+                wglMakeCurrent(dc, std::ptr::null_mut());
+                wglDeleteContext(temporary);
+                ReleaseDC(window.handle(), dc);
+                bail!("Required native WGL extensions are not advertised by the driver");
+            }
             // WGL_ARB_pixel_format explicitly distinguishes full driver
             // acceleration from generic or partially accelerated formats.
             let query = wglGetProcAddress(c"wglGetPixelFormatAttribivARB".as_ptr().cast())
@@ -143,7 +158,7 @@ impl Graphics {
                 }
             });
             if let Some(proc) = wglGetProcAddress(c"wglSwapIntervalEXT".as_ptr().cast())
-                .filter(|p| valid_proc(*p as usize))
+                .filter(|p| has("WGL_EXT_swap_control") && valid_proc(*p as usize))
             {
                 let interval: unsafe extern "system" fn(i32) -> i32 = std::mem::transmute(proc);
                 interval(1);
@@ -605,6 +620,34 @@ fn bounded(value: i32, max: usize) -> Result<usize> {
 }
 fn valid_proc(pointer: usize) -> bool {
     pointer > 3 && pointer != usize::MAX
+}
+
+unsafe fn wgl_extensions(dc: HDC) -> Option<String> {
+    let pointer = if let Some(proc) =
+        wglGetProcAddress(c"wglGetExtensionsStringARB".as_ptr().cast())
+            .filter(|p| valid_proc(*p as usize))
+    {
+        let query: unsafe extern "system" fn(HDC) -> *const std::ffi::c_char =
+            std::mem::transmute(proc);
+        query(dc)
+    } else if let Some(proc) = wglGetProcAddress(c"wglGetExtensionsStringEXT".as_ptr().cast())
+        .filter(|p| valid_proc(*p as usize))
+    {
+        let query: unsafe extern "system" fn() -> *const std::ffi::c_char =
+            std::mem::transmute(proc);
+        query()
+    } else {
+        std::ptr::null()
+    };
+    if pointer.is_null() {
+        None
+    } else {
+        Some(
+            std::ffi::CStr::from_ptr(pointer)
+                .to_string_lossy()
+                .into_owned(),
+        )
+    }
 }
 fn texture_size(w: i32, h: i32, format: u32, typ: u32) -> Result<usize> {
     if typ != glow::UNSIGNED_BYTE {

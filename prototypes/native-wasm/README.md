@@ -5,6 +5,17 @@ Parsec WASM binary and supplies host imports in Rust using Wasmtime. It does not
 link Tauri, WebView2, a JavaScript engine, or a browser. The production app is
 not changed and this directory is not part of its build or releases.
 
+## Native window / graphics stage M2
+
+`window <parsecd.wasm> [report.json] [optional-capture.png]` adds a bounded native
+Win32 event loop and an OpenGL GPU adapter for Matoya's original UI imports.
+It requires a driver advertising the needed WGL extensions and an accelerated
+OpenGL 4.1 compatibility context; there is no generic/software fallback.
+The guest remains offline, without a Parsec host session or decoded remote video.
+Read [M2 details and test instructions](../../docs/NATIVE_M2.md).
+The M0/M1 sections below describe the earlier headless milestones; `boot` retains
+its original boundary diagnostic behavior.
+
 ## Runtime milestone M0, 2026-10-08
 
 On Windows, the unchanged Parsec core compiles, instantiates, allocates/frees
@@ -32,7 +43,7 @@ CI checks that the original core actually initializes it.
 - Fail explicitly at missing Parsec/WebRTC, audio or graphics bridges.
 
 **This is not yet a functioning remote desktop client. It does not log in,
-connect to a host, decode video, render a window, or play sound.** `boot` is a
+connect to a host, decode video or play sound.** `boot` is a
 bounded startup diagnostic, not a fake successful connection. JSON reports
 explicitly record `network_enabled: false` and `video_rendered: false`.
 
@@ -152,17 +163,14 @@ deliberately different from the browser shim's localStorage-backed virtual files
 
 ## Next milestones
 
-1. Complete the minimum platform imports needed to reach the Matoya event loop.
-   Extend the isolated virtual filesystem only as required before attempting login.
-2. Bridge the WASM UI's GLES/WebGL-style commands to a documented native graphics
-   implementation, with a native Rust window and real keyboard/mouse events.
-   The existing canvas UI and remote-video surface are separate.
-3. Integrate the native data-channel transport with the guest's live-attempt
+1. Extend the M2 platform/input bridge as required by an actual session.
+   The Matoya UI and remote-video surface remain separate components.
+2. Integrate the native data-channel transport with the guest's live-attempt
    bridge: signaling, explicit STUN/TURN configuration and control-message framing.
    The WASM module alone does not supply the JavaScript WebRTC implementation.
-4. Decode incoming H.264 and Opus natively and present real frames/audio.
+3. Decode incoming H.264 and Opus natively and present real frames/audio.
    Verify a first frame on a real host before claiming client compatibility.
-5. Add full session lifecycle, cleanup, clipboard and controlled live diagnostics.
+4. Add full session lifecycle, cleanup, clipboard and controlled live diagnostics.
 
 The public Wasmtime/Windows/WebRTC interfaces can be supported APIs. The
 **Parsec-specific WASM import ABI remains private and version-dependent**. Keeping
