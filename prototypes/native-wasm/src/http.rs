@@ -340,7 +340,8 @@ mod tests {
             })
             .is_err());
         assert!(network.client.get().is_none());
-        assert!(!network.audit.snapshot().intents[0].policy_allowed);
+        let audit = serde_json::to_value(network.audit.snapshot()).unwrap();
+        assert_eq!(audit["intents"][0]["policy_allowed"], false);
     }
     #[test]
     fn header_values_preserve_colons_and_reject_injection_and_framing() {
