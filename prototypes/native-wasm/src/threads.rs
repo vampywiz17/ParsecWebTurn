@@ -11,6 +11,7 @@ pub struct ThreadRuntime {
     pub engine: Engine,
     pub module: Module,
     pub memory: GuestMemory,
+    pub filesystem: Arc<Mutex<crate::filesystem::VirtualFs>>,
     records: Mutex<Vec<ThreadRecord>>,
 }
 
@@ -29,6 +30,7 @@ impl ThreadRuntime {
             engine,
             module,
             memory,
+            filesystem: Default::default(),
             records: Mutex::new(Vec::new()),
         }
     }

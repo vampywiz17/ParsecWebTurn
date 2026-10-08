@@ -14,6 +14,8 @@ pub struct HostState {
     #[serde(skip)]
     pub threads: Option<std::sync::Arc<crate::threads::ThreadRuntime>>,
     #[serde(skip)]
+    pub filesystem: std::sync::Arc<std::sync::Mutex<crate::filesystem::VirtualFs>>,
+    #[serde(skip)]
     pub started: Instant,
     pub calls: BTreeMap<String, u64>,
     pub boundary: Option<String>,
@@ -29,6 +31,7 @@ impl HostState {
         Self {
             memory,
             threads: None,
+            filesystem: Default::default(),
             started: Instant::now(),
             calls: BTreeMap::new(),
             boundary: None,
@@ -69,6 +72,9 @@ pub fn implemented(module: &str, name: &str) -> bool {
                 | "sched_yield"
                 | "path_open"
                 | "path_filestat_get"
+                | "path_create_directory"
+                | "fd_read"
+                | "fd_seek"
                 | "proc_exit"
         ),
         "wasi" => name == "thread-spawn",
@@ -210,35 +216,31 @@ pub fn dispatch(
                 0
             }
         }
-        "path_open" => {
-            if int(args, 0)? == 3 {
-                44
-            } else {
-                8
-            }
-        } // NOENT: empty virtual root
-        "path_filestat_get" => {
-            if int(args, 0)? != 3 {
-                8
-            } else {
-                let len = ptr(args, 3)? as usize;
-                if len > 4096 {
-                    bail!("path exceeds limit");
-                }
-                let path = m.read(ptr(args, 2)?, len)?;
-                if path == b"." || path == b"/" {
-                    let mut stat = [0u8; 64];
-                    stat[16] = 3; // directory
-                    m.write(ptr(args, 4)?, &stat)?;
-                    0
-                } else {
-                    44
-                }
-            }
+        "path_open" | "path_filestat_get" | "path_create_directory" | "fd_read" | "fd_seek" => {
+            let fs = caller.data().filesystem.clone();
+            let mut fs = fs
+                .lock()
+                .map_err(|_| anyhow::anyhow!("virtual filesystem lock poisoned"))?;
+            filesystem_call(&m, &mut fs, name, args)?
         }
         "fd_fdstat_get" => {
-            if !(0..=3).contains(&int(args, 0)?) {
-                8
+            let fd = ptr(args, 0)?;
+            if fd > 3 {
+                let fs = caller
+                    .data()
+                    .filesystem
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("virtual filesystem lock poisoned"))?;
+                if let Some(h) = fs.handles.get(&fd) {
+                    let mut stat = [0u8; 24];
+                    stat[0] = 4;
+                    stat[2..4].copy_from_slice(&h.flags.to_le_bytes());
+                    stat[8..16].copy_from_slice(&h.rights.to_le_bytes());
+                    m.write(ptr(args, 1)?, &stat)?;
+                    0
+                } else {
+                    8
+                }
             } else {
                 let mut stat = [0u8; 24];
                 stat[0] = if int(args, 0)? == 3 { 3 } else { 2 };
@@ -252,7 +254,23 @@ pub fn dispatch(
                 0
             }
         }
-        "fd_fdstat_set_flags" | "fd_close" => {
+        "fd_close" => {
+            let fd = ptr(args, 0)?;
+            if fd > 3 {
+                let fs = caller.data().filesystem.clone();
+                let mut fs = fs
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("virtual filesystem lock poisoned"))?;
+                if fs.handles.remove(&fd).is_some() {
+                    0
+                } else {
+                    8
+                }
+            } else {
+                0
+            }
+        }
+        "fd_fdstat_set_flags" => {
             if (0..=2).contains(&int(args, 0)?) {
                 0
             } else {
@@ -260,7 +278,8 @@ pub fn dispatch(
             }
         }
         "fd_write" => {
-            if !(1..=2).contains(&int(args, 0)?) {
+            let fd = ptr(args, 0)?;
+            if fd == 0 || fd == 3 {
                 8
             } else {
                 let count = ptr(args, 2)?;
@@ -276,9 +295,21 @@ pub fn dispatch(
                         bail!("stdout iovec exceeds limit");
                     }
                     let bytes = m.read(p, len as usize)?;
-                    let text = String::from_utf8_lossy(&bytes);
-                    if caller.data().stdout.len() + text.len() <= 65536 {
-                        caller.data_mut().stdout.push_str(&text);
+                    if fd <= 2 {
+                        let text = String::from_utf8_lossy(&bytes);
+                        if caller.data().stdout.len() + text.len() <= 65536 {
+                            caller.data_mut().stdout.push_str(&text);
+                        }
+                    } else {
+                        let fs = caller.data().filesystem.clone();
+                        let mut fs = fs
+                            .lock()
+                            .map_err(|_| anyhow::anyhow!("virtual filesystem lock poisoned"))?;
+                        if let Err(errno) = fs.write(fd, &bytes) {
+                            m.set_u32(ptr(args, 3)?, total)?;
+                            result(results, errno);
+                            return Ok(());
+                        }
                     }
                     total = total.checked_add(len).context("write count overflow")?;
                 }
@@ -295,4 +326,107 @@ pub fn dispatch(
     };
     result(results, errno);
     Ok(())
+}
+
+fn filesystem_call(
+    m: &GuestMemory,
+    fs: &mut crate::filesystem::VirtualFs,
+    name: &str,
+    args: &[Val],
+) -> Result<i32> {
+    use crate::filesystem::*;
+    match name {
+        "path_open" | "path_filestat_get" | "path_create_directory" => {
+            if ptr(args, 0)? != 3 {
+                return Ok(BADF);
+            }
+            let index = if name == "path_create_directory" {
+                1
+            } else {
+                2
+            };
+            let len = ptr(args, index + 1)? as usize;
+            if len > 4096 {
+                return Ok(INVAL);
+            }
+            let path = m.read(ptr(args, index)?, len)?;
+            if name == "path_open" {
+                let rights = args.get(5).and_then(Val::i64).context("expected rights")? as u64;
+                match fs.open(&path, ptr(args, 4)?, rights, ptr(args, 7)? as u16) {
+                    Ok(fd) => {
+                        m.set_u32(ptr(args, 8)?, fd)?;
+                        Ok(0)
+                    }
+                    Err(errno) => Ok(errno),
+                }
+            } else {
+                let path = match VirtualFs::path(&path) {
+                    Ok(p) => p,
+                    Err(errno) => return Ok(errno),
+                };
+                if name == "path_create_directory" {
+                    if fs.directories.contains(&path) {
+                        return Ok(EXIST);
+                    }
+                    if fs.directories.len() >= 32 {
+                        return Ok(INVAL);
+                    }
+                    fs.directories.insert(path);
+                    Ok(0)
+                } else {
+                    let mut stat = [0u8; 64];
+                    if fs.directories.contains(&path) {
+                        stat[16] = 3;
+                    } else if let Some(data) = fs.files.get(&path) {
+                        stat[16] = 4;
+                        stat[32..40].copy_from_slice(&(data.len() as u64).to_le_bytes());
+                    } else {
+                        return Ok(NOENT);
+                    }
+                    m.write(ptr(args, 4)?, &stat)?;
+                    Ok(0)
+                }
+            }
+        }
+        "fd_read" => {
+            let count = ptr(args, 2)?;
+            if count > 1024 {
+                return Ok(INVAL);
+            }
+            let mut total = 0u32;
+            for i in 0..count {
+                let address = ptr(args, 1)?.checked_add(i * 8).context("iovec overflow")?;
+                let dest = m.u32(address)?;
+                let len = m.u32(address.checked_add(4).context("iovec overflow")?)?;
+                match fs.read(ptr(args, 0)?, len as usize) {
+                    Ok(bytes) => {
+                        m.write(dest, &bytes)?;
+                        total = total
+                            .checked_add(bytes.len() as u32)
+                            .context("read count overflow")?;
+                    }
+                    Err(errno) => {
+                        m.set_u32(ptr(args, 3)?, total)?;
+                        return Ok(errno);
+                    }
+                }
+            }
+            m.set_u32(ptr(args, 3)?, total)?;
+            Ok(0)
+        }
+        "fd_seek" => {
+            let offset = args
+                .get(1)
+                .and_then(Val::i64)
+                .context("expected file offset")?;
+            match fs.seek(ptr(args, 0)?, offset, int(args, 2)?) {
+                Ok(position) => {
+                    m.write(ptr(args, 3)?, &position.to_le_bytes())?;
+                    Ok(0)
+                }
+                Err(errno) => Ok(errno),
+            }
+        }
+        _ => unreachable!(),
+    }
 }

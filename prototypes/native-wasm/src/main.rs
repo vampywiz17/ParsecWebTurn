@@ -1,3 +1,4 @@
+mod filesystem;
 mod host;
 mod memory;
 mod threads;
@@ -196,6 +197,7 @@ fn instantiate_with_runtime(
     let memory = runtime.memory.0.clone();
     let mut host = HostState::new(runtime.memory.clone());
     host.threads = Some(runtime.clone());
+    host.filesystem = runtime.filesystem.clone();
     let mut store = Store::new(engine, host);
     store.set_fuel(50_000_000)?;
     store.set_epoch_deadline(1);

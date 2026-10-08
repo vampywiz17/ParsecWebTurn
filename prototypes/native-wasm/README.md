@@ -50,7 +50,9 @@ Use the retained audit copy or audit and explicitly pin the replacement.
 
 ## Isolation and limits
 
-- Only an empty synthetic `/` directory is preopened for WASI libc startup.
+- Only a synthetic `/` directory is preopened for WASI libc startup.
+  Guest-created files stay in bounded memory, shared between the guest threads,
+  and are discarded when the CLI exits.
   No host filesystem, environment variables, real clipboard or user profile access.
 - No HTTP/WebSocket/WebRTC implementation and no account credentials.
 - Unsupported functions are correctly typed traps, **not zero-returning success stubs**.
@@ -73,14 +75,15 @@ error instead produces a nonzero exit code.
 
 The adapter currently presents `web.parsec.app` and `Win32` to the guest to match
 the audited Windows web ABI; this does not establish an origin, permissions or
-browser sandbox. The root contains no files; opens return WASI NOENT, and
-unsupported filesystem operations fail explicitly. This is
+browser sandbox. The root starts empty; nonexistent files return WASI NOENT,
+and guest-created files never map to real host paths. Unsupported filesystem
+operations fail explicitly. This is
 deliberately different from the browser shim's localStorage-backed virtual files.
 
 ## Next milestones
 
 1. Complete the minimum platform imports needed to reach the Matoya event loop.
-   Implement a private, isolated virtual filesystem before attempting login.
+   Extend the isolated virtual filesystem only as required before attempting login.
 2. Bridge the WASM UI's GLES/WebGL-style commands to a documented native graphics
    implementation, with a native Rust window and real keyboard/mouse events.
    The existing canvas UI and remote-video surface are separate.
