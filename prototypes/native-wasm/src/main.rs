@@ -46,16 +46,16 @@ const PINNED_SHA256: &str = "d663dd96df477c65479fb93eb88756c7fcafff581cc93be5636
 
 struct ExecutionDeadline(Arc<AtomicBool>);
 impl ExecutionDeadline {
-    fn start() -> Self {
+    fn start(seconds: u64) -> Self {
         let done = Arc::new(AtomicBool::new(false));
         let flag = done.clone();
         std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_secs(15));
+            std::thread::sleep(Duration::from_secs(seconds));
             if !flag.load(Ordering::SeqCst) {
                 // Epoch interruption does not interrupt every blocking atomic
                 // wait. This standalone CLI has no persistent writes/session
                 // to clean up, so enforce a hard execution limit as well.
-                eprintln!("WASM execution exceeded the 15-second process deadline");
+                eprintln!("WASM execution exceeded the bounded process deadline");
                 std::process::exit(124);
             }
         });
@@ -92,6 +92,7 @@ struct Report {
     threads: Vec<threads::ThreadRecord>,
     native_backend: Option<serde_json::Value>,
     network_audit: Option<network_audit::Snapshot>,
+    synthetic_login_steps: usize,
     #[cfg(windows)]
     graphics: Option<graphics::GraphicsReport>,
 }
@@ -120,8 +121,8 @@ fn main() {
 fn run() -> Result<()> {
     let mut args = env::args().skip(1);
     let mode = args.next().unwrap_or_else(|| "help".into());
-    let window_mode = matches!(mode.as_str(), "window" | "window-audit");
-    let audit_mode = mode == "window-audit";
+    let window_mode = matches!(mode.as_str(), "window" | "window-audit" | "login-audit");
+    let audit_mode = matches!(mode.as_str(), "window-audit" | "login-audit");
     if matches!(
         mode.as_str(),
         "guest-offer-probe"
@@ -193,6 +194,7 @@ fn run() -> Result<()> {
                   parsec-native-wasm guest-tls-probe [report.json]\n\
                   parsec-native-wasm guest-audit-probe [report.json]\n\
                   parsec-native-wasm window-audit <parsecd.wasm> [report.json]\n\
+                  parsec-native-wasm login-audit <parsecd.wasm> [report.json]\n\
                   WASM UI remains offline; probes use native peers. No browser, login or decoded remote video.\n\
                   boot reports the first unimplemented bridge; it is not a connected client."
         );
@@ -200,7 +202,7 @@ fn run() -> Result<()> {
     }
     if !matches!(
         mode.as_str(),
-        "inspect" | "allocator" | "boot" | "window" | "window-audit"
+        "inspect" | "allocator" | "boot" | "window" | "window-audit" | "login-audit"
     ) {
         bail!("unknown mode: {mode}");
     }
@@ -268,14 +270,15 @@ fn run() -> Result<()> {
         threads: Vec::new(),
         native_backend: None,
         network_audit: None,
+        synthetic_login_steps: 0,
         #[cfg(windows)]
         graphics: None,
     };
     if mode != "inspect" {
-        let _deadline = ExecutionDeadline::start();
+        let _deadline = ExecutionDeadline::start(if mode == "login-audit" { 30 } else { 15 });
         #[cfg(windows)]
         let native_window = if window_mode {
-            Some(window::Window::create()?)
+            Some(window::Window::create(mode == "login-audit")?)
         } else {
             None
         };
@@ -326,6 +329,7 @@ fn run() -> Result<()> {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .clone();
+            report.synthetic_login_steps = window.script_steps.load(Ordering::Acquire);
             if window.active_contexts.load(Ordering::Acquire) == 0 {
                 window.close();
             }
@@ -449,7 +453,10 @@ fn instantiate_with_runtime(
     // Engine watchdog also bounds guest code that spends no fuel between epochs.
     let watchdog = engine.clone();
     #[cfg(windows)]
-    let seconds = if runtime.window.is_some() { 12 } else { 5 };
+    let seconds = runtime
+        .window
+        .as_ref()
+        .map_or(5, |window| window.run_seconds + 4);
     #[cfg(not(windows))]
     let seconds = 5;
     std::thread::spawn(move || {

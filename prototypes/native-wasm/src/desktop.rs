@@ -205,7 +205,8 @@ fn run_loop(store: &mut Store<HostState>, instance: &Instance, input: bool) -> R
     if input {
         export(store, instance, "mty_app_set_keys", &[])?;
     }
-    let until = Instant::now() + Duration::from_secs(8);
+    let until = Instant::now() + Duration::from_secs(window.run_seconds);
+    let mut script_frame = 0;
     let mut first = true;
     while !window.closing.load(Ordering::Acquire) && Instant::now() < until {
         let frame_started = Instant::now();
@@ -218,6 +219,56 @@ fn run_loop(store: &mut Store<HostState>, instance: &Instance, input: bool) -> R
             50_000_000
         })?;
         if input {
+            if window.synthetic_login {
+                // Isolated offline test of the pinned UI layout, not login
+                // automation for real accounts. Wait for rendered widgets and
+                // separate press/release/text stages by actual presentations.
+                let frames = window
+                    .graphics
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .as_ref()
+                    .map_or(0, |g| g.frames_presented);
+                let step = window.script_steps.load(Ordering::Acquire);
+                if frames >= 2 && frames > script_frame && step < 8 {
+                    let (width, height) =
+                        *window.dimensions.lock().unwrap_or_else(|e| e.into_inner());
+                    let x = width / 2;
+                    let email_y = height / 2 - 34;
+                    let password_y = height / 2 + 52;
+                    let login_y = height / 2 + 138;
+                    let mut events = window.events.lock().unwrap_or_else(|e| e.into_inner());
+                    match step {
+                        0 => {
+                            events.push_back(Event::Focus(true));
+                            events.push_back(Event::Motion(x, email_y));
+                            events.push_back(Event::Button(true, 0, x, email_y));
+                        }
+                        1 => events.push_back(Event::Button(false, 0, x, email_y)),
+                        2 => events.extend(
+                            "native-audit@example.invalid"
+                                .chars()
+                                .map(|c| Event::Text(c as u32)),
+                        ),
+                        3 => {
+                            events.push_back(Event::Motion(x, password_y));
+                            events.push_back(Event::Button(true, 0, x, password_y));
+                        }
+                        4 => events.push_back(Event::Button(false, 0, x, password_y)),
+                        5 => {
+                            events.extend("fixture-password".chars().map(|c| Event::Text(c as u32)))
+                        }
+                        6 => {
+                            events.push_back(Event::Motion(x, login_y));
+                            events.push_back(Event::Button(true, 0, x, login_y));
+                        }
+                        7 => events.push_back(Event::Button(false, 0, x, login_y)),
+                        _ => unreachable!(),
+                    }
+                    script_frame = frames;
+                    window.script_steps.store(step + 1, Ordering::Release);
+                }
+            }
             let app = store.data().app_pointer.context("app pointer missing")? as i32;
             let events = window
                 .events

@@ -28,10 +28,13 @@ pub struct Window {
     pub dimensions: Mutex<(i32, i32)>,
     pub graphics: Mutex<Option<crate::graphics::GraphicsReport>>,
     pub capture: Mutex<Option<std::path::PathBuf>>,
+    pub synthetic_login: bool,
+    pub script_steps: AtomicUsize,
+    pub run_seconds: u64,
 }
 
 impl Window {
-    pub fn create() -> Result<Arc<Self>> {
+    pub fn create(synthetic_login: bool) -> Result<Arc<Self>> {
         let state = Arc::new(Self {
             hwnd: AtomicUsize::new(0),
             closing: AtomicBool::new(false),
@@ -40,6 +43,9 @@ impl Window {
             dimensions: Mutex::new((1024, 720)),
             graphics: Default::default(),
             capture: Default::default(),
+            synthetic_login,
+            script_steps: AtomicUsize::new(0),
+            run_seconds: if synthetic_login { 20 } else { 8 },
         });
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         let ui = state.clone();

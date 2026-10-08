@@ -10,6 +10,9 @@ not changed and this directory is not part of its build or releases.
 `window-audit <parsecd.wasm> [report.json]` runs the original native UI offline
 for the existing bounded eight-second event loop. Its HTTP calls now use the
 common native host bridge, rather than a separate window-only failure stub.
+`login-audit <parsecd.wasm> [report.json]` is a separate 20-second offline test:
+it enters fixed fictitious credentials through native input and presses Log In
+on the pinned UI layout. It accepts no real credentials or account arguments.
 All guest instances share a bounded network metadata observer. Raw guest stdout
 is no longer retained in any mode. This audit mode also omits titles, guest
 filesystem paths, raw execution errors and screenshots.

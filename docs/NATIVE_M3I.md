@@ -41,6 +41,7 @@ replaced with stdout_bytes and network_audit was added).
 ```powershell
 ./parsec-native-wasm.exe guest-audit-probe ./guest-audit-local.json
 ./parsec-native-wasm.exe window-audit ./parsecd.wasm ./window-audit-local.json
+./parsec-native-wasm.exe login-audit ./parsecd.wasm ./login-audit-local.json
 ```
 
 The first command is a controlled WASM test, not the original core. Two instances
@@ -55,7 +56,18 @@ the existing bounded eight-second event loop and process deadline. Inspect
 network_audit for the attempted requests. An empty list proves only that no
 parsed request was observed in that bounded run. It does not prove the core has
 no login flow. This is not a usable login window: do not enter real credentials.
-There is no login automation or synthetic server response fed to the core.
+There is no real-account login automation or synthetic server response fed to
+the core.
+
+The third command is an isolated **offline synthetic input** test of the pinned
+UI layout. It uses the existing native input bridge to enter a fixed fictitious
+email/password and press Log In. Its eight input stages wait for actual UI
+presentations; the layout coordinates are a snapshot-specific diagnostic fixture,
+not a production login contract. It does not accept account arguments or enable
+network. The event loop is bounded to 20 seconds, watchdog to 24 and process
+deadline to 30. It accepts no screenshot argument. synthetic_login_steps reports
+only the injected stage count, not successful form submission or authentication;
+the observed network intent is the separate evidence of a request attempt.
 
 authentication_integrated, external traffic, host connection and decoded video
 remain absent. Next: use observed original-core requests to define the minimal
