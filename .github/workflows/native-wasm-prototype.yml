@@ -101,6 +101,10 @@ jobs:
           $boot.threads | ConvertTo-Json -Depth 5
           $boot.start_error
           Copy-Item -LiteralPath $exe -Destination "$artifact/parsec-native-wasm.exe"
+          & $exe guest-tls-probe "$artifact/guest-tls.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Native guest HTTPS/WSS imports failed' }
+          $tls = Get-Content "$artifact/guest-tls.json" -Raw | ConvertFrom-Json
+          if ($tls.tls_connections_verified -ne 6 -or $tls.certificate_rejections_verified -ne 4 -or !$tls.https_import_verified -or !$tls.wss_import_verified -or !$tls.hostname_mismatch_rejected_verified -or !$tls.untrusted_certificate_rejected_verified -or !$tls.servers_closed -or $tls.certificate_verification_disabled -or $tls.external_requests_enabled -or $tls.authentication_integrated) { throw 'Incorrect guest TLS proof' }
           Copy-Item -LiteralPath prototypes/native-wasm/README.md -Destination "$artifact/README.md"
           Copy-Item -LiteralPath prototypes/native-wasm/Cargo.lock -Destination "$artifact/Cargo.lock"
       - uses: actions/upload-artifact@v4

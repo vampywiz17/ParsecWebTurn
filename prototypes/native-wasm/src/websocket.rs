@@ -16,6 +16,11 @@ pub const MAX_MESSAGE: usize = 64 * 1024;
 const LIMIT: Duration = Duration::from_secs(5);
 const KEEPALIVE: Duration = Duration::from_secs(60);
 
+struct ConnectionOptions {
+    heartbeat: Duration,
+    tls: Option<Arc<rustls::ClientConfig>>,
+}
+
 #[derive(Default)]
 struct Inbox {
     messages: VecDeque<String>,
@@ -91,6 +96,7 @@ impl Socket {
         url: String,
         timeout: Duration,
         heartbeat: Duration,
+        tls: Option<Arc<rustls::ClientConfig>>,
     ) -> std::result::Result<Arc<Self>, u16> {
         let shared = Arc::new(Shared::new());
         let state = shared.clone();
@@ -108,7 +114,7 @@ impl Socket {
                     Ok(runtime) => runtime.block_on(run(
                         url,
                         timeout,
-                        heartbeat,
+                        ConnectionOptions { heartbeat, tls },
                         state.clone(),
                         incoming,
                         cancellation,
@@ -223,7 +229,7 @@ impl Drop for Socket {
 async fn run(
     url: String,
     timeout: Duration,
-    heartbeat: Duration,
+    options: ConnectionOptions,
     state: Arc<Shared>,
     mut writes: command::Receiver<Write>,
     mut cancellation: oneshot::Receiver<()>,
@@ -236,7 +242,9 @@ async fn run(
         .max_write_buffer_size(MAX_MESSAGE * 2);
     let connect = async {
         let request = url.into_client_request()?;
-        tokio_tungstenite::connect_async_with_config(request, Some(config), false).await
+        let connector = options.tls.map(tokio_tungstenite::Connector::Rustls);
+        tokio_tungstenite::connect_async_tls_with_config(request, Some(config), false, connector)
+            .await
     };
     let connected = tokio::select! {
         biased;
@@ -260,7 +268,10 @@ async fn run(
             return;
         }
     };
-    let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + heartbeat, heartbeat);
+    let mut ticker = tokio::time::interval_at(
+        tokio::time::Instant::now() + options.heartbeat,
+        options.heartbeat,
+    );
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let (code, failed) = loop {
         tokio::select! {
@@ -318,14 +329,16 @@ struct Registry {
     sockets: BTreeMap<u32, Arc<Socket>>,
 }
 pub struct Network {
-    port: Option<u16>,
+    policy: crate::network_policy::Policy,
+    tls: Option<Arc<rustls::ClientConfig>>,
     heartbeat: Duration,
     registry: Mutex<Registry>,
 }
 impl Default for Network {
     fn default() -> Self {
         Self {
-            port: None,
+            policy: Default::default(),
+            tls: None,
             heartbeat: KEEPALIVE,
             registry: Mutex::new(Registry {
                 next: 1,
@@ -337,7 +350,8 @@ impl Default for Network {
 impl Network {
     pub fn diagnostic(port: u16, heartbeat: Duration) -> Self {
         Self {
-            port: Some(port),
+            policy: crate::network_policy::Policy::loopback(port),
+            tls: None,
             heartbeat,
             registry: Mutex::new(Registry {
                 next: 1,
@@ -346,13 +360,28 @@ impl Network {
         }
     }
     fn allowed(&self, url: &reqwest::Url) -> bool {
-        self.port.is_some()
-            && url.scheme() == "ws"
-            && url.host_str() == Some("127.0.0.1")
-            && url.port_or_known_default() == self.port
-            && url.username().is_empty()
-            && url.password().is_none()
-            && url.fragment().is_none()
+        self.policy.allows(url) && matches!(url.scheme(), "ws" | "wss")
+    }
+    pub fn diagnostic_tls(port: u16, root: Option<Vec<u8>>) -> Result<Self> {
+        let mut roots = rustls::RootCertStore::empty();
+        if let Some(root) = root {
+            roots.add(rustls::pki_types::CertificateDer::from(root))?;
+        }
+        let config = rustls::ClientConfig::builder_with_provider(Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()?
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+        Ok(Self {
+            policy: crate::network_policy::Policy::secure(&[&format!("wss://127.0.0.1:{port}")])?,
+            tls: Some(Arc::new(config)),
+            heartbeat: KEEPALIVE,
+            registry: Mutex::new(Registry {
+                next: 1,
+                sockets: BTreeMap::new(),
+            }),
+        })
     }
     fn connect(&self, url: reqwest::Url, timeout: Duration) -> std::result::Result<u32, u16> {
         if !self.allowed(&url) {
@@ -364,7 +393,7 @@ impl Network {
         }
         let id = registry.next;
         registry.next += 1;
-        let socket = Socket::start(url.to_string(), timeout, self.heartbeat)?;
+        let socket = Socket::start(url.to_string(), timeout, self.heartbeat, self.tls.clone())?;
         registry.sockets.insert(id, socket);
         Ok(id)
     }

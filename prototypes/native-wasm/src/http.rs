@@ -19,7 +19,8 @@ const MAX_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Default)]
 pub struct Network {
-    loopback_port: Option<u16>,
+    policy: crate::network_policy::Policy,
+    fixture_root: Option<Vec<u8>>,
     client: OnceLock<Client>,
     active: Mutex<usize>,
 }
@@ -42,19 +43,21 @@ impl Drop for Active<'_> {
 impl Network {
     pub fn diagnostic(port: u16) -> Self {
         Self {
-            loopback_port: Some(port),
+            policy: crate::network_policy::Policy::loopback(port),
             ..Default::default()
         }
     }
 
     fn allowed(&self, url: &Url) -> bool {
-        self.loopback_port.is_some()
-            && url.scheme() == "http"
-            && url.host_str() == Some("127.0.0.1")
-            && url.port_or_known_default() == self.loopback_port
-            && url.username().is_empty()
-            && url.password().is_none()
-            && url.fragment().is_none()
+        self.policy.allows(url) && matches!(url.scheme(), "http" | "https")
+    }
+
+    pub fn diagnostic_tls(port: u16, root: Option<Vec<u8>>) -> Result<Self> {
+        Ok(Self {
+            policy: crate::network_policy::Policy::secure(&[&format!("https://127.0.0.1:{port}")])?,
+            fixture_root: root,
+            ..Default::default()
+        })
     }
 
     fn execute(&self, request: Request) -> Result<(u16, Vec<u8>)> {
@@ -72,13 +75,19 @@ impl Network {
         // No URL/header/body/error is logged. No proxy, cookie jar or redirect:
         // even a loopback redirect must never reach an unintended destination.
         if self.client.get().is_none() {
-            let client = Client::builder()
+            let mut builder = Client::builder()
                 .no_proxy()
                 .redirect(reqwest::redirect::Policy::none())
                 .connect_timeout(MAX_TIMEOUT)
                 .timeout(MAX_TIMEOUT)
-                .pool_max_idle_per_host(2)
-                .build()?;
+                .pool_max_idle_per_host(2);
+            if let Some(root) = &self.fixture_root {
+                // Private trust is scoped to this loopback diagnostic client.
+                builder = builder
+                    .tls_built_in_root_certs(false)
+                    .add_root_certificate(reqwest::Certificate::from_der(root)?);
+            }
+            let client = builder.build()?;
             let _ = self.client.set(client);
         }
         let client = self.client.get().context("HTTP client unavailable")?;

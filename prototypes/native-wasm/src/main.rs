@@ -12,10 +12,12 @@ mod host;
 mod http;
 mod http_probe;
 mod memory;
+mod network_policy;
 mod poll;
 mod session_probe;
 mod signaling;
 mod threads;
+mod tls_probe;
 mod transport;
 mod websocket;
 mod websocket_probe;
@@ -123,12 +125,15 @@ fn run() -> Result<()> {
             | "guest-buffer-probe"
             | "guest-http-probe"
             | "guest-websocket-probe"
+            | "guest-tls-probe"
     ) {
         let path = args.next().map(PathBuf::from);
         if args.next().is_some() {
             bail!("too many arguments");
         }
-        let report = if mode == "guest-websocket-probe" {
+        let report = if mode == "guest-tls-probe" {
+            tls_probe::probe()?
+        } else if mode == "guest-websocket-probe" {
             websocket_probe::probe()?
         } else if mode == "guest-http-probe" {
             http_probe::probe()?
@@ -177,6 +182,7 @@ fn run() -> Result<()> {
                   parsec-native-wasm guest-buffer-probe [report.json]\n\
                   parsec-native-wasm guest-http-probe [report.json]\n\
                   parsec-native-wasm guest-websocket-probe [report.json]\n\
+                  parsec-native-wasm guest-tls-probe [report.json]\n\
                   WASM UI remains offline; probes use native peers. No browser, login or decoded remote video.\n\
                   boot reports the first unimplemented bridge; it is not a connected client."
         );

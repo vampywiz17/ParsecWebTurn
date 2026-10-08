@@ -5,6 +5,15 @@ Parsec WASM binary and supplies host imports in Rust using Wasmtime. It does not
 link Tauri, WebView2, a JavaScript engine, or a browser. The production app is
 not changed and this directory is not part of its build or releases.
 
+## Native HTTPS/WSS boundary stage M3h
+
+`guest-tls-probe [report.json]` exercises the actual HTTP/WebSocket imports
+over native TLS with synthetic credentials on local servers. It verifies
+encrypted request/response and session-text exchange, rejection of untrusted
+and name-mismatched certificates, offline/exact-origin policy and cleanup.
+This does not enable real-account login or external traffic in original-core
+modes. Read [M3h details](../../docs/NATIVE_M3H.md).
+
 ## Native WebSocket imports stage M3g
 
 `guest-websocket-probe [report.json]` runs the five pinned Matoya WebSocket
