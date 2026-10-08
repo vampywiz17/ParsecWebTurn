@@ -164,6 +164,7 @@ pub fn dispatch(
         memory.write(p, &vec![0; n])?;
     }
     out[0] = Val::I32(0);
+    caller.data_mut().http_failure = None;
     // Match the pinned worker's boolean failure result, with deterministic zero
     // outputs. Invalid output pointers trap before any request or output write.
     let request: Result<Request> = (|| {
@@ -206,12 +207,20 @@ pub fn dispatch(
             timeout,
         })
     })();
-    let Ok(request) = request else {
-        return Ok(());
+    let request = match request {
+        Ok(request) => request,
+        Err(_) => {
+            caller.data_mut().http_failure = Some("request-validation");
+            return Ok(());
+        }
     };
     let network = caller.data().http.clone();
-    let Ok((status, body)) = network.execute(request) else {
-        return Ok(());
+    let (status, body) = match network.execute(request) {
+        Ok(response) => response,
+        Err(error) => {
+            caller.data_mut().http_failure = Some(failure_kind(&error));
+            return Ok(());
+        }
     };
     let mut pointer = 0;
     if !body.is_empty() {
@@ -247,6 +256,26 @@ pub fn dispatch(
     memory.write(outputs[2].0, &status.to_le_bytes())?;
     out[0] = Val::I32(1);
     Ok(()) // Allocated response ownership belongs to the guest.
+}
+
+fn failure_kind(error: &anyhow::Error) -> &'static str {
+    if let Some(error) = error.downcast_ref::<reqwest::Error>() {
+        if error.is_timeout() {
+            "timeout"
+        } else if error.is_connect() {
+            "connect"
+        } else if error.is_body() {
+            "body"
+        } else if error.is_request() {
+            "request-transport"
+        } else {
+            "http-transport"
+        }
+    } else if error.downcast_ref::<std::io::Error>().is_some() {
+        "body-io"
+    } else {
+        "policy-or-limit"
+    }
 }
 
 #[cfg(test)]

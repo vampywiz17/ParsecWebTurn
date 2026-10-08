@@ -2,7 +2,7 @@
 use anyhow::{bail, Context, Result};
 use std::{
     io::{Read, Write},
-    net::{TcpListener, TcpStream},
+    net::{Shutdown, TcpListener, TcpStream},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
@@ -121,6 +121,7 @@ fn serve(mut stream: TcpStream) -> Result<bool> {
         }
         _ => bail!("Unexpected fixture HTTP path"),
     }
+    let _ = stream.shutdown(Shutdown::Write);
     Ok(checked)
 }
 
@@ -171,7 +172,12 @@ pub fn probe() -> Result<serde_json::Value> {
     }
     store.data_mut().http = Arc::new(crate::http::Network::diagnostic(server.port));
     if request.call(&mut store, (1000, 400))? != 1 {
-        bail!("HTTP binary response failed");
+        server.finish()?;
+        bail!(
+            "HTTP binary response failed: category={}, completed_fixture_requests={}",
+            store.data().http_failure.unwrap_or("guest-allocation"),
+            server.checks.lock().unwrap().len()
+        );
     }
     if memory.u32(400)? != 8192
         || memory.u32(404)? != 5

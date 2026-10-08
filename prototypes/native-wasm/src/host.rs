@@ -20,6 +20,8 @@ pub struct HostState {
     #[serde(skip)]
     pub http: std::sync::Arc<crate::http::Network>,
     #[serde(skip)]
+    pub http_failure: Option<&'static str>,
+    #[serde(skip)]
     pub started: Instant,
     pub calls: BTreeMap<String, u64>,
     pub boundary: Option<String>,
@@ -46,6 +48,7 @@ impl HostState {
             filesystem: Default::default(),
             backend: Default::default(),
             http: Default::default(),
+            http_failure: None,
             started: Instant::now(),
             calls: BTreeMap::new(),
             boundary: None,
