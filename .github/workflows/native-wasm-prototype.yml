@@ -1,0 +1,63 @@
+name: Native WASM prototype
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/native-wasm-prototype]
+    paths:
+      - 'prototypes/native-wasm/**'
+      - '.github/workflows/native-wasm-prototype.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: prototypes/native-wasm
+      - name: Validate and build independent Rust host
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo fmt --manifest-path prototypes/native-wasm/Cargo.toml -- --check
+          if ($LASTEXITCODE -ne 0) { throw 'Formatting failed' }
+          cargo test --locked --manifest-path prototypes/native-wasm/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
+          cargo clippy --locked --manifest-path prototypes/native-wasm/Cargo.toml --all-targets -- -D warnings
+          if ($LASTEXITCODE -ne 0) { throw 'Clippy failed' }
+          cargo build --locked --release --manifest-path prototypes/native-wasm/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
+      - name: Run original Parsec WASM without a browser
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./prototypes/native-wasm/fetch-core.ps1
+          $artifact = 'prototypes/native-wasm/artifacts'
+          New-Item -ItemType Directory -Path $artifact -Force | Out-Null
+          $exe = 'prototypes/native-wasm/target/release/parsec-native-wasm.exe'
+          $core = 'prototypes/native-wasm/vendor/parsecd.wasm'
+          foreach ($mode in @('inspect', 'allocator', 'boot')) {
+            & $exe $mode $core "$artifact/$mode.json" | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "WASM $mode failed" }
+          }
+          $allocator = Get-Content "$artifact/allocator.json" -Raw | ConvertFrom-Json
+          if (!$allocator.instantiated -or !$allocator.allocator_roundtrip) { throw 'Actual guest allocator not verified' }
+          $boot = Get-Content "$artifact/boot.json" -Raw | ConvertFrom-Json
+          if (!$boot.instantiated -or $boot.video_rendered -or $boot.network_enabled) { throw 'Incorrect bootstrap status' }
+          $boot.host | ConvertTo-Json -Depth 5
+          $boot.start_error
+          Copy-Item -LiteralPath $exe -Destination "$artifact/parsec-native-wasm.exe"
+          Copy-Item -LiteralPath prototypes/native-wasm/README.md -Destination "$artifact/README.md"
+          Copy-Item -LiteralPath prototypes/native-wasm/Cargo.lock -Destination "$artifact/Cargo.lock"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Native-WASM-prototype-win64
+          path: prototypes/native-wasm/artifacts/
+          if-no-files-found: error
