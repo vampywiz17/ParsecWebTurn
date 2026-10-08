@@ -466,9 +466,19 @@ fn worker(
             state.progress.mid = description.mid.clone();
         }
         let ready = state.progress.ready;
+        let cancelled = state.cancelled;
         drop(state);
+        if cancelled {
+            return Ok(());
+        }
+        if !ready {
+            bail!("native offer publication failed or was cancelled");
+        }
         let deadline = std::time::Instant::now() + Duration::from_secs(30);
-        while ready {
+        loop {
+            if std::time::Instant::now() >= deadline {
+                bail!("native diagnostic attempt expired");
+            }
             let command = match commands
                 .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
             {

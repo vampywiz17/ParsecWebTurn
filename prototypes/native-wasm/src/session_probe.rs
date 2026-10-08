@@ -223,6 +223,18 @@ pub fn probe() -> Result<serde_json::Value> {
             .context("native attempt lost")?;
         let exchange = (|| -> Result<serde_json::Value> {
             attempt.wait_transport(Duration::from_secs(10))?;
+            runtime.block_on(async {
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    while peer.connection_state() != RTCPeerConnectionState::Connected
+                        || channels
+                            .iter()
+                            .any(|c| c.ready_state() != RTCDataChannelState::Open)
+                    {
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                })
+                .await
+            })?;
             if peer.connection_state() != RTCPeerConnectionState::Connected
                 || channels
                     .iter()
