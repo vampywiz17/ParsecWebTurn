@@ -126,16 +126,20 @@ async fn serve(listener: tokio::net::TcpListener) -> Result<usize> {
     }
 
     let (stream, _) = listener.accept().await?;
-    let rejected = tokio_tungstenite::accept_hdr_async(stream, |_: &Request, _: Response| {
-        let mut response = ErrorResponse::new(Some("fixture rejection".into()));
-        *response.status_mut() = tokio_tungstenite::tungstenite::http::StatusCode::FORBIDDEN;
-        Err(response)
-    })
-    .await;
+    let rejected = tokio_tungstenite::accept_hdr_async(stream, reject_upgrade).await;
     if rejected.is_ok() {
         bail!("Rejected handshake succeeded");
     }
     Ok(4)
+}
+
+// Tungstenite's public Callback contract requires an unboxed ErrorResponse;
+// boxing it would change the required signature. Scoped to this fixture only.
+#[allow(clippy::result_large_err)]
+fn reject_upgrade(_: &Request, _: Response) -> std::result::Result<Response, ErrorResponse> {
+    let mut response = ErrorResponse::new(Some("fixture rejection".into()));
+    *response.status_mut() = tokio_tungstenite::tungstenite::http::StatusCode::FORBIDDEN;
+    Err(response)
 }
 
 pub fn probe() -> Result<serde_json::Value> {
