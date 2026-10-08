@@ -2,6 +2,8 @@
 
 The user's first real-account test logged in and immediately closed the native
 window. Its redacted report contains eight guest thread records (IDs 2–9).
+The main instance recorded five spawn calls and the rendering worker four:
+nine calls reached the old eight-record lifetime limit.
 Two HTTP workers finished normally, the rendering worker called WASI proc_exit,
 and no unimplemented-import boundary was reported. Authentication requests and
 an authorized API GET were permitted. This is consistent with the old lifetime
@@ -37,3 +39,28 @@ prototype branch.
 
 Reference: https://github.com/WebAssembly/wasi-threads (legacy preview1 proposal;
 retained for the pinned core, not claimed to be a current WASI v0.2 interface).
+
+## Verified build
+
+Source commit: `ede46a331d9bfd019c3d66c4ee31496940d04a90`.
+[Windows CI run 37857243591](https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37857243591)
+passed formatting, Clippy with warnings denied, all 51 tests, the release build
+and the native diagnostic probes.
+
+The downloaded release executable also passed the local guest-thread probe:
+97 workers completed, peak concurrency was 16, the deliberate 17th concurrent
+spawn was rejected, capacity recovered, and 33 completed history entries were
+omitted. No account or external request was used.
+
+The original-core 35-second offline window test presented 59 frames using
+295 draw calls and two shaders on the AMD Radeon 780M accelerated OpenGL
+context. It released the native window normally and rejected no worker spawns.
+These are core UI frames, not decoded remote video. Waiting guest workers can
+remain in the shutdown snapshot; this test does not claim every worker joined.
+
+The release login-audit regression also passed all eight synthetic input steps.
+The original core generated the expected authentication POST with a 133-byte
+fixture body; offline policy blocked the request. The window presented 14 UI
+frames, shut down normally, and rejected no workers. The exported report does
+not contain the fixture email or password. Actual post-login behavior still
+requires the user's retest with this build.
