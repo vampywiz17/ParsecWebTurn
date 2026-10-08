@@ -93,7 +93,7 @@ probe. The unchanged core identifies as 150-104a, SHA-256
 `d663dd96df477c65479fb93eb88756c7fcafff581cc93be563625cd195a4b4a6`.
 
 The downloaded release executable also passed `guest-buffer-probe` locally:
-all eleven buffer verification flags were true, all three channels opened,
+all ten buffer verification flags were true, all three channels opened,
 both peers closed and the native worker finished. Cursor rendering, clipboard
 synchronization, original-guest connection and decoded video remain false.
 This evidence covers synthetic local interoperability, not a real Parsec host.
