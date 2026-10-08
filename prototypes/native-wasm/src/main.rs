@@ -1,5 +1,6 @@
 mod attempt;
 mod attempt_probe;
+mod audit_probe;
 mod backend;
 mod buffers;
 mod control;
@@ -12,6 +13,7 @@ mod host;
 mod http;
 mod http_probe;
 mod memory;
+mod network_audit;
 mod network_policy;
 mod poll;
 mod session_probe;
@@ -89,6 +91,7 @@ struct Report {
     host: Option<HostState>,
     threads: Vec<threads::ThreadRecord>,
     native_backend: Option<serde_json::Value>,
+    network_audit: Option<network_audit::Snapshot>,
     #[cfg(windows)]
     graphics: Option<graphics::GraphicsReport>,
 }
@@ -117,6 +120,8 @@ fn main() {
 fn run() -> Result<()> {
     let mut args = env::args().skip(1);
     let mode = args.next().unwrap_or_else(|| "help".into());
+    let window_mode = matches!(mode.as_str(), "window" | "window-audit");
+    let audit_mode = mode == "window-audit";
     if matches!(
         mode.as_str(),
         "guest-offer-probe"
@@ -126,12 +131,15 @@ fn run() -> Result<()> {
             | "guest-http-probe"
             | "guest-websocket-probe"
             | "guest-tls-probe"
+            | "guest-audit-probe"
     ) {
         let path = args.next().map(PathBuf::from);
         if args.next().is_some() {
             bail!("too many arguments");
         }
-        let report = if mode == "guest-tls-probe" {
+        let report = if mode == "guest-audit-probe" {
+            audit_probe::probe()?
+        } else if mode == "guest-tls-probe" {
             tls_probe::probe()?
         } else if mode == "guest-websocket-probe" {
             websocket_probe::probe()?
@@ -183,16 +191,21 @@ fn run() -> Result<()> {
                   parsec-native-wasm guest-http-probe [report.json]\n\
                   parsec-native-wasm guest-websocket-probe [report.json]\n\
                   parsec-native-wasm guest-tls-probe [report.json]\n\
+                  parsec-native-wasm guest-audit-probe [report.json]\n\
+                  parsec-native-wasm window-audit <parsecd.wasm> [report.json]\n\
                   WASM UI remains offline; probes use native peers. No browser, login or decoded remote video.\n\
                   boot reports the first unimplemented bridge; it is not a connected client."
         );
         return Ok(());
     }
-    if !matches!(mode.as_str(), "inspect" | "allocator" | "boot" | "window") {
+    if !matches!(
+        mode.as_str(),
+        "inspect" | "allocator" | "boot" | "window" | "window-audit"
+    ) {
         bail!("unknown mode: {mode}");
     }
     #[cfg(not(windows))]
-    if mode == "window" {
+    if window_mode {
         bail!("The native window prototype currently requires Windows");
     }
     let path = PathBuf::from(args.next().context("WASM path required")?);
@@ -219,7 +232,7 @@ fn run() -> Result<()> {
     let engine = Engine::new(&config)?;
     let module = Module::new(&engine, &bytes).context("compiling the original WASM")?;
     let mut report = Report {
-        schema: 2,
+        schema: 3,
         wasm_sha256: hash,
         mode: mode.clone(),
         imports: module
@@ -230,12 +243,8 @@ fn run() -> Result<()> {
                 signature: format!("{:?}", i.ty()),
                 bridge: if matches!(i.ty(), ExternType::Memory(_)) {
                     "shared-memory"
-                } else if mode == "window" && native_window_import(i.module(), i.name()) {
-                    if i.name() == "MTY_HttpRequest" {
-                        "offline-http-failure"
-                    } else {
-                        "native-window"
-                    }
+                } else if window_mode && native_window_import(i.module(), i.name()) {
+                    "native-window"
                 } else if host::disabled_web_stub(i.module(), i.name()) {
                     "unavailable-as-in-web-client"
                 } else if host::implemented(i.module(), i.name()) {
@@ -258,13 +267,14 @@ fn run() -> Result<()> {
         host: None,
         threads: Vec::new(),
         native_backend: None,
+        network_audit: None,
         #[cfg(windows)]
         graphics: None,
     };
     if mode != "inspect" {
         let _deadline = ExecutionDeadline::start();
         #[cfg(windows)]
-        let native_window = if mode == "window" {
+        let native_window = if window_mode {
             Some(window::Window::create()?)
         } else {
             None
@@ -280,11 +290,11 @@ fn run() -> Result<()> {
         report.instantiated = true;
         allocator_roundtrip(&mut store, &instance)?;
         report.allocator_roundtrip = true;
-        if mode == "boot" || mode == "window" {
+        if mode == "boot" || window_mode {
             let start = instance.get_typed_func::<(), ()>(&mut store, "_start")?;
             let outcome = start.call(&mut store, ());
             #[cfg(windows)]
-            let handed_off = mode == "window" && store.data().event_loop.is_some();
+            let handed_off = window_mode && store.data().event_loop.is_some();
             #[cfg(not(windows))]
             let handed_off = false;
             if outcome.is_err() && !handed_off {
@@ -325,6 +335,7 @@ fn run() -> Result<()> {
             // This does not wait indefinitely for guest threads.
             std::thread::sleep(Duration::from_millis(100));
             report.threads = runtime.snapshot();
+            report.network_audit = Some(runtime.audit.snapshot());
         }
         report.native_backend = Some(serde_json::to_value(
             &*store
@@ -334,6 +345,22 @@ fn run() -> Result<()> {
                 .map_err(|_| anyhow::anyhow!("backend lock poisoned"))?,
         )?);
         report.host = Some(store.into_data());
+    }
+    if audit_mode {
+        // Keep the dedicated account-flow audit independent of guest strings,
+        // window titles, filenames and potentially sensitive exception details.
+        if report.start_error.is_some() {
+            report.start_error = Some("guest-execution-failed".into());
+        }
+        for thread in &mut report.threads {
+            if thread.error.is_some() {
+                thread.error = Some("guest-worker-failed".into());
+            }
+        }
+        if let Some(host) = &mut report.host {
+            host.title = None;
+            host.filesystem_requests.clear();
+        }
     }
     let json = serde_json::to_string_pretty(&report)?;
     if let Some(path) = report_path {

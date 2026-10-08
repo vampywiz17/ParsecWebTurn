@@ -19,6 +19,7 @@ const MAX_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Default)]
 pub struct Network {
+    pub audit: std::sync::Arc<crate::network_audit::Audit>,
     policy: crate::network_policy::Policy,
     fixture_root: Option<Vec<u8>>,
     client: OnceLock<Client>,
@@ -41,6 +42,12 @@ impl Drop for Active<'_> {
 }
 
 impl Network {
+    pub fn offline(audit: std::sync::Arc<crate::network_audit::Audit>) -> Self {
+        Self {
+            audit,
+            ..Default::default()
+        }
+    }
     pub fn diagnostic(port: u16) -> Self {
         Self {
             policy: crate::network_policy::Policy::loopback(port),
@@ -61,6 +68,13 @@ impl Network {
     }
 
     fn execute(&self, request: Request) -> Result<(u16, Vec<u8>)> {
+        self.audit.record(
+            &request.url,
+            request.method.as_str(),
+            request.headers.contains_key(reqwest::header::AUTHORIZATION),
+            request.body.as_ref().map_or(0, Vec::len),
+            self.allowed(&request.url),
+        );
         if !self.allowed(&request.url) {
             bail!("HTTP destination not enabled");
         }

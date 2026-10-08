@@ -19,7 +19,6 @@ pub fn handles(name: &str) -> bool {
                 | "web_set_app"
                 | "web_set_title"
                 | "MTY_DecompressImage"
-                | "MTY_HttpRequest"
         )
 }
 
@@ -120,13 +119,6 @@ pub fn dispatch(
                 );
             }
             caller.data_mut().title = Some(title);
-        }
-        "MTY_HttpRequest" => {
-            // This experiment explicitly has no HTTP service. A request fails,
-            // as an offline browser fetch would; it never fabricates a response.
-            if let Some(slot) = results.first_mut() {
-                *slot = Val::I32(0);
-            }
         }
         "MTY_DecompressImage" => {
             let size = usize::try_from(int(1)?)?;

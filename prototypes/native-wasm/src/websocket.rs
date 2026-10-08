@@ -329,6 +329,7 @@ struct Registry {
     sockets: BTreeMap<u32, Arc<Socket>>,
 }
 pub struct Network {
+    pub audit: Arc<crate::network_audit::Audit>,
     policy: crate::network_policy::Policy,
     tls: Option<Arc<rustls::ClientConfig>>,
     heartbeat: Duration,
@@ -336,8 +337,14 @@ pub struct Network {
 }
 impl Default for Network {
     fn default() -> Self {
+        Self::offline(Default::default())
+    }
+}
+impl Network {
+    pub fn offline(audit: Arc<crate::network_audit::Audit>) -> Self {
         Self {
             policy: Default::default(),
+            audit,
             tls: None,
             heartbeat: KEEPALIVE,
             registry: Mutex::new(Registry {
@@ -346,11 +353,10 @@ impl Default for Network {
             }),
         }
     }
-}
-impl Network {
     pub fn diagnostic(port: u16, heartbeat: Duration) -> Self {
         Self {
             policy: crate::network_policy::Policy::loopback(port),
+            audit: Default::default(),
             tls: None,
             heartbeat,
             registry: Mutex::new(Registry {
@@ -375,6 +381,7 @@ impl Network {
         .with_no_client_auth();
         Ok(Self {
             policy: crate::network_policy::Policy::secure(&[&format!("wss://127.0.0.1:{port}")])?,
+            audit: Default::default(),
             tls: Some(Arc::new(config)),
             heartbeat: KEEPALIVE,
             registry: Mutex::new(Registry {
@@ -384,6 +391,7 @@ impl Network {
         })
     }
     fn connect(&self, url: reqwest::Url, timeout: Duration) -> std::result::Result<u32, u16> {
+        self.audit.record(&url, "GET", false, 0, self.allowed(&url));
         if !self.allowed(&url) {
             return Err(0);
         }

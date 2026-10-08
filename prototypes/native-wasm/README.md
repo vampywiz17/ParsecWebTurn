@@ -5,6 +5,20 @@ Parsec WASM binary and supplies host imports in Rust using Wasmtime. It does not
 link Tauri, WebView2, a JavaScript engine, or a browser. The production app is
 not changed and this directory is not part of its build or releases.
 
+## Original UI network audit stage M3i
+
+`window-audit <parsecd.wasm> [report.json]` runs the original native UI offline
+for the existing bounded eight-second event loop. Its HTTP calls now use the
+common native host bridge, rather than a separate window-only failure stub.
+All guest instances share a bounded network metadata observer. Raw guest stdout
+is no longer retained in any mode. This audit mode also omits titles, guest
+filesystem paths, raw execution errors and screenshots.
+
+`guest-audit-probe [report.json]` verifies actual HTTP/WebSocket/WASI imports,
+shared observations from two guest instances, offline failure outputs and
+redaction with synthetic secret sentinels. No account login/external network is
+enabled. Read [M3i details](../../docs/NATIVE_M3I.md).
+
 ## Native HTTPS/WSS boundary stage M3h
 
 `guest-tls-probe [report.json]` exercises the actual HTTP/WebSocket imports

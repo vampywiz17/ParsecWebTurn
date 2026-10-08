@@ -27,7 +27,7 @@ pub struct HostState {
     pub started: Instant,
     pub calls: BTreeMap<String, u64>,
     pub boundary: Option<String>,
-    pub stdout: String,
+    pub stdout_bytes: u64,
     pub title: Option<String>,
     pub app_pointer: Option<u32>,
     pub filesystem_requests: Vec<(String, String, i32)>,
@@ -55,7 +55,7 @@ impl HostState {
             started: Instant::now(),
             calls: BTreeMap::new(),
             boundary: None,
-            stdout: String::new(),
+            stdout_bytes: 0,
             title: None,
             app_pointer: None,
             filesystem_requests: Vec::new(),
@@ -447,10 +447,10 @@ pub fn dispatch(
                     }
                     let bytes = m.read(p, len as usize)?;
                     if fd <= 2 {
-                        let text = String::from_utf8_lossy(&bytes);
-                        if caller.data().stdout.len() + text.len() <= 65536 {
-                            caller.data_mut().stdout.push_str(&text);
-                        }
+                        // Guest logs can contain request bodies/session tokens.
+                        // Count acknowledged bytes, never retain log contents.
+                        caller.data_mut().stdout_bytes =
+                            caller.data().stdout_bytes.saturating_add(len as u64);
                     } else {
                         let fs = caller.data().filesystem.clone();
                         let mut fs = fs

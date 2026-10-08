@@ -15,6 +15,7 @@ pub struct ThreadRuntime {
     pub backend: Arc<Mutex<crate::backend::Backend>>,
     pub http: Arc<crate::http::Network>,
     pub websocket: Arc<crate::websocket::Network>,
+    pub audit: Arc<crate::network_audit::Audit>,
     pub started: std::time::Instant,
     pub(crate) records: Mutex<Vec<ThreadRecord>>,
     #[cfg(windows)]
@@ -32,14 +33,18 @@ pub struct ThreadRecord {
 
 impl ThreadRuntime {
     pub fn new(engine: Engine, module: Module, memory: GuestMemory) -> Self {
+        let audit = Arc::new(crate::network_audit::Audit::default());
+        let http = crate::http::Network::offline(audit.clone());
+        let websocket = crate::websocket::Network::offline(audit.clone());
         Self {
             engine,
             module,
             memory,
             filesystem: Default::default(),
             backend: Default::default(),
-            http: Default::default(),
-            websocket: Default::default(),
+            http: Arc::new(http),
+            websocket: Arc::new(websocket),
+            audit,
             started: std::time::Instant::now(),
             records: Mutex::new(Vec::new()),
             #[cfg(windows)]
