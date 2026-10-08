@@ -214,8 +214,17 @@ fn run_loop(store: &mut Store<HostState>, instance: &Instance, input: bool) -> R
         export(store, instance, "mty_app_set_keys", &[])?;
     }
     let until = Instant::now() + Duration::from_secs(8);
+    let mut first = true;
     while !window.closing.load(Ordering::Acquire) && Instant::now() < until {
-        store.set_fuel(50_000_000)?;
+        let frame_started = Instant::now();
+        // The first render callback decompresses/rasterizes the embedded font
+        // atlas. Give that one-time initialization its own bounded budget;
+        // subsequent iterations retain the smaller per-frame allowance.
+        store.set_fuel(if first && !input {
+            500_000_000
+        } else {
+            50_000_000
+        })?;
         if input {
             let app = store.data().app_pointer.context("app pointer missing")? as i32;
             let events = window
@@ -275,7 +284,14 @@ fn run_loop(store: &mut Store<HostState>, instance: &Instance, input: bool) -> R
         if callback.call(&mut *store, opaque as i32)? == 0 {
             break;
         }
-        std::thread::sleep(Duration::from_millis(16));
+        first = false;
+        // SwapBuffers can already wait for vblank. Do not add a full second
+        // frame delay on top of that; idle callbacks still avoid busy polling.
+        let remaining =
+            Duration::from_nanos(1_000_000_000 / 60).saturating_sub(frame_started.elapsed());
+        if !remaining.is_zero() {
+            std::thread::sleep(remaining);
+        }
     }
     Ok(())
 }
