@@ -104,6 +104,17 @@ impl Backend {
         self.events.pop_front()
     }
 
+    pub fn pump_native_events(&mut self) {
+        if let Some(attempt) = &self.native_attempt {
+            while self.events.len() < 32 {
+                let Some(event) = attempt.pop_event() else {
+                    break;
+                };
+                self.events.push_back(event);
+            }
+        }
+    }
+
     pub fn peek_event(&self) -> Option<&Value> {
         self.events.front()
     }

@@ -31,8 +31,22 @@ Read [M3a scope and acceptance criteria](../../docs/NATIVE_M3.md).
 controlled WASM fixture, verifies the shared-memory completion handshake and
 actual native credentials, then cancels and checks peer cleanup. The worker is
 asynchronous, bounded and isolated from backend locks. The original guest's
-remote begin/candidate imports and login remain later work; this is not a live
+remote begin/candidate imports are added in M3c below; login remains later work. This is not a live
 Parsec host session. Read [M3b details](../../docs/NATIVE_M3B.md).
+
+## Native attempt signaling stage M3c
+
+`guest-session-probe [report.json]` exercises `new_attempt`, `begin_p2p`,
+`add_candidate` and `poll_events` through a controlled WASM guest. It connects
+the retained native peer to a local test peer using only compact credentials
+and guest candidate events. It verifies three ICE/DTLS/SCTP channels, six
+binary messages, the candidate sync acknowledgment, failed-buffer-copy retry
+and cancellation/cleanup. No browser or JavaScript participates.
+
+This is a bounded transport diagnostic, not a working Parsec host session:
+the original guest UI attempt, account signaling, Parsec control framing,
+video decoding and audio playback are not exercised. Read
+[M3c details](../../docs/NATIVE_M3C.md).
 
 ## Runtime milestone M0, 2026-10-08
 

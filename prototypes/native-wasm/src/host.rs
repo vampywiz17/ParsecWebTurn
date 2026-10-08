@@ -77,6 +77,8 @@ pub fn implemented(module: &str, name: &str) -> bool {
                 | "MTY_GetRandomBytes"
                 | "parsec_web_init"
                 | "parsec_web_new_attempt"
+                | "parsec_web_begin_p2p"
+                | "parsec_web_add_candidate"
                 | "parsec_web_destroy"
                 | "parsec_web_disconnect"
                 | "parsec_web_get_status"
@@ -488,7 +490,7 @@ fn backend_call(
                     } else {
                         // Spawn returns immediately. Native async work never
                         // needs this backend lock or a Wasmtime Store/Caller.
-                        match crate::attempt::Attempt::spawn(output.clone()) {
+                        match crate::attempt::Attempt::spawn_named(&id, output.clone()) {
                             Ok(attempt) => {
                                 b.status = Some(20);
                                 b.native_attempt = Some(attempt);
@@ -497,6 +499,34 @@ fn backend_call(
                                 output.finish(None)?;
                             }
                         }
+                    }
+                }
+                "parsec_web_begin_p2p" => {
+                    let id = m.string(ptr(args, 0)?, 257)?;
+                    // The pinned JS ignores port: ICE selects the endpoint.
+                    let remote = crate::signaling::Credentials {
+                        ufrag: m.string(ptr(args, 2)?, 257)?,
+                        password: m.string(ptr(args, 3)?, 257)?,
+                        fingerprint: m.string(ptr(args, 4)?, 257)?,
+                    };
+                    b.native_attempt
+                        .as_ref()
+                        .context("no native attempt")?
+                        .begin(&id, remote)?;
+                }
+                "parsec_web_add_candidate" => {
+                    let id = m.string(ptr(args, 0)?, 257)?;
+                    let attempt = b.native_attempt.as_ref().context("no native attempt")?;
+                    if int(args, 3)? != 0 {
+                        // Sync is a protocol marker, never an IP endpoint.
+                        attempt.sync(&id)?;
+                    } else {
+                        let candidate = crate::signaling::Candidate::new(
+                            &m.string(ptr(args, 1)?, 128)?,
+                            u16::try_from(int(args, 2)?).context("invalid candidate port")?,
+                            int(args, 4)? != 0,
+                        )?;
+                        attempt.candidate(&id, candidate)?;
                     }
                 }
                 "parsec_web_disconnect" => b.disconnect(int(args, 0)?, int(args, 1)?)?,
@@ -528,6 +558,7 @@ fn backend_call(
                     m.c_string(ptr(args, 0)?, ptr(args, 1)? as usize, "[]")?
                 }
                 "parsec_web_poll_events" => {
+                    b.pump_native_events();
                     if let Some(event) = b.peek_event() {
                         let json = serde_json::to_string(event)?;
                         // Consume only after a successful copy, so a bad guest

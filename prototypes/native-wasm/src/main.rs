@@ -9,6 +9,7 @@ mod graphics;
 mod host;
 mod memory;
 mod poll;
+mod session_probe;
 mod signaling;
 mod threads;
 mod transport;
@@ -108,12 +109,16 @@ fn main() {
 fn run() -> Result<()> {
     let mut args = env::args().skip(1);
     let mode = args.next().unwrap_or_else(|| "help".into());
-    if mode == "guest-offer-probe" {
+    if matches!(mode.as_str(), "guest-offer-probe" | "guest-session-probe") {
         let path = args.next().map(PathBuf::from);
         if args.next().is_some() {
             bail!("too many arguments");
         }
-        let report = attempt_probe::probe()?;
+        let report = if mode == "guest-session-probe" {
+            session_probe::probe()?
+        } else {
+            attempt_probe::probe()?
+        };
         let json = serde_json::to_string_pretty(&report)?;
         if let Some(path) = path {
             fs::write(path, &json)?;
@@ -145,6 +150,7 @@ fn run() -> Result<()> {
                   parsec-native-wasm transport-probe [report.json]\n\
                   parsec-native-wasm signaling-probe [report.json]\n\
                   parsec-native-wasm guest-offer-probe [report.json]\n\
+                  parsec-native-wasm guest-session-probe [report.json]\n\
                   WASM UI remains offline; probes use native peers. No browser, login or decoded remote video.\n\
                   boot reports the first unimplemented bridge; it is not a connected client."
         );
@@ -516,7 +522,7 @@ mod tests {
             &engine,
             r#"(module
             (import "env" "memory" (memory 1 1 shared))
-            (import "env" "parsec_web_begin_p2p" (func $connect (result i32)))
+            (import "env" "MTY_HttpRequest" (func $connect (result i32)))
             (func (export "probe") (result i32) call $connect))"#,
         )
         .unwrap();
@@ -528,7 +534,7 @@ mod tests {
             .is_err());
         assert_eq!(
             store.data().boundary.as_deref(),
-            Some("env::parsec_web_begin_p2p")
+            Some("env::MTY_HttpRequest")
         );
     }
 
