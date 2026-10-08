@@ -48,7 +48,7 @@ impl GuestMemory {
 
     pub fn sync_word(&self, ptr: u32) -> Result<&AtomicU32> {
         self.range(ptr, 4)?;
-        if ptr % 4 != 0 {
+        if !ptr.is_multiple_of(4) {
             bail!("unaligned guest synchronization word");
         }
         let address = self.0.data()[ptr as usize].get().cast::<u32>();

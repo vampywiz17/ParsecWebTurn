@@ -118,11 +118,21 @@ pub struct Attempt {
 
 impl Attempt {
     pub fn spawn(output: Output) -> Result<Self> {
-        ACTIVE_WORKERS
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
-                (n < 8).then_some(n + 1)
-            })
-            .map_err(|_| anyhow::anyhow!("native offer worker limit reached"))?;
+        let mut active = ACTIVE_WORKERS.load(Ordering::SeqCst);
+        loop {
+            if active >= 8 {
+                bail!("native offer worker limit reached");
+            }
+            match ACTIVE_WORKERS.compare_exchange(
+                active,
+                active + 1,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => break,
+                Err(current) => active = current,
+            }
+        }
         let permit = Permit;
         let (tx, rx) = mpsc::channel();
         let completion = Arc::new(Mutex::new(Completion {
@@ -198,60 +208,6 @@ impl Attempt {
             bail!("native offer worker did not finish within the deadline");
         }
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::signaling::Credentials;
-    use wasmtime::{Config, Engine, MemoryType, SharedMemory};
-    fn memory() -> GuestMemory {
-        let mut config = Config::new();
-        config.wasm_threads(true);
-        GuestMemory(
-            SharedMemory::new(&Engine::new(&config).unwrap(), MemoryType::shared(1, 1)).unwrap(),
-        )
-    }
-    #[test]
-    fn outputs_reject_aliases_and_incomplete_credentials_before_publication() {
-        let m = memory();
-        assert!(Output::new(m.clone(), [100, 200, 700], 256, 64, 80).is_err());
-        assert!(Output::new(m.clone(), [100, 400, 700], 256, 65, 80).is_err());
-        assert!(Output::new(m.clone(), [100, 400, 700], 256, 64, 702).is_err());
-        let output = Output::new(m.clone(), [100, 400, 700], 128, 64, 80).unwrap();
-        let d = Description {
-            credentials: Credentials {
-                ufrag: "abcd".into(),
-                password: "x".repeat(256),
-                fingerprint: format!("sha-256 {}", ["AB"; 32].join(":")),
-            },
-            mid: "0".into(),
-        };
-        assert!(!output.finish(Some(&d)).unwrap());
-        assert_eq!(m.u32(80).unwrap(), 1);
-        assert_eq!(m.string(100, 128).unwrap(), "");
-        assert_eq!(m.string(400, 128).unwrap(), "");
-        assert_eq!(m.string(700, 128).unwrap(), "");
-    }
-    #[test]
-    fn cancellation_prevents_writes_into_reused_guest_buffers() {
-        let m = memory();
-        let output = Output::new(m.clone(), [100, 400, 700], 256, 64, 80).unwrap();
-        let mut attempt = Attempt::spawn(output).unwrap();
-        attempt.cancel();
-        m.sync_word(64).unwrap().store(0, Ordering::SeqCst);
-        for ptr in [100, 400, 700] {
-            m.c_string(ptr, 256, "reused-buffer").unwrap();
-        }
-        m.set_u32(80, 12345).unwrap();
-        attempt.wait_finished(Duration::from_secs(12)).unwrap();
-        for ptr in [100, 400, 700] {
-            assert_eq!(m.string(ptr, 256).unwrap(), "reused-buffer");
-        }
-        assert_eq!(m.u32(80).unwrap(), 12345);
-        assert_eq!(attempt.snapshot()["peer_closed"], true);
-        assert_eq!(attempt.snapshot()["host_connected"], false);
     }
 }
 
@@ -334,4 +290,58 @@ fn worker(shared: &Arc<Mutex<Completion>>, cancel: mpsc::Receiver<()>) -> Result
         bail!("native offer peer did not close within the deadline");
     }
     outcome
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::signaling::Credentials;
+    use wasmtime::{Config, Engine, MemoryType, SharedMemory};
+    fn memory() -> GuestMemory {
+        let mut config = Config::new();
+        config.wasm_threads(true);
+        GuestMemory(
+            SharedMemory::new(&Engine::new(&config).unwrap(), MemoryType::shared(1, 1)).unwrap(),
+        )
+    }
+    #[test]
+    fn outputs_reject_aliases_and_incomplete_credentials_before_publication() {
+        let m = memory();
+        assert!(Output::new(m.clone(), [100, 200, 700], 256, 64, 80).is_err());
+        assert!(Output::new(m.clone(), [100, 400, 700], 256, 65, 80).is_err());
+        assert!(Output::new(m.clone(), [100, 400, 700], 256, 64, 702).is_err());
+        let output = Output::new(m.clone(), [100, 400, 700], 128, 64, 80).unwrap();
+        let d = Description {
+            credentials: Credentials {
+                ufrag: "abcd".into(),
+                password: "x".repeat(256),
+                fingerprint: format!("sha-256 {}", ["AB"; 32].join(":")),
+            },
+            mid: "0".into(),
+        };
+        assert!(!output.finish(Some(&d)).unwrap());
+        assert_eq!(m.u32(80).unwrap(), 1);
+        assert_eq!(m.string(100, 128).unwrap(), "");
+        assert_eq!(m.string(400, 128).unwrap(), "");
+        assert_eq!(m.string(700, 128).unwrap(), "");
+    }
+    #[test]
+    fn cancellation_prevents_writes_into_reused_guest_buffers() {
+        let m = memory();
+        let output = Output::new(m.clone(), [100, 400, 700], 256, 64, 80).unwrap();
+        let mut attempt = Attempt::spawn(output).unwrap();
+        attempt.cancel();
+        m.sync_word(64).unwrap().store(0, Ordering::SeqCst);
+        for ptr in [100, 400, 700] {
+            m.c_string(ptr, 256, "reused-buffer").unwrap();
+        }
+        m.set_u32(80, 12345).unwrap();
+        attempt.wait_finished(Duration::from_secs(12)).unwrap();
+        for ptr in [100, 400, 700] {
+            assert_eq!(m.string(ptr, 256).unwrap(), "reused-buffer");
+        }
+        assert_eq!(m.u32(80).unwrap(), 12345);
+        assert_eq!(attempt.snapshot()["peer_closed"], true);
+        assert_eq!(attempt.snapshot()["host_connected"], false);
+    }
 }
