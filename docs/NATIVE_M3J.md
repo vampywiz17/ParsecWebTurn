@@ -80,3 +80,27 @@ References:
 - https://docs.rs/reqwest/0.12.28/reqwest/blocking/struct.ClientBuilder.html
 - https://docs.rs/tokio-tungstenite/0.30.0/tokio_tungstenite/fn.connect_async_tls_with_config.html
 - https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-destroywindow
+
+## Verified build
+
+Source `e69aa988f869f607e4ff1913b8700b7c0ee1feb0`,
+[Windows CI 37855542486](https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37855542486):
+49 tests passed, formatting, Clippy with warnings denied, release compilation,
+original core inspect/allocator/bootstrap and every native transport/import
+probe passed. Release compilation took 36.71 seconds with cached dependencies.
+
+The local release `session-audit` completed normally after its full 35-second
+offline window lifetime (36.97 seconds including compilation/teardown).
+It rendered the original UI through an accelerated AMD Radeon 780M OpenGL
+context: two shaders, 325 draw calls, 65 presentations. The report confirmed
+stop requested, WGL/HWND teardown, two cancelled workers and no worker errors.
+Two other guest workers remained in blocking waits at the snapshot; they are
+terminated with the standalone process, not falsely reported as joined.
+No external requests, synthetic login or remote video ran in this test.
+These results do not constitute real-account acceptance.
+
+The release `login-audit` regression test also completed: all eight synthetic
+input stages, one original HTTPS POST authentication intent with a 133-byte
+body denied offline, 14 UI presentations and native-window release. Reports
+contained neither fictitious email nor password. This proves the old input
+and request-boundary diagnostic still works, not successful authentication.
