@@ -10,6 +10,21 @@ It uses documented Win32/WGL APIs and OpenGL 4.1 compatibility, including ES2
 shader compatibility for the original `#version 100` sources. Shader sources
 are not rewritten. The Parsec import ABI itself remains snapshot-specific.
 
+## Verified result, 2026-10-08
+
+The original core's own login UI renders in the native window. The release
+executable was tested on AMD Radeon 780M (driver reports OpenGL 4.6 compatibility):
+two original shaders compiled, 70 draw calls were issued and 14 presentations
+completed during the bounded idle UI test. `start_error` and import boundaries
+were empty. These are UI counters, not a video FPS/performance benchmark.
+An optional backbuffer PNG was visually checked against the actual login UI.
+
+Windows CI run `37811539263`, executable source commit
+`fcdfcd60d518fc7f00fca8f7697c5ecd3217d841`, passed formatting, 16 tests,
+Clippy with warnings denied, release compilation, pinned-core startup and the
+native six-message/two-peer WebRTC transport probe. The same final release
+executable passed the separate local hardware GPU test.
+
 ## Run
 
 In the extracted test package, from PowerShell:
