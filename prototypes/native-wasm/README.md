@@ -48,6 +48,17 @@ the original guest UI attempt, account signaling, Parsec control framing,
 video decoding and audio playback are not exercised. Read
 [M3c details](../../docs/NATIVE_M3C.md).
 
+## Control framing stage M3d
+
+`guest-control-probe [report.json]` uses the controlled WASM fixture and a native
+test peer to verify the pinned Parsec control header, startup configuration,
+WASM key input, status events, guest/self metadata, host mode, encode latency,
+rumble and clipboard-request events. No JavaScript or browser is used.
+Metadata configured before an attempt enables this limited control mode;
+the raw M3c transport diagnostic remains unchanged. This does not verify real
+host compatibility, video, audio or a functioning clipboard.
+Read [M3d scope and limitations](../../docs/NATIVE_M3D.md).
+
 ## Runtime milestone M0, 2026-10-08
 
 On Windows, the unchanged Parsec core compiles, instantiates, allocates/frees

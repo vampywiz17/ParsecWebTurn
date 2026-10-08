@@ -118,6 +118,7 @@ struct Progress {
     local_candidates: usize,
     remote_candidates: usize,
     messages_received: usize,
+    control_ready: bool,
 }
 
 struct Completion {
@@ -150,7 +151,16 @@ impl Attempt {
         Self::spawn_named("local-offer-test", output)
     }
 
+    #[cfg(test)]
     pub fn spawn_named(id: &str, output: Output) -> Result<Self> {
+        Self::spawn_configured(id, output, None)
+    }
+
+    pub fn spawn_configured(
+        id: &str,
+        output: Output,
+        config: Option<crate::control::Config>,
+    ) -> Result<Self> {
         CandidateGate::new(id)?;
         let mut active = ACTIVE_WORKERS.load(Ordering::SeqCst);
         loop {
@@ -187,7 +197,7 @@ impl Attempt {
             .name("parsec-native-offer".into())
             .spawn(move || {
                 let _permit = permit;
-                let result = worker(&shared, &notify, &attempt_id, rx);
+                let result = worker(&shared, &notify, &attempt_id, rx, config);
                 let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
                 if result.is_err() {
                     state.progress.failed = true;
@@ -233,6 +243,21 @@ impl Attempt {
             .unwrap_or_else(|e| e.into_inner())
             .progress
             .failed
+    }
+
+    pub fn control_ready(&self) -> bool {
+        self.completion
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .progress
+            .control_ready
+    }
+
+    pub fn pop_binary(&self) -> Option<(u16, bool, Bytes)> {
+        let mut state = self.completion.lock().unwrap_or_else(|e| e.into_inner());
+        let message = state.messages.pop_front()?;
+        state.message_bytes -= message.2.len();
+        Some(message)
     }
 
     pub fn snapshot(&self) -> serde_json::Value {
@@ -343,6 +368,7 @@ fn worker(
     wake: &Arc<Condvar>,
     id: &str,
     commands: mpsc::Receiver<Command>,
+    config: Option<crate::control::Config>,
 ) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -396,6 +422,7 @@ fn worker(
     let prepared = runtime.block_on(async {
         tokio::time::timeout(Duration::from_secs(5), async {
             let mut channels = Vec::new();
+            let control_attempt_id=id.to_owned();
             for (id, label) in CHANNELS {
                 let channel = peer
                     .create_data_channel(
@@ -409,10 +436,28 @@ fn worker(
                     .await?;
                 let callback_state = shared.clone();
                 let callback_wake = wake.clone();
+                let startup_config = if id == 0 {config.clone()} else {None};
+                let weak_channel=Arc::downgrade(&channel);
+                let attempt_id=control_attempt_id.clone();
                 channel.on_open(Box::new(move || {
                     let shared = callback_state.clone();
                     let wake = callback_wake.clone();
                     Box::pin(async move {
+                        if shared.lock().unwrap_or_else(|e|e.into_inner()).cancelled {return;}
+                        if let Some(config)=startup_config {
+                            let sent=async {
+                                let channel=weak_channel.upgrade().context("control channel released")?;
+                                tokio::time::timeout(Duration::from_secs(5),channel.send(&config.startup()?)).await??;
+                                Ok::<(),anyhow::Error>(())
+                            }.await;
+                            let mut state=shared.lock().unwrap_or_else(|e|e.into_inner());
+                            if state.cancelled {return;}
+                            if sent.is_err() || state.events.len()>=64 {state.progress.failed=true;}
+                            else {
+                                state.progress.control_ready=true;
+                                state.events.push_back(serde_json::json!({"type":7,"status":0,"state":4,"attemptID":attempt_id,"duration":0}));
+                            }
+                        }
                         let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
                         if !state.cancelled {
                             state.progress.open_mask |= 1 << id;
@@ -540,6 +585,7 @@ fn worker(
         if is_closed {
             state.progress.transport_connected = false;
             state.progress.open_mask = 0;
+            state.progress.control_ready = false;
         }
     }
     if !is_closed {

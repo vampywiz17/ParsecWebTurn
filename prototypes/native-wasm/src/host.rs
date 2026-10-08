@@ -490,10 +490,16 @@ fn backend_call(
                     } else {
                         // Spawn returns immediately. Native async work never
                         // needs this backend lock or a Wasmtime Store/Caller.
-                        match crate::attempt::Attempt::spawn_named(&id, output.clone()) {
+                        let config = b.video_protocol.as_ref().map(|p| crate::control::Config {
+                            video_protocol: p.version,
+                        });
+                        match crate::attempt::Attempt::spawn_configured(&id, output.clone(), config)
+                        {
                             Ok(attempt) => {
                                 b.status = Some(20);
                                 b.native_attempt = Some(attempt);
+                                b.attempt_id = id;
+                                b.attempt_started = Some(Instant::now());
                             }
                             Err(_) => {
                                 output.finish(None)?;
@@ -532,11 +538,21 @@ fn backend_call(
                 "parsec_web_disconnect" => b.disconnect(int(args, 0)?, int(args, 1)?)?,
                 "parsec_web_send_message" => {
                     // weblib.js parses JSON even when no transport is connected.
-                    let _: serde_json::Value =
+                    let message: serde_json::Value =
                         serde_json::from_str(&m.string(ptr(args, 0)?, 65536)?)?;
-                    b.discard_idle_message()?;
+                    b.pump_native_events()?;
+                    if b.status == Some(0) {
+                        let frame = crate::control::input(&message)?;
+                        b.native_attempt
+                            .as_ref()
+                            .context("native control attempt missing")?
+                            .send_binary(0, frame)?;
+                    } else {
+                        b.discard_idle_message()?;
+                    }
                 }
                 "parsec_web_get_status" => {
+                    b.pump_native_events()?;
                     if b.native_attempt
                         .as_ref()
                         .is_some_and(|attempt| attempt.failed())
@@ -555,10 +571,15 @@ fn backend_call(
                     })?
                 }
                 "parsec_web_get_guests" => {
-                    m.c_string(ptr(args, 0)?, ptr(args, 1)? as usize, "[]")?
+                    b.pump_native_events()?;
+                    m.c_string(
+                        ptr(args, 0)?,
+                        ptr(args, 1)? as usize,
+                        &serde_json::to_string(&b.guests)?,
+                    )?
                 }
                 "parsec_web_poll_events" => {
-                    b.pump_native_events();
+                    b.pump_native_events()?;
                     if let Some(event) = b.peek_event() {
                         let json = serde_json::to_string(event)?;
                         // Consume only after a successful copy, so a bad guest
@@ -571,13 +592,21 @@ fn backend_call(
                     }
                 }
                 "parsec_web_get_self" => {
-                    m.write(ptr(args, 0)?, &[0])?;
-                    m.set_u32(ptr(args, 1)?, 0)?;
+                    b.pump_native_events()?;
+                    m.write(
+                        ptr(args, 0)?,
+                        &[u8::from(b.me["owner"].as_bool().unwrap_or(false))],
+                    )?;
+                    m.set_u32(
+                        ptr(args, 1)?,
+                        u32::try_from(b.me["id"].as_u64().unwrap_or(0))?,
+                    )?;
                     // The pinned import has an i32 result, although weblib.js
                     // returns undefined. WebAssembly coerces that to zero.
                     result(results, 0);
                 }
                 "parsec_web_get_metrics" => {
+                    b.pump_native_events()?;
                     // Idle values from X's constructor, NOT measured telemetry.
                     for i in [0, 1, 4, 5, 6] {
                         m.set_u32(ptr(args, i)?, 0)?;
@@ -585,11 +614,15 @@ fn backend_call(
                     for i in [2, 3] {
                         m.write(ptr(args, i)?, &[0])?;
                     }
+                    m.write(ptr(args, 5)?, &b.encode_latency.to_le_bytes())?;
+                }
+                "parsec_web_get_host_mode" => {
+                    b.pump_native_events()?;
+                    result(results, b.host_mode);
                 }
                 "parsec_web_get_buffer" => {} // No buffers exist before a live attempt.
                 "parsec_web_get_buffer_size"
                 | "parsec_web_get_network_failure"
-                | "parsec_web_get_host_mode"
                 | "parsec_web_poll_audio" => result(results, 0),
                 _ => unreachable!(),
             }
