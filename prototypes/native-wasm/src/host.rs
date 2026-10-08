@@ -143,12 +143,15 @@ pub fn implemented(module: &str, name: &str) -> bool {
 
 /// The audited weblib.js leaves these optional services empty. Its undefined
 /// result becomes a null/zero WASM handle. Preserve unavailability, not a
-/// fabricated maintenance service, USB forwarding or native feature.
+/// fabricated maintenance service, USB forwarding or native feature. The
+/// pinned MTY_CryptoHash import is void and its web implementation is empty:
+/// leave the output untouched rather than inventing an algorithm or digest.
 pub fn disabled_web_stub(module: &str, name: &str) -> bool {
     module == "env"
         && matches!(
             name,
             "maintenance_create"
+                | "MTY_CryptoHash"
                 | "maintenance_destroy"
                 | "maintenance_force_poll"
                 | "maintenance_get_state"

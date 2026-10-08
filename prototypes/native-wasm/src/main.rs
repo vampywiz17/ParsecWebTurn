@@ -848,4 +848,37 @@ mod tests {
         );
         assert!(store.data().boundary.is_none());
     }
+
+    #[test]
+    fn pinned_web_crypto_hash_is_void_and_leaves_memory_untouched() {
+        let mut config = Config::new();
+        config
+            .wasm_threads(true)
+            .consume_fuel(true)
+            .epoch_interruption(true);
+        let engine = Engine::new(&config).unwrap();
+        let module = Module::new(
+            &engine,
+            r#"(module
+            (import "env" "memory" (memory 1 1 shared))
+            (import "env" "MTY_CryptoHash" (func $hash
+                (param i32 i32 i32 i32 i32 i32 i32)))
+            (func (export "probe")
+                i32.const 1 i32.const 64 i32.const 4
+                i32.const 80 i32.const 4 i32.const 96 i32.const 32 call $hash))"#,
+        )
+        .unwrap();
+        let (mut store, instance) = instantiate(&engine, &module).unwrap();
+        let memory = store.data().memory.clone();
+        let before = vec![0xA5; 128];
+        memory.write(0, &before).unwrap();
+        instance
+            .get_typed_func::<(), ()>(&mut store, "probe")
+            .unwrap()
+            .call(&mut store, ())
+            .unwrap();
+        assert_eq!(memory.read(0, before.len()).unwrap(), before);
+        assert!(store.data().boundary.is_none());
+        assert_eq!(store.data().calls["env::MTY_CryptoHash"], 1);
+    }
 }
