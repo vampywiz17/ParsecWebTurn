@@ -28,6 +28,7 @@ pub struct HostState {
     pub calls: BTreeMap<String, u64>,
     pub boundary: Option<String>,
     pub stdout_bytes: u64,
+    pub guest_exit_code: Option<u32>,
     pub title: Option<String>,
     pub app_pointer: Option<u32>,
     pub filesystem_requests: Vec<(String, String, i32)>,
@@ -56,6 +57,7 @@ impl HostState {
             calls: BTreeMap::new(),
             boundary: None,
             stdout_bytes: 0,
+            guest_exit_code: None,
             title: None,
             app_pointer: None,
             filesystem_requests: Vec::new(),
@@ -476,7 +478,11 @@ pub fn dispatch(
             std::thread::yield_now();
             0
         }
-        "proc_exit" => bail!("guest requested exit code {}", int(args, 0)?),
+        "proc_exit" => {
+            let code = int(args, 0)? as u32;
+            caller.data_mut().guest_exit_code = Some(code);
+            bail!("guest requested exit code {code}");
+        }
         _ => unreachable!(),
     };
     result(results, errno);

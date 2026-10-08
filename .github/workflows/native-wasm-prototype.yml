@@ -106,6 +106,10 @@ jobs:
           $tls = Get-Content "$artifact/guest-tls.json" -Raw | ConvertFrom-Json
           if ($tls.tls_connections_verified -ne 6 -or $tls.certificate_rejections_verified -ne 4 -or !$tls.https_import_verified -or !$tls.wss_import_verified -or !$tls.hostname_mismatch_rejected_verified -or !$tls.untrusted_certificate_rejected_verified -or !$tls.servers_closed -or $tls.certificate_verification_disabled -or $tls.external_requests_enabled -or $tls.authentication_integrated) { throw 'Incorrect guest TLS proof' }
           Copy-Item -LiteralPath prototypes/native-wasm/README.md -Destination "$artifact/README.md"
+          & $exe guest-thread-probe "$artifact/guest-thread.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Guest thread lifecycle failed' }
+          $thread = Get-Content "$artifact/guest-thread.json" -Raw | ConvertFrom-Json
+          if ($thread.sequential_guest_workers_verified -ne 80 -or $thread.completed_guest_workers_verified -ne 97 -or !$thread.concurrent_limit_verified -or !$thread.capacity_released_verified -or !$thread.bounded_history_verified -or !$thread.numeric_guest_exit_code_verified -or $thread.external_requests_enabled -or $thread.real_account_used) { throw 'Incorrect guest thread lifecycle proof' }
           & $exe guest-audit-probe "$artifact/guest-audit.json"
           if ($LASTEXITCODE -ne 0) { throw 'Shared guest network audit failed' }
           $audit = Get-Content "$artifact/guest-audit.json" -Raw | ConvertFrom-Json

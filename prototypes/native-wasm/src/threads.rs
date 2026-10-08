@@ -4,6 +4,73 @@ use serde::Serialize;
 use std::sync::{Arc, Mutex};
 use wasmtime::{Engine, Module};
 
+const MAX_ACTIVE: usize = 16;
+const MAX_HISTORY: usize = 64;
+const TID_END: i32 = 1 << 29;
+
+pub(crate) struct Records {
+    entries: Vec<ThreadRecord>,
+    next_id: i32,
+    completed: u64,
+    rejected: u64,
+    omitted: u64,
+    peak_active: usize,
+}
+impl Default for Records {
+    fn default() -> Self {
+        Self {
+            entries: Vec::new(),
+            next_id: 2,
+            completed: 0,
+            rejected: 0,
+            omitted: 0,
+            peak_active: 0,
+        }
+    }
+}
+impl Records {
+    fn active(&self) -> usize {
+        self.entries.iter().filter(|r| !r.finished).count()
+    }
+    fn reserve(&mut self) -> Option<i32> {
+        let active = self.active();
+        if active >= MAX_ACTIVE || self.next_id >= TID_END {
+            self.rejected = self.rejected.saturating_add(1);
+            return None;
+        }
+        if self.entries.len() == MAX_HISTORY {
+            // Never evict a running worker: its eventual completion must still
+            // release capacity and retain its failure/exit diagnostics.
+            let oldest = self.entries.iter().position(|r| r.finished)?;
+            self.entries.remove(oldest);
+            self.omitted = self.omitted.saturating_add(1);
+        }
+        let id = self.next_id;
+        self.next_id += 1;
+        self.peak_active = self.peak_active.max(active + 1);
+        self.entries.push(ThreadRecord {
+            id,
+            finished: false,
+            cancelled: false,
+            error: None,
+            boundary: None,
+            exit_code: None,
+            calls: Default::default(),
+        });
+        Some(id)
+    }
+}
+
+#[derive(Serialize)]
+pub struct ThreadSummary {
+    pub active: usize,
+    pub active_limit: usize,
+    pub peak_active: usize,
+    pub completed: u64,
+    pub spawn_rejected: u64,
+    pub history_omitted: u64,
+}
+
 /// Legacy WASI-threads ABI used by this pinned module: thread-spawn(start_arg)
 /// returns a positive ID, and a fresh instance sharing linear memory enters
 /// wasi_thread_start(thread_id, start_arg). No JavaScript worker is involved.
@@ -17,8 +84,7 @@ pub struct ThreadRuntime {
     pub websocket: Arc<crate::websocket::Network>,
     pub audit: Arc<crate::network_audit::Audit>,
     pub started: std::time::Instant,
-    pub(crate) records: Mutex<Vec<ThreadRecord>>,
-    #[cfg(windows)]
+    pub(crate) records: Mutex<Records>,
     pub watchdog_started: std::sync::atomic::AtomicBool,
     #[cfg(windows)]
     pub window: Option<Arc<crate::window::Window>>,
@@ -31,6 +97,7 @@ pub struct ThreadRecord {
     pub cancelled: bool,
     pub error: Option<String>,
     pub boundary: Option<String>,
+    pub exit_code: Option<u32>,
     pub calls: std::collections::BTreeMap<String, u64>,
 }
 
@@ -49,8 +116,7 @@ impl ThreadRuntime {
             websocket: Arc::new(websocket),
             audit,
             started: std::time::Instant::now(),
-            records: Mutex::new(Vec::new()),
-            #[cfg(windows)]
+            records: Default::default(),
             watchdog_started: Default::default(),
             #[cfg(windows)]
             window: None,
@@ -61,27 +127,28 @@ impl ThreadRuntime {
         self.records
             .lock()
             .unwrap_or_else(|e| e.into_inner())
+            .entries
             .clone()
+    }
+
+    pub fn summary(&self) -> ThreadSummary {
+        let records = self.records.lock().unwrap_or_else(|e| e.into_inner());
+        ThreadSummary {
+            active: records.active(),
+            active_limit: MAX_ACTIVE,
+            peak_active: records.peak_active,
+            completed: records.completed,
+            spawn_rejected: records.rejected,
+            history_omitted: records.omitted,
+        }
     }
 
     pub fn spawn(self: &Arc<Self>, argument: u32) -> i32 {
         let id = {
             let mut records = self.records.lock().unwrap_or_else(|e| e.into_inner());
-            // Includes finished threads: the offline bootstrap may create at
-            // most eight threads in total, not an unbounded sequence of workers.
-            if records.len() >= 8 {
+            let Some(id) = records.reserve() else {
                 return -1;
-            }
-            // Match the audited Matoya loader: main is ID 1, children start at 2.
-            let id = records.len() as i32 + 2;
-            records.push(ThreadRecord {
-                id,
-                finished: false,
-                cancelled: false,
-                error: None,
-                boundary: None,
-                calls: Default::default(),
-            });
+            };
             id
         };
         let runtime = self.clone();
@@ -133,14 +200,20 @@ impl ThreadRuntime {
         let failed = error.is_some();
         {
             let mut records = self.records.lock().unwrap_or_else(|e| e.into_inner());
-            let record = &mut records[id as usize - 2];
+            let record = records
+                .entries
+                .iter_mut()
+                .find(|r| r.id == id)
+                .expect("active thread record retained until completion");
             record.finished = true;
             record.cancelled = cancelled;
             record.error = error;
             if let Some(host) = host {
                 record.boundary = host.boundary;
                 record.calls = host.calls;
+                record.exit_code = host.guest_exit_code;
             }
+            records.completed = records.completed.saturating_add(1);
         }
         // Abort other executing guest loops at an observable bridge boundary.
         // A process deadline remains necessary for blocking guest atomic waits.
@@ -153,5 +226,20 @@ impl ThreadRuntime {
             }
             self.engine.increment_epoch();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn legacy_tid_range_never_wraps_or_reuses_an_id() {
+        let mut records = Records {
+            next_id: TID_END - 1,
+            ..Default::default()
+        };
+        assert_eq!(records.reserve(), Some(TID_END - 1));
+        assert_eq!(records.reserve(), None);
+        assert_eq!(records.rejected, 1);
     }
 }

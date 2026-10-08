@@ -19,6 +19,7 @@ mod network_policy;
 mod poll;
 mod session_probe;
 mod signaling;
+mod thread_probe;
 mod threads;
 mod tls_probe;
 mod transport;
@@ -94,6 +95,7 @@ struct Report {
     video_rendered: bool,
     host: Option<HostState>,
     threads: Vec<threads::ThreadRecord>,
+    thread_runtime: Option<threads::ThreadSummary>,
     native_backend: Option<serde_json::Value>,
     network_audit: Option<network_audit::Snapshot>,
     synthetic_login_steps: usize,
@@ -146,12 +148,15 @@ fn run() -> Result<()> {
             | "guest-websocket-probe"
             | "guest-tls-probe"
             | "guest-audit-probe"
+            | "guest-thread-probe"
     ) {
         let path = args.next().map(PathBuf::from);
         if args.next().is_some() {
             bail!("too many arguments");
         }
-        let report = if mode == "guest-audit-probe" {
+        let report = if mode == "guest-thread-probe" {
+            thread_probe::probe()?
+        } else if mode == "guest-audit-probe" {
             audit_probe::probe()?
         } else if mode == "guest-tls-probe" {
             tls_probe::probe()?
@@ -206,6 +211,7 @@ fn run() -> Result<()> {
                   parsec-native-wasm guest-websocket-probe [report.json]\n\
                   parsec-native-wasm guest-tls-probe [report.json]\n\
                   parsec-native-wasm guest-audit-probe [report.json]\n\
+                  parsec-native-wasm guest-thread-probe [report.json]\n\
                   parsec-native-wasm window-audit <parsecd.wasm> [report.json]\n\
                   parsec-native-wasm login-audit <parsecd.wasm> [report.json]\n\
                   parsec-native-wasm account <parsecd.wasm> [report.json]\n\
@@ -293,6 +299,7 @@ fn run() -> Result<()> {
         video_rendered: false,
         host: None,
         threads: Vec::new(),
+        thread_runtime: None,
         native_backend: None,
         network_audit: None,
         synthetic_login_steps: 0,
@@ -410,6 +417,7 @@ fn run() -> Result<()> {
             // This does not wait indefinitely for guest threads.
             std::thread::sleep(Duration::from_millis(100));
             report.threads = runtime.snapshot();
+            report.thread_runtime = Some(runtime.summary());
             report.network_audit = Some(runtime.audit.snapshot());
         }
         report.native_backend = Some(serde_json::to_value(
@@ -557,7 +565,7 @@ fn instantiate_with_runtime(
     let bounded = live_window.is_none();
     #[cfg(not(windows))]
     let bounded = true;
-    if bounded {
+    if bounded && !runtime.watchdog_started.swap(true, Ordering::AcqRel) {
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_secs(seconds));
             watchdog.increment_epoch();
