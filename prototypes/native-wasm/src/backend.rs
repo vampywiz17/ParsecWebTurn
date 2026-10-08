@@ -11,6 +11,7 @@ pub struct Backend {
     pub generation: u64,
     pub status: Option<i32>,
     pub video_protocol: Option<VideoProtocol>,
+    pub idle_messages_discarded: u64,
     #[serde(skip)]
     events: VecDeque<Value>,
 }
@@ -37,12 +38,24 @@ impl Backend {
         self.status = None;
         self.video_protocol = None;
         self.events.clear();
+        self.idle_messages_discarded = 0;
     }
 
     pub fn require_initialized(&self) -> Result<()> {
         if !self.initialized {
             bail!("Parsec backend has not been initialized");
         }
+        Ok(())
+    }
+
+    pub fn discard_idle_message(&mut self) -> Result<()> {
+        self.require_initialized()?;
+        // Audited h.W / clientSendMessage sends only if a transport exists
+        // and status == 0. Preserve its idle no-op, not a fake delivery.
+        if self.status == Some(0) {
+            bail!("Live message transport is not implemented");
+        }
+        self.idle_messages_discarded = self.idle_messages_discarded.saturating_add(1);
         Ok(())
     }
 
@@ -95,6 +108,21 @@ impl Backend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn idle_input_never_claims_a_live_message_delivery() {
+        let mut b = Backend::default();
+        assert!(b.discard_idle_message().is_err());
+        b.init();
+        b.discard_idle_message().unwrap();
+        assert_eq!(b.idle_messages_discarded, 1);
+        assert_eq!(b.status, Some(-3));
+        b.status = Some(0);
+        assert!(b.discard_idle_message().is_err());
+        assert_eq!(b.idle_messages_discarded, 1);
+        b.destroy();
+        assert_eq!(b.idle_messages_discarded, 0);
+    }
 
     #[test]
     fn lifecycle_is_idempotent_and_reinitialization_resets_state() {

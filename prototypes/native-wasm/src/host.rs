@@ -79,6 +79,7 @@ pub fn implemented(module: &str, name: &str) -> bool {
                 | "parsec_web_destroy"
                 | "parsec_web_disconnect"
                 | "parsec_web_get_status"
+                | "parsec_web_send_message"
                 | "parsec_web_get_guests"
                 | "parsec_web_poll_events"
                 | "parsec_web_get_buffer_size"
@@ -461,6 +462,12 @@ fn backend_call(
             b.require_initialized()?;
             match name {
                 "parsec_web_disconnect" => b.disconnect(int(args, 0)?, int(args, 1)?)?,
+                "parsec_web_send_message" => {
+                    // weblib.js parses JSON even when no transport is connected.
+                    let _: serde_json::Value =
+                        serde_json::from_str(&m.string(ptr(args, 0)?, 65536)?)?;
+                    b.discard_idle_message()?;
+                }
                 "parsec_web_get_status" => {
                     result(results, b.status.context("backend status missing")?)
                 }
