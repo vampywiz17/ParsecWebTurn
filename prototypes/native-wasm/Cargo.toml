@@ -1,6 +1,6 @@
 [package]
 name = "parsec-native-wasm"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.90"
 publish = false
@@ -15,7 +15,12 @@ getrandom = "0.3"
 bytes = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "net"] }
 webrtc = "=0.14.0"
+glow = "=0.16.0"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 wasmtime = { version = "38", default-features = false, features = ["std", "runtime", "cranelift", "threads", "wat"] }
 
 [profile.release]
 strip = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Graphics_OpenGL", "Win32_System_LibraryLoader", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse"] }

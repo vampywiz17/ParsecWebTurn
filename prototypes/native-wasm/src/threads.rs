@@ -14,7 +14,9 @@ pub struct ThreadRuntime {
     pub filesystem: Arc<Mutex<crate::filesystem::VirtualFs>>,
     pub backend: Arc<Mutex<crate::backend::Backend>>,
     pub started: std::time::Instant,
-    records: Mutex<Vec<ThreadRecord>>,
+    pub(crate) records: Mutex<Vec<ThreadRecord>>,
+    #[cfg(windows)]
+    pub window: Option<Arc<crate::window::Window>>,
 }
 
 #[derive(Clone, Serialize)]
@@ -36,6 +38,8 @@ impl ThreadRuntime {
             backend: Default::default(),
             started: std::time::Instant::now(),
             records: Mutex::new(Vec::new()),
+            #[cfg(windows)]
+            window: None,
         }
     }
 

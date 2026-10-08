@@ -1,10 +1,16 @@
 mod backend;
+#[cfg(windows)]
+mod desktop;
 mod filesystem;
+#[cfg(windows)]
+mod graphics;
 mod host;
 mod memory;
 mod poll;
 mod threads;
 mod transport;
+#[cfg(windows)]
+mod window;
 
 use anyhow::{bail, Context, Result};
 use host::HostState;
@@ -71,6 +77,8 @@ struct Report {
     host: Option<HostState>,
     threads: Vec<threads::ThreadRecord>,
     native_backend: Option<serde_json::Value>,
+    #[cfg(windows)]
+    graphics: Option<graphics::GraphicsReport>,
 }
 
 fn main() {
@@ -99,13 +107,14 @@ fn run() -> Result<()> {
     if mode == "help" || mode == "--help" {
         println!(
             "parsec-native-wasm <inspect|allocator|boot> <parsecd.wasm> [report.json]\n\
+                  parsec-native-wasm window <parsecd.wasm> [report.json]\n\
                   parsec-native-wasm transport-probe [report.json]\n\
                   Offline WASM host prototype. No browser, login, network or video renderer.\n\
                   boot reports the first unimplemented bridge; it is not a connected client."
         );
         return Ok(());
     }
-    if !matches!(mode.as_str(), "inspect" | "allocator" | "boot") {
+    if !matches!(mode.as_str(), "inspect" | "allocator" | "boot" | "window") {
         bail!("unknown mode: {mode}");
     }
     let path = PathBuf::from(args.next().context("WASM path required")?);
@@ -159,21 +168,62 @@ fn run() -> Result<()> {
         host: None,
         threads: Vec::new(),
         native_backend: None,
+        #[cfg(windows)]
+        graphics: None,
     };
     if mode != "inspect" {
         let _deadline = ExecutionDeadline::start();
+        #[cfg(windows)]
+        let native_window = if mode == "window" {
+            Some(window::Window::create()?)
+        } else {
+            None
+        };
+        #[cfg(windows)]
+        let (mut store, instance) = instantiate_mode(&engine, &module, native_window.clone())?;
+        #[cfg(not(windows))]
         let (mut store, instance) = instantiate(&engine, &module)?;
         report.instantiated = true;
         allocator_roundtrip(&mut store, &instance)?;
         report.allocator_roundtrip = true;
-        if mode == "boot" {
+        if mode == "boot" || mode == "window" {
             let start = instance.get_typed_func::<(), ()>(&mut store, "_start")?;
             let outcome = start.call(&mut store, ());
-            if outcome.is_err() {
+            #[cfg(windows)]
+            let handed_off = mode == "window" && store.data().event_loop.is_some();
+            #[cfg(not(windows))]
+            let handed_off = false;
+            if outcome.is_err() && !handed_off {
                 engine.increment_epoch();
             }
             report.start_returned = outcome.is_ok();
             report.start_error = outcome.err().map(|e| format!("{e:#}"));
+            #[cfg(windows)]
+            if handed_off {
+                report.start_error = desktop::run(&mut store, &instance)
+                    .err()
+                    .map(|e| format!("{e:#}"));
+                engine.increment_epoch();
+            }
+        }
+        #[cfg(windows)]
+        if let Some(window) = &native_window {
+            // The render worker owns its WGL context and releases it before
+            // the HWND is destroyed. Never destroy a live context's window.
+            let until = std::time::Instant::now() + Duration::from_secs(2);
+            while window.active_contexts.load(Ordering::Acquire) != 0
+                && std::time::Instant::now() < until
+            {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            report.graphics = window
+                .graphics
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            if window.active_contexts.load(Ordering::Acquire) == 0 {
+                window.close();
+            }
         }
         if let Some(runtime) = &store.data().threads {
             // Let workers already at their boundary publish their records.
@@ -201,6 +251,30 @@ fn run() -> Result<()> {
 }
 
 fn instantiate(engine: &Engine, module: &Module) -> Result<(Store<HostState>, Instance)> {
+    #[cfg(windows)]
+    {
+        instantiate_mode(engine, module, None)
+    }
+    #[cfg(not(windows))]
+    {
+        instantiate_base_with_window(engine, module)
+    }
+}
+
+#[cfg(windows)]
+fn instantiate_mode(
+    engine: &Engine,
+    module: &Module,
+    window: Option<Arc<window::Window>>,
+) -> Result<(Store<HostState>, Instance)> {
+    instantiate_base_with_window(engine, module, window)
+}
+
+fn instantiate_base_with_window(
+    engine: &Engine,
+    module: &Module,
+    #[cfg(windows)] window: Option<Arc<window::Window>>,
+) -> Result<(Store<HostState>, Instance)> {
     let ty = module
         .imports()
         .find_map(|i| match i.ty() {
@@ -212,12 +286,10 @@ fn instantiate(engine: &Engine, module: &Module) -> Result<(Store<HostState>, In
         bail!("expected shared memory");
     }
     let memory = SharedMemory::new(engine, ty)?;
-    let runtime = Arc::new(threads::ThreadRuntime::new(
-        engine.clone(),
-        module.clone(),
-        GuestMemory(memory),
-    ));
-    instantiate_with_runtime(runtime)
+    let runtime = threads::ThreadRuntime::new(engine.clone(), module.clone(), GuestMemory(memory));
+    #[cfg(windows)]
+    let runtime = threads::ThreadRuntime { window, ..runtime };
+    instantiate_with_runtime(Arc::new(runtime))
 }
 
 fn instantiate_with_runtime(
@@ -231,13 +303,21 @@ fn instantiate_with_runtime(
     host.filesystem = runtime.filesystem.clone();
     host.backend = runtime.backend.clone();
     host.started = runtime.started;
+    #[cfg(windows)]
+    {
+        host.window = runtime.window.clone();
+    }
     let mut store = Store::new(engine, host);
     store.set_fuel(50_000_000)?;
     store.set_epoch_deadline(1);
     // Engine watchdog also bounds guest code that spends no fuel between epochs.
     let watchdog = engine.clone();
+    #[cfg(windows)]
+    let seconds = if runtime.window.is_some() { 12 } else { 5 };
+    #[cfg(not(windows))]
+    let seconds = 5;
     std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_secs(5));
+        std::thread::sleep(Duration::from_secs(seconds));
         watchdog.increment_epoch();
     });
     let mut linker = Linker::new(engine);

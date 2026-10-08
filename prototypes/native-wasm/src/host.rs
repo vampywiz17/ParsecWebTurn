@@ -27,6 +27,13 @@ pub struct HostState {
     pub filesystem_requests: Vec<(String, String, i32)>,
     #[serde(skip)]
     pub keys: BTreeMap<i32, String>,
+    #[cfg(windows)]
+    #[serde(skip)]
+    pub window: Option<std::sync::Arc<crate::window::Window>>,
+    #[cfg(windows)]
+    #[serde(skip)]
+    pub graphics: Option<crate::graphics::Graphics>,
+    pub event_loop: Option<(u32, u32)>,
 }
 
 impl HostState {
@@ -44,6 +51,11 @@ impl HostState {
             app_pointer: None,
             filesystem_requests: Vec::new(),
             keys: BTreeMap::new(),
+            #[cfg(windows)]
+            window: None,
+            #[cfg(windows)]
+            graphics: None,
+            event_loop: None,
         }
     }
 }
@@ -147,6 +159,10 @@ pub fn dispatch(
 ) -> Result<()> {
     let id = format!("{module}::{name}");
     *caller.data_mut().calls.entry(id.clone()).or_default() += 1;
+    #[cfg(windows)]
+    if module == "env" && caller.data().window.is_some() && crate::desktop::handles(name) {
+        return crate::desktop::dispatch(caller, name, args, results);
+    }
     if !implemented(module, name) {
         caller.data_mut().boundary = Some(id.clone());
         bail!("native bridge not implemented: {id}");
