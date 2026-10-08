@@ -76,6 +76,7 @@ pub fn implemented(module: &str, name: &str) -> bool {
                 | "web_set_app"
                 | "MTY_GetRandomBytes"
                 | "parsec_web_init"
+                | "parsec_web_new_attempt"
                 | "parsec_web_destroy"
                 | "parsec_web_disconnect"
                 | "parsec_web_get_status"
@@ -472,6 +473,32 @@ fn backend_call(
         _ => {
             b.require_initialized()?;
             match name {
+                "parsec_web_new_attempt" => {
+                    let id = m.string(ptr(args, 0)?, 257)?;
+                    crate::signaling::CandidateGate::new(&id)?;
+                    let output = crate::attempt::Output::new(
+                        m.clone(),
+                        [ptr(args, 1)?, ptr(args, 2)?, ptr(args, 3)?],
+                        ptr(args, 4)? as usize,
+                        ptr(args, 5)?,
+                        ptr(args, 6)?,
+                    )?;
+                    if b.status != Some(-3) || b.native_attempt.is_some() {
+                        output.finish(None)?;
+                    } else {
+                        // Spawn returns immediately. Native async work never
+                        // needs this backend lock or a Wasmtime Store/Caller.
+                        match crate::attempt::Attempt::spawn(output.clone()) {
+                            Ok(attempt) => {
+                                b.status = Some(20);
+                                b.native_attempt = Some(attempt);
+                            }
+                            Err(_) => {
+                                output.finish(None)?;
+                            }
+                        }
+                    }
+                }
                 "parsec_web_disconnect" => b.disconnect(int(args, 0)?, int(args, 1)?)?,
                 "parsec_web_send_message" => {
                     // weblib.js parses JSON even when no transport is connected.
@@ -480,6 +507,12 @@ fn backend_call(
                     b.discard_idle_message()?;
                 }
                 "parsec_web_get_status" => {
+                    if b.native_attempt
+                        .as_ref()
+                        .is_some_and(|attempt| attempt.failed())
+                    {
+                        b.status = Some(-3);
+                    }
                     result(results, b.status.context("backend status missing")?)
                 }
                 "parsec_client_set_config" => {

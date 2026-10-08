@@ -13,6 +13,8 @@ pub struct Backend {
     pub video_protocol: Option<VideoProtocol>,
     pub idle_messages_discarded: u64,
     #[serde(skip)]
+    pub native_attempt: Option<crate::attempt::Attempt>,
+    #[serde(skip)]
     events: VecDeque<Value>,
 }
 
@@ -34,6 +36,7 @@ impl Backend {
     }
 
     pub fn destroy(&mut self) {
+        self.native_attempt.take();
         self.initialized = false;
         self.status = None;
         self.video_protocol = None;
@@ -92,6 +95,7 @@ impl Backend {
                 "attemptID": "", "duration": 0
             }));
         }
+        self.native_attempt.take();
         self.status = Some(status);
         Ok(())
     }

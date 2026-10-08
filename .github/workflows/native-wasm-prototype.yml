@@ -73,6 +73,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Compact Parsec signaling adapter failed' }
           $signaling = Get-Content "$artifact/signaling.json" -Raw | ConvertFrom-Json
           if ($signaling.connected_peers -ne 2 -or $signaling.binary_messages_verified -ne 6 -or !$signaling.peers_closed -or $signaling.compact_candidates_added -lt 1 -or $signaling.parsec_host_connected) { throw 'Incorrect compact signaling proof' }
+          & $exe guest-offer-probe "$artifact/guest-offer.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Actual native guest offer import failed' }
+          $offer = Get-Content "$artifact/guest-offer.json" -Raw | ConvertFrom-Json
+          if (!$offer.guest_completion_verified -or !$offer.credentials_validated -or !$offer.native_attempt.peer_closed -or !$offer.native_attempt.worker_finished -or $offer.parsec_host_connected) { throw 'Incorrect guest/native offer proof' }
           $boot.host | ConvertTo-Json -Depth 5
           $boot.threads | ConvertTo-Json -Depth 5
           $boot.start_error
