@@ -72,3 +72,29 @@ App version and upstream WASM version should remain separate. The currently
 pinned original core reports `150-104a`; its SHA-256 is
 `d663dd96df477c65479fb93eb88756c7fcafff581cc93be563625cd195a4b4a6`.
 An upstream update must pass the ABI/compatibility checks before it is adopted.
+
+## Verified build, 2026-10-08
+
+Source: `c86e07a612dc653ed249b88747f4f98f38dc9130`.
+[Windows CI run 37821713825](https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37821713825)
+passed formatting, all 26 tests, Clippy with warnings denied, the release build,
+the unchanged original core's diagnostics, both prior native transport probes,
+the guest offer probe and the new guest session probe.
+
+The same release EXE also passed the local Windows guest session probe:
+three compact candidates in each direction, three open channels, six exact
+binary messages, sync acknowledgment and copy retry verified. Both peers
+closed; the attempt worker finished without failure. The connected and
+closed snapshots are separate, and the closed snapshot reports zero open
+channels and `transport_connected: false`.
+
+These results prove the controlled guest/native transport boundary only.
+They do not establish real Parsec host compatibility or hardware decoding.
+
+References:
+
+- [Public native WebRTC peer API](https://docs.rs/webrtc/0.14.0/webrtc/peer_connection/struct.RTCPeerConnection.html).
+- [RFC 8839: ICE SDP usage](https://www.rfc-editor.org/rfc/rfc8839.html).
+- [RFC 8841: SDP for SCTP over DTLS](https://www.rfc-editor.org/rfc/rfc8841.html).
+- Pinned `weblib.js::parsec_web_begin_p2p`, `parsec_web_add_candidate`,
+  `parsec_web_poll_events` and `parsec.js::U`, `ja`, `ka`.
