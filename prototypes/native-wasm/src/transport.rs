@@ -12,9 +12,10 @@ use webrtc::{
         data_channel_state::RTCDataChannelState, RTCDataChannel,
     },
     ice::network_type::NetworkType,
+    ice_transport::ice_gathering_state::RTCIceGatheringState,
     peer_connection::{
-        configuration::RTCConfiguration, ice_gathering_state::RTCIceGatheringState,
-        peer_connection_state::RTCPeerConnectionState, RTCPeerConnection,
+        configuration::RTCConfiguration, peer_connection_state::RTCPeerConnectionState,
+        RTCPeerConnection,
     },
 };
 
