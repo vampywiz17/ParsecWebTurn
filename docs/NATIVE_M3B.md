@@ -72,6 +72,16 @@ in the normal bridge.
 
 ## Next integration
 
+Verified 2026-10-08 at source commit
+`0f13a740a60d75400d01e98b2fd7afdf52c2d5c7`:
+[Windows CI run 37817633457](https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37817633457)
+passed formatting, all 25 tests, Clippy with warnings denied, the release build,
+the original pinned core diagnostics, both native transport probes and the new
+guest offer probe. The same release executable passed the local Windows guest
+offer probe: credentials validated, guest completion verified, three negotiated
+channels created, peer closed and worker finished without failure. This evidence
+does not establish an attempt from the original login UI or real-host compatibility.
+
 Replace the retained offer's cancel-only wait with a bounded command path for
 `begin_p2p` and candidate/sync operations using the existing M3a adapter. Attach
 actual local candidate callbacks to guest events, implement native control
