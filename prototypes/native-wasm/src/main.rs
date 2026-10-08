@@ -2,6 +2,7 @@ mod backend;
 mod filesystem;
 mod host;
 mod memory;
+mod poll;
 mod threads;
 mod transport;
 
@@ -229,6 +230,7 @@ fn instantiate_with_runtime(
     host.threads = Some(runtime.clone());
     host.filesystem = runtime.filesystem.clone();
     host.backend = runtime.backend.clone();
+    host.started = runtime.started;
     let mut store = Store::new(engine, host);
     store.set_fuel(50_000_000)?;
     store.set_epoch_deadline(1);

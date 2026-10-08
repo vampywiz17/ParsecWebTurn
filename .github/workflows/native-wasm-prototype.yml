@@ -53,6 +53,8 @@ jobs:
           $boot = Get-Content "$artifact/boot.json" -Raw | ConvertFrom-Json
           if (!$boot.instantiated -or $boot.video_rendered -or $boot.network_enabled) { throw 'Incorrect bootstrap status' }
           if (!$boot.native_backend.initialized -or $boot.host.boundary -eq 'env::parsec_web_init') { throw 'The pinned core did not initialize the native client backend' }
+          $boundaries = @($boot.host.boundary) + @($boot.threads | ForEach-Object { $_.boundary })
+          if (!$boot.start_error -or !($boundaries -contains 'env::web_run_and_yield' -or $boundaries -contains 'env::web_set_gfx')) { throw 'The pinned core did not reach its native event-loop/graphics boundary' }
           & $exe transport-probe "$artifact/transport.json"
           if ($LASTEXITCODE -ne 0) { throw 'Native WebRTC transport failed' }
           $transport = Get-Content "$artifact/transport.json" -Raw | ConvertFrom-Json

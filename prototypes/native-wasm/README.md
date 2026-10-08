@@ -104,6 +104,16 @@ metadata is checked before storing it, and guest output buffers are bounds check
 Empty audio/events/buffers and zero metrics represent the **idle backend only**.
 Live-attempt imports continue to trap until their actual signaling is implemented.
 
+The original core now reaches `MTY_AppRun`. It stops explicitly at the native
+event-loop bridge (`web_run_and_yield`) or the concurrently started graphics
+bridge (`web_set_gfx`). Which is recorded first can depend on thread scheduling;
+CI checks both the initialized backend and these next boundaries. The libc
+`poll_oneoff` clock subscription used by its signal thread is implemented with
+the WASI preview1 layout: one realtime/monotonic clock, relative or absolute
+deadline, maximum one second of host waiting. Other polling requests return
+INVAL/NOSYS; they do not invent file/network readiness. All guest instances
+share the same monotonic clock epoch.
+
 The separate `transport-probe` command creates **two real native WebRTC peers on
 the same machine**, using `webrtc-rs` 0.14.0 and Tokio. It creates the audited
 negotiated, ordered binary channels: `control` (0), `video` (1), and `audio` (2).
@@ -166,7 +176,8 @@ license is not a license grant for that binary.
 References:
 - https://docs.wasmtime.dev/api/wasmtime/struct.SharedMemory.html
 - https://docs.wasmtime.dev/api/wasmtime/struct.Linker.html
-- https://github.com/WebAssembly/WASI/blob/main/legacy/preview1/docs.md
+- https://github.com/WebAssembly/WASI/tree/wasi-0.1
+- https://github.com/WebAssembly/wasi-libc/blob/main/libc-bottom-half/headers/public/wasi/wasip1.h
 - https://github.com/WebAssembly/wasi-threads
 - https://web.parsec.app/lib/matoya-worker.js
 - https://web.parsec.app/lib/weblib.js

@@ -85,6 +85,7 @@ pub fn implemented(module: &str, name: &str) -> bool {
                 | "environ_get"
                 | "environ_sizes_get"
                 | "clock_time_get"
+                | "poll_oneoff"
                 | "fd_prestat_get"
                 | "fd_prestat_dir_name"
                 | "fd_fdstat_get"
@@ -218,6 +219,14 @@ pub fn dispatch(
     // environment or user files. The libc bootstrap expects a root preopen.
     // Unsupported operations fail rather than returning fabricated success.
     let errno = match name {
+        "poll_oneoff" => crate::poll::clock_poll(
+            &m,
+            caller.data().started,
+            ptr(args, 0)?,
+            ptr(args, 1)?,
+            ptr(args, 2)?,
+            ptr(args, 3)?,
+        )?,
         "args_sizes_get" => {
             m.set_u32(ptr(args, 0)?, 1)?;
             m.set_u32(ptr(args, 1)?, 8)?;
