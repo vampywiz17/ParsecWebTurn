@@ -28,6 +28,7 @@ pub struct ThreadRuntime {
 pub struct ThreadRecord {
     pub id: i32,
     pub finished: bool,
+    pub cancelled: bool,
     pub error: Option<String>,
     pub boundary: Option<String>,
     pub calls: std::collections::BTreeMap<String, u64>,
@@ -76,6 +77,7 @@ impl ThreadRuntime {
             records.push(ThreadRecord {
                 id,
                 finished: false,
+                cancelled: false,
                 error: None,
                 boundary: None,
                 calls: Default::default(),
@@ -103,13 +105,23 @@ impl ThreadRuntime {
                     host = Some(store.into_data());
                     result
                 })();
-                runtime.finish(id, outcome.err().map(|e| format!("{e:#}")), host);
+                let error = outcome.err();
+                let cancelled = error
+                    .as_ref()
+                    .is_some_and(crate::lifecycle::is_cancellation);
+                runtime.finish(
+                    id,
+                    error.filter(|_| !cancelled).map(|e| format!("{e:#}")),
+                    host,
+                    cancelled,
+                );
             });
         if let Err(error) = spawned {
             self.finish(
                 id,
                 Some(format!("OS thread creation failed: {error}")),
                 None,
+                false,
             );
             -1
         } else {
@@ -117,12 +129,13 @@ impl ThreadRuntime {
         }
     }
 
-    fn finish(&self, id: i32, error: Option<String>, host: Option<HostState>) {
+    fn finish(&self, id: i32, error: Option<String>, host: Option<HostState>, cancelled: bool) {
         let failed = error.is_some();
         {
             let mut records = self.records.lock().unwrap_or_else(|e| e.into_inner());
             let record = &mut records[id as usize - 2];
             record.finished = true;
+            record.cancelled = cancelled;
             record.error = error;
             if let Some(host) = host {
                 record.boundary = host.boundary;

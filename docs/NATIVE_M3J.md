@@ -50,6 +50,8 @@ timeout. A ten-second shutdown-only process deadline bounds guest atomic waits;
 it never limits the interactive account lifetime. The report distinguishes
 shutdown requested and actual native-window release. It does not claim that
 every guest thread joined or that a server session was revoked.
+Guest workers interrupted by the explicit stop signal report `cancelled: true`
+without a failure; genuine guest errors remain distinct and stop the session.
 
 `session-audit` exercises the same persistent UI/epoch lifecycle offline and
 requests shutdown after 35 seconds, beyond the old window/process limits.

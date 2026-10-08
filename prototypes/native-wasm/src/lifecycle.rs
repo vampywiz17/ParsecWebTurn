@@ -2,6 +2,18 @@
 use std::sync::{Condvar, Mutex};
 use std::time::Duration;
 
+#[derive(Debug)]
+struct SessionStopped;
+impl std::fmt::Display for SessionStopped {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("native-session-stopped")
+    }
+}
+impl std::error::Error for SessionStopped {}
+pub fn is_cancellation(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<SessionStopped>().is_some()
+}
+
 #[derive(Default)]
 pub struct StopSignal {
     stopped: Mutex<bool>,
@@ -41,7 +53,7 @@ pub fn configure_store<T: 'static>(
 ) {
     store.epoch_deadline_callback(move |mut context| {
         if stop.stopped() {
-            anyhow::bail!("native-session-stopped");
+            return Err(anyhow::Error::new(SessionStopped));
         }
         context.set_fuel(context.get_fuel()?.max(50_000_000))?;
         Ok(wasmtime::UpdateDeadline::Continue(1))
@@ -103,6 +115,8 @@ mod tests {
         assert!(store.get_fuel().unwrap() > 100);
         stop.stop();
         engine.increment_epoch();
-        assert!(tick.call(&mut store, ()).is_err());
+        let error = tick.call(&mut store, ()).unwrap_err();
+        assert!(is_cancellation(&error));
+        assert!(!is_cancellation(&anyhow::anyhow!("actual guest failure")));
     }
 }

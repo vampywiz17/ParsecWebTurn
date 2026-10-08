@@ -360,11 +360,15 @@ fn run() -> Result<()> {
                 engine.increment_epoch();
             }
             report.start_returned = outcome.is_ok();
-            report.start_error = outcome.err().map(|e| format!("{e:#}"));
+            report.start_error = outcome
+                .err()
+                .filter(|e| !lifecycle::is_cancellation(e))
+                .map(|e| format!("{e:#}"));
             #[cfg(windows)]
             if handed_off {
                 report.start_error = desktop::run(&mut store, &instance)
                     .err()
+                    .filter(|e| !lifecycle::is_cancellation(e))
                     .map(|e| format!("{e:#}"));
                 engine.increment_epoch();
             }
