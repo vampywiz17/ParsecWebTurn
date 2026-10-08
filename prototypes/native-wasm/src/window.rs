@@ -31,10 +31,13 @@ pub struct Window {
     pub synthetic_login: bool,
     pub script_steps: AtomicUsize,
     pub run_seconds: u64,
+    pub live: bool,
+    pub online: bool,
+    pub stop: Arc<crate::lifecycle::StopSignal>,
 }
 
 impl Window {
-    pub fn create(synthetic_login: bool) -> Result<Arc<Self>> {
+    pub fn create(synthetic_login: bool, live: bool, online: bool) -> Result<Arc<Self>> {
         let state = Arc::new(Self {
             hwnd: AtomicUsize::new(0),
             closing: AtomicBool::new(false),
@@ -46,6 +49,9 @@ impl Window {
             synthetic_login,
             script_steps: AtomicUsize::new(0),
             run_seconds: if synthetic_login { 20 } else { 8 },
+            live,
+            online,
+            stop: Default::default(),
         });
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         let ui = state.clone();
@@ -92,10 +98,14 @@ impl Window {
         }
     }
     pub fn close(&self) {
-        self.closing.store(true, Ordering::Release);
+        self.request_stop();
         unsafe {
             PostMessageW(self.handle(), WM_APP + 1, 0, 0);
         }
+    }
+    pub fn request_stop(&self) {
+        self.closing.store(true, Ordering::Release);
+        self.stop.stop();
     }
     fn push(&self, event: Event) {
         let mut queue = self.events.lock().unwrap_or_else(|e| e.into_inner());
@@ -181,7 +191,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
         let y = (lp >> 16) as i16 as i32;
         match message {
             WM_CLOSE => {
-                s.closing.store(true, Ordering::Release);
+                s.request_stop();
                 return 0;
             }
             m if m == WM_APP + 1 => {

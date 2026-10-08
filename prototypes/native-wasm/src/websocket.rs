@@ -329,6 +329,7 @@ struct Registry {
     sockets: BTreeMap<u32, Arc<Socket>>,
 }
 pub struct Network {
+    closed: std::sync::atomic::AtomicBool,
     pub audit: Arc<crate::network_audit::Audit>,
     policy: crate::network_policy::Policy,
     tls: Option<Arc<rustls::ClientConfig>>,
@@ -341,8 +342,28 @@ impl Default for Network {
     }
 }
 impl Network {
+    pub fn account(audit: Arc<crate::network_audit::Audit>) -> Self {
+        let mut network = Self::offline(audit);
+        network.policy = crate::network_policy::Policy::account();
+        network
+    }
+    pub fn shutdown(&self) {
+        self.closed
+            .store(true, std::sync::atomic::Ordering::Release);
+        let sockets = {
+            let mut registry = self.registry.lock().unwrap_or_else(|e| e.into_inner());
+            std::mem::take(&mut registry.sockets)
+        };
+        for socket in sockets.values() {
+            socket.cancel();
+        }
+        for socket in sockets.values() {
+            socket.stop();
+        }
+    }
     pub fn offline(audit: Arc<crate::network_audit::Audit>) -> Self {
         Self {
+            closed: Default::default(),
             policy: Default::default(),
             audit,
             tls: None,
@@ -355,6 +376,7 @@ impl Network {
     }
     pub fn diagnostic(port: u16, heartbeat: Duration) -> Self {
         Self {
+            closed: Default::default(),
             policy: crate::network_policy::Policy::loopback(port),
             audit: Default::default(),
             tls: None,
@@ -366,7 +388,9 @@ impl Network {
         }
     }
     fn allowed(&self, url: &reqwest::Url) -> bool {
-        self.policy.allows(url) && matches!(url.scheme(), "ws" | "wss")
+        !self.closed.load(std::sync::atomic::Ordering::Acquire)
+            && self.policy.allows(url)
+            && matches!(url.scheme(), "ws" | "wss")
     }
     pub fn diagnostic_tls(port: u16, root: Option<Vec<u8>>) -> Result<Self> {
         let mut roots = rustls::RootCertStore::empty();
@@ -380,6 +404,7 @@ impl Network {
         .with_root_certificates(roots)
         .with_no_client_auth();
         Ok(Self {
+            closed: Default::default(),
             policy: crate::network_policy::Policy::secure(&[&format!("wss://127.0.0.1:{port}")])?,
             audit: Default::default(),
             tls: Some(Arc::new(config)),
@@ -396,7 +421,10 @@ impl Network {
             return Err(0);
         }
         let mut registry = self.registry.lock().unwrap_or_else(|e| e.into_inner());
-        if registry.sockets.len() >= 4 || registry.next == u32::MAX {
+        if self.closed.load(std::sync::atomic::Ordering::Acquire)
+            || registry.sockets.len() >= 4
+            || registry.next == u32::MAX
+        {
             return Err(0);
         }
         let id = registry.next;
@@ -546,6 +574,38 @@ pub fn dispatch(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn shutdown_closes_a_live_socket_and_refuses_reconnect() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (tcp, _) = listener.accept().unwrap();
+            tcp.set_read_timeout(Some(Duration::from_secs(6))).unwrap();
+            tcp.set_write_timeout(Some(Duration::from_secs(6))).unwrap();
+            let mut ws = tokio_tungstenite::tungstenite::accept(tcp).unwrap();
+            assert!(matches!(ws.read().unwrap(), Message::Close(_)));
+            let _ = ws.flush();
+        });
+        let network = Network::diagnostic(port, KEEPALIVE);
+        let url = reqwest::Url::parse(&format!("ws://127.0.0.1:{port}")).unwrap();
+        let id = network.connect(url.clone(), LIMIT).unwrap();
+        let socket = network.socket(id).unwrap();
+        network.shutdown();
+        assert_eq!(network.active_handles(), 0);
+        assert!(socket.shared.inbox.lock().unwrap().closed);
+        assert!(socket.worker.lock().unwrap().is_none());
+        assert!(network.connect(url, LIMIT).is_err());
+        server.join().unwrap();
+        let account = Network::account(Default::default());
+        assert!(account.allowed(&reqwest::Url::parse("wss://kessel-ws.parsec.app").unwrap()));
+        account.shutdown();
+        assert!(account
+            .connect(
+                reqwest::Url::parse("wss://kessel-ws.parsec.app").unwrap(),
+                LIMIT
+            )
+            .is_err());
+    }
     #[test]
     fn inbox_and_origin_limits_fail_without_reusing_data() {
         let inbox = Shared::new();

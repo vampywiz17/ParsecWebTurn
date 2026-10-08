@@ -12,6 +12,7 @@ mod graphics;
 mod host;
 mod http;
 mod http_probe;
+mod lifecycle;
 mod memory;
 mod network_audit;
 mod network_policy;
@@ -87,6 +88,9 @@ struct Report {
     start_returned: bool,
     start_error: Option<String>,
     network_enabled: bool,
+    live_session: bool,
+    shutdown_requested: bool,
+    native_window_released: bool,
     video_rendered: bool,
     host: Option<HostState>,
     threads: Vec<threads::ThreadRecord>,
@@ -113,7 +117,14 @@ fn main() {
         })
         .and_then(|result| result);
     if let Err(error) = outcome {
-        eprintln!("{error:#}");
+        if matches!(
+            env::args().nth(1).as_deref(),
+            Some("account" | "session-audit")
+        ) {
+            eprintln!("Native account runtime failed; guest content is not logged");
+        } else {
+            eprintln!("{error:#}");
+        }
         std::process::exit(1);
     }
 }
@@ -121,8 +132,10 @@ fn main() {
 fn run() -> Result<()> {
     let mut args = env::args().skip(1);
     let mode = args.next().unwrap_or_else(|| "help".into());
-    let window_mode = matches!(mode.as_str(), "window" | "window-audit" | "login-audit");
-    let audit_mode = matches!(mode.as_str(), "window-audit" | "login-audit");
+    let live_mode = matches!(mode.as_str(), "account" | "session-audit");
+    let window_mode =
+        live_mode || matches!(mode.as_str(), "window" | "window-audit" | "login-audit");
+    let audit_mode = live_mode || matches!(mode.as_str(), "window-audit" | "login-audit");
     if matches!(
         mode.as_str(),
         "guest-offer-probe"
@@ -195,14 +208,23 @@ fn run() -> Result<()> {
                   parsec-native-wasm guest-audit-probe [report.json]\n\
                   parsec-native-wasm window-audit <parsecd.wasm> [report.json]\n\
                   parsec-native-wasm login-audit <parsecd.wasm> [report.json]\n\
-                  WASM UI remains offline; probes use native peers. No browser, login or decoded remote video.\n\
+                  parsec-native-wasm account <parsecd.wasm> [report.json]\n\
+                  parsec-native-wasm session-audit <parsecd.wasm> [report.json]\n\
+                  Only account enables exact HTTPS/WSS origins and runs until close. No decoded remote video.\n\
                   boot reports the first unimplemented bridge; it is not a connected client."
         );
         return Ok(());
     }
     if !matches!(
         mode.as_str(),
-        "inspect" | "allocator" | "boot" | "window" | "window-audit" | "login-audit"
+        "inspect"
+            | "allocator"
+            | "boot"
+            | "window"
+            | "window-audit"
+            | "login-audit"
+            | "account"
+            | "session-audit"
     ) {
         bail!("unknown mode: {mode}");
     }
@@ -264,7 +286,10 @@ fn run() -> Result<()> {
         allocator_roundtrip: false,
         start_returned: false,
         start_error: None,
-        network_enabled: false,
+        network_enabled: mode == "account",
+        live_session: live_mode,
+        shutdown_requested: false,
+        native_window_released: false,
         video_rendered: false,
         host: None,
         threads: Vec::new(),
@@ -275,16 +300,47 @@ fn run() -> Result<()> {
         graphics: None,
     };
     if mode != "inspect" {
-        let _deadline = ExecutionDeadline::start(if mode == "login-audit" { 30 } else { 15 });
+        let _deadline = if live_mode {
+            None
+        } else {
+            Some(ExecutionDeadline::start(if mode == "login-audit" {
+                30
+            } else {
+                15
+            }))
+        };
         #[cfg(windows)]
         let native_window = if window_mode {
-            Some(window::Window::create(mode == "login-audit")?)
+            Some(window::Window::create(
+                mode == "login-audit",
+                live_mode,
+                mode == "account",
+            )?)
         } else {
             None
         };
         #[cfg(windows)]
         if let Some(window) = &native_window {
             *window.capture.lock().unwrap_or_else(|e| e.into_inner()) = capture_path;
+            if live_mode {
+                let stop = window.stop.clone();
+                // Blocking guest atomic waits cannot always be interrupted.
+                // Bound shutdown only, never the interactive account lifetime.
+                std::thread::spawn(move || {
+                    stop.wait();
+                    std::thread::sleep(Duration::from_secs(10));
+                    eprintln!("Native session shutdown deadline reached");
+                    std::process::exit(124);
+                });
+                if mode == "session-audit" {
+                    let window = window.clone();
+                    std::thread::spawn(move || {
+                        if !window.stop.wait_timeout(Duration::from_secs(35)) {
+                            window.request_stop();
+                        }
+                    });
+                }
+            }
         }
         #[cfg(windows)]
         let (mut store, instance) = instantiate_mode(&engine, &module, native_window.clone())?;
@@ -317,7 +373,13 @@ fn run() -> Result<()> {
         if let Some(window) = &native_window {
             // The render worker owns its WGL context and releases it before
             // the HWND is destroyed. Never destroy a live context's window.
-            window.closing.store(true, Ordering::Release);
+            window.request_stop();
+            engine.increment_epoch();
+            report.shutdown_requested = true;
+            if let Some(runtime) = &store.data().threads {
+                runtime.http.shutdown();
+                runtime.websocket.shutdown();
+            }
             let until = std::time::Instant::now() + Duration::from_secs(2);
             while window.active_contexts.load(Ordering::Acquire) != 0
                 && std::time::Instant::now() < until
@@ -332,6 +394,11 @@ fn run() -> Result<()> {
             report.synthetic_login_steps = window.script_steps.load(Ordering::Acquire);
             if window.active_contexts.load(Ordering::Acquire) == 0 {
                 window.close();
+                let until = std::time::Instant::now() + Duration::from_secs(1);
+                while !window.handle().is_null() && std::time::Instant::now() < until {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                report.native_window_released = window.handle().is_null();
             }
         }
         if let Some(runtime) = &store.data().threads {
@@ -426,7 +493,14 @@ fn instantiate_base_with_window(
     let memory = SharedMemory::new(engine, ty)?;
     let runtime = threads::ThreadRuntime::new(engine.clone(), module.clone(), GuestMemory(memory));
     #[cfg(windows)]
-    let runtime = threads::ThreadRuntime { window, ..runtime };
+    let runtime = {
+        let mut runtime = threads::ThreadRuntime { window, ..runtime };
+        if runtime.window.as_ref().is_some_and(|w| w.online) {
+            runtime.http = Arc::new(http::Network::account(runtime.audit.clone()));
+            runtime.websocket = Arc::new(websocket::Network::account(runtime.audit.clone()));
+        }
+        runtime
+    };
     instantiate_with_runtime(Arc::new(runtime))
 }
 
@@ -450,6 +524,22 @@ fn instantiate_with_runtime(
     let mut store = Store::new(engine, host);
     store.set_fuel(50_000_000)?;
     store.set_epoch_deadline(1);
+    #[cfg(windows)]
+    let live_window = runtime.window.as_ref().filter(|window| window.live);
+    #[cfg(windows)]
+    if let Some(window) = live_window {
+        lifecycle::configure_store(&mut store, window.stop.clone());
+        if !runtime.watchdog_started.swap(true, Ordering::AcqRel) {
+            let watchdog = engine.clone();
+            let stop = window.stop.clone();
+            std::thread::spawn(move || {
+                while !stop.wait_timeout(Duration::from_millis(100)) {
+                    watchdog.increment_epoch();
+                }
+                watchdog.increment_epoch();
+            });
+        }
+    }
     // Engine watchdog also bounds guest code that spends no fuel between epochs.
     let watchdog = engine.clone();
     #[cfg(windows)]
@@ -459,10 +549,16 @@ fn instantiate_with_runtime(
         .map_or(5, |window| window.run_seconds + 4);
     #[cfg(not(windows))]
     let seconds = 5;
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_secs(seconds));
-        watchdog.increment_epoch();
-    });
+    #[cfg(windows)]
+    let bounded = live_window.is_none();
+    #[cfg(not(windows))]
+    let bounded = true;
+    if bounded {
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(seconds));
+            watchdog.increment_epoch();
+        });
+    }
     let mut linker = Linker::new(engine);
     for import in module.imports() {
         match import.ty() {

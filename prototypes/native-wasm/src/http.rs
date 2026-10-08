@@ -1,4 +1,4 @@
-//! Pinned MTY_HttpRequest ABI. Network stays disabled outside the loopback probe.
+//! Pinned MTY_HttpRequest ABI. Offline by default; exact origins in account mode.
 use anyhow::{bail, Context, Result};
 use reqwest::{
     blocking::Client,
@@ -19,6 +19,7 @@ const MAX_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Default)]
 pub struct Network {
+    closed: std::sync::atomic::AtomicBool,
     pub audit: std::sync::Arc<crate::network_audit::Audit>,
     policy: crate::network_policy::Policy,
     fixture_root: Option<Vec<u8>>,
@@ -42,6 +43,17 @@ impl Drop for Active<'_> {
 }
 
 impl Network {
+    pub fn account(audit: std::sync::Arc<crate::network_audit::Audit>) -> Self {
+        Self {
+            audit,
+            policy: crate::network_policy::Policy::account(),
+            ..Default::default()
+        }
+    }
+    pub fn shutdown(&self) {
+        self.closed
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
     pub fn offline(audit: std::sync::Arc<crate::network_audit::Audit>) -> Self {
         Self {
             audit,
@@ -56,7 +68,9 @@ impl Network {
     }
 
     fn allowed(&self, url: &Url) -> bool {
-        self.policy.allows(url) && matches!(url.scheme(), "http" | "https")
+        !self.closed.load(std::sync::atomic::Ordering::Acquire)
+            && self.policy.allows(url)
+            && matches!(url.scheme(), "http" | "https")
     }
 
     pub fn diagnostic_tls(port: u16, root: Option<Vec<u8>>) -> Result<Self> {
@@ -80,6 +94,9 @@ impl Network {
         }
         {
             let mut active = self.active.lock().unwrap_or_else(|e| e.into_inner());
+            if self.closed.load(std::sync::atomic::Ordering::Acquire) {
+                bail!("HTTP service stopped");
+            }
             if *active >= 8 {
                 bail!("HTTP concurrency limit");
             }
@@ -304,6 +321,27 @@ fn failure_kind(error: &anyhow::Error) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn account_shutdown_rejects_requests_before_creating_a_client() {
+        let network = Network::account(Default::default());
+        let url = Url::parse("https://kessel-api.parsec.app/v2/auth").unwrap();
+        assert!(network.allowed(&url));
+        assert!(
+            !network.allowed(&Url::parse("https://kessel-api.parsec.app.evil.invalid").unwrap())
+        );
+        network.shutdown();
+        assert!(network
+            .execute(Request {
+                url,
+                method: Method::POST,
+                headers: Default::default(),
+                body: Some(b"synthetic-only".to_vec()),
+                timeout: MAX_TIMEOUT,
+            })
+            .is_err());
+        assert!(network.client.get().is_none());
+        assert!(!network.audit.snapshot().intents[0].policy_allowed);
+    }
     #[test]
     fn header_values_preserve_colons_and_reject_injection_and_framing() {
         let h = headers("Authorization: Bearer fixture:a:b\r\nX-Test: yes\n").unwrap();

@@ -263,6 +263,14 @@ deliberately different from the browser shim's localStorage-backed virtual files
 
 ## Next milestones
 
+M3j / 0.13.0 adds `account <parsecd.wasm> [report.json]`: an original-core login
+window that runs until close, with exact HTTPS/WSS destinations and an ephemeral
+guest filesystem. The original core owns authentication; live account acceptance
+and remote video remain unverified. `session-audit` tests the persistent lifecycle
+offline for 35 seconds. See [M3j](../../docs/NATIVE_M3J.md) for network scope,
+privacy, shutdown behavior and testing. No credentials belong in CLI arguments
+or reports. All other diagnostic modes remain offline.
+
 1. Extend the M2 platform/input bridge as required by an actual session.
    The Matoya UI and remote-video surface remain separate components.
 2. Integrate the native data-channel transport with the guest's live-attempt

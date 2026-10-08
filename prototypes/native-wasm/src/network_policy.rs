@@ -5,6 +5,17 @@ use reqwest::Url;
 #[derive(Clone, Default)]
 pub struct Policy(Vec<(String, String, u16)>);
 impl Policy {
+    /// Exact origins from the pinned core audit, never a wildcard Parsec domain.
+    /// Signaling must still be confirmed against a real account by the user.
+    pub fn account() -> Self {
+        Self::secure(&[
+            "https://kessel-api.parsec.app",
+            "https://public.parsec.app",
+            "https://parsecusercontent.com",
+            "wss://kessel-ws.parsec.app",
+        ])
+        .expect("fixed secure origins")
+    }
     pub fn loopback(port: u16) -> Self {
         Self(vec![
             ("http".into(), "127.0.0.1".into(), port),

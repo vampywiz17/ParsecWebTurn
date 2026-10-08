@@ -208,7 +208,7 @@ fn run_loop(store: &mut Store<HostState>, instance: &Instance, input: bool) -> R
     let until = Instant::now() + Duration::from_secs(window.run_seconds);
     let mut script_frame = 0;
     let mut first = true;
-    while !window.closing.load(Ordering::Acquire) && Instant::now() < until {
+    while !window.closing.load(Ordering::Acquire) && (window.live || Instant::now() < until) {
         let frame_started = Instant::now();
         // The first render callback decompresses/rasterizes the embedded font
         // atlas. Give that one-time initialization its own bounded budget;
