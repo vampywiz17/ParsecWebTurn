@@ -117,6 +117,10 @@ fn run() -> Result<()> {
     if !matches!(mode.as_str(), "inspect" | "allocator" | "boot" | "window") {
         bail!("unknown mode: {mode}");
     }
+    #[cfg(not(windows))]
+    if mode == "window" {
+        bail!("The native window prototype currently requires Windows");
+    }
     let path = PathBuf::from(args.next().context("WASM path required")?);
     let report_path = args.next().map(PathBuf::from);
     #[cfg(windows)]
@@ -152,6 +156,12 @@ fn run() -> Result<()> {
                 signature: format!("{:?}", i.ty()),
                 bridge: if matches!(i.ty(), ExternType::Memory(_)) {
                     "shared-memory"
+                } else if mode == "window" && native_window_import(i.module(), i.name()) {
+                    if i.name() == "MTY_HttpRequest" {
+                        "offline-http-failure"
+                    } else {
+                        "native-window"
+                    }
                 } else if host::disabled_web_stub(i.module(), i.name()) {
                     "unavailable-as-in-web-client"
                 } else if host::implemented(i.module(), i.name()) {
@@ -220,6 +230,7 @@ fn run() -> Result<()> {
         if let Some(window) = &native_window {
             // The render worker owns its WGL context and releases it before
             // the HWND is destroyed. Never destroy a live context's window.
+            window.closing.store(true, Ordering::Release);
             let until = std::time::Instant::now() + Duration::from_secs(2);
             while window.active_contexts.load(Ordering::Acquire) != 0
                 && std::time::Instant::now() < until
@@ -258,6 +269,18 @@ fn run() -> Result<()> {
     // A boot boundary is a successful diagnostic, not a successful app launch.
     // Consumers must check start_error, video_rendered and the bridge statuses.
     Ok(())
+}
+
+fn native_window_import(module: &str, name: &str) -> bool {
+    #[cfg(windows)]
+    {
+        module == "env" && desktop::handles(name)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (module, name);
+        false
+    }
 }
 
 #[cfg(any(test, not(windows)))]

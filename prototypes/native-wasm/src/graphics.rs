@@ -45,10 +45,27 @@ pub struct Graphics {
     unpack_alignment: usize,
     // A current GL context must never be moved to another OS thread.
     _thread: std::marker::PhantomData<std::rc::Rc<()>>,
+    _activity: ContextActivity,
+}
+
+struct ContextActivity(Arc<Window>);
+impl Drop for ContextActivity {
+    fn drop(&mut self) {
+        self.0
+            .active_contexts
+            .fetch_sub(1, std::sync::atomic::Ordering::Release);
+    }
 }
 
 impl Graphics {
     pub fn create(window: Arc<Window>) -> Result<Self> {
+        window
+            .active_contexts
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        let activity = ContextActivity(window.clone());
+        if window.closing.load(std::sync::atomic::Ordering::Acquire) {
+            bail!("Native window is closing");
+        }
         unsafe {
             let dc = GetDC(window.handle());
             let temporary = wglCreateContext(dc);
@@ -58,6 +75,32 @@ impl Graphics {
                 }
                 ReleaseDC(window.handle(), dc);
                 bail!("WGL bootstrap failed");
+            }
+            // WGL_ARB_pixel_format explicitly distinguishes full driver
+            // acceleration from generic or partially accelerated formats.
+            let query = wglGetProcAddress(c"wglGetPixelFormatAttribivARB".as_ptr().cast())
+                .filter(|p| valid_proc(*p as usize));
+            let accelerated = if let Some(proc) = query {
+                let query: unsafe extern "system" fn(
+                    HDC,
+                    i32,
+                    i32,
+                    u32,
+                    *const i32,
+                    *mut i32,
+                ) -> i32 = std::mem::transmute(proc);
+                let attribute = 0x2003; // WGL_ACCELERATION_ARB
+                let mut value = 0;
+                query(dc, GetPixelFormat(dc), 0, 1, &attribute, &mut value) != 0 && value == 0x2027
+            // WGL_FULL_ACCELERATION_ARB
+            } else {
+                false
+            };
+            if !accelerated {
+                wglMakeCurrent(dc, std::ptr::null_mut());
+                wglDeleteContext(temporary);
+                ReleaseDC(window.handle(), dc);
+                bail!("The driver did not confirm a fully accelerated WGL pixel format; software fallback is disabled");
             }
             let modern = wglGetProcAddress(c"wglCreateContextAttribsARB".as_ptr().cast());
             let context = if let Some(proc) = modern.filter(|p| valid_proc(*p as usize)) {
@@ -125,9 +168,6 @@ impl Graphics {
             };
             gl.bind_vertex_array(Some(vao));
             *window.graphics.lock().unwrap_or_else(|e| e.into_inner()) = Some(report.clone());
-            window
-                .active_contexts
-                .fetch_add(1, std::sync::atomic::Ordering::Release);
             Ok(Self {
                 gl,
                 dc,
@@ -139,6 +179,7 @@ impl Graphics {
                 report,
                 unpack_alignment: 4,
                 _thread: std::marker::PhantomData,
+                _activity: activity,
             })
         }
     }
@@ -552,9 +593,6 @@ impl Drop for Graphics {
             .graphics
             .lock()
             .unwrap_or_else(|e| e.into_inner()) = Some(self.report.clone());
-        self.window
-            .active_contexts
-            .fetch_sub(1, std::sync::atomic::Ordering::Release);
     }
 }
 

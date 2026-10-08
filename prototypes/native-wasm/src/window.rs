@@ -192,7 +192,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
             WM_KILLFOCUS => s.push(Event::Focus(false)),
             WM_MOUSEMOVE => s.push(Event::Motion(x, y)),
             WM_LBUTTONDOWN | WM_LBUTTONUP => {
-                s.push(Event::Button(message == WM_LBUTTONDOWN, 1, x, y))
+                s.push(Event::Button(message == WM_LBUTTONDOWN, 0, x, y))
             }
             WM_RBUTTONDOWN | WM_RBUTTONUP => {
                 s.push(Event::Button(message == WM_RBUTTONDOWN, 2, x, y))

@@ -77,10 +77,22 @@ pub fn dispatch(
             caller.data_mut().app_pointer = Some(app as u32);
             let (w, h) = *window.dimensions.lock().unwrap_or_else(|e| e.into_inner());
             let (x, y, screen_w, screen_h, focused) = window.initial_geometry();
+            for (name, x, y) in [
+                ("mty_window_update_position", x, y),
+                ("mty_window_update_screen", screen_w, screen_h),
+                ("mty_window_update_size", w, h),
+            ] {
+                invoke(
+                    caller,
+                    name,
+                    &[
+                        Val::I32(app),
+                        Val::F64((x as f64).to_bits()),
+                        Val::F64((y as f64).to_bits()),
+                    ],
+                )?;
+            }
             for (name, values) in [
-                ("mty_window_update_position", vec![app, x, y]),
-                ("mty_window_update_screen", vec![app, screen_w, screen_h]),
-                ("mty_window_update_size", vec![app, w, h]),
                 ("mty_window_update_focus", vec![app, focused as i32]),
                 ("mty_window_update_fullscreen", vec![app, 0]),
                 ("mty_window_update_visibility", vec![app, 1]),
@@ -95,7 +107,7 @@ pub fn dispatch(
             invoke(
                 caller,
                 "mty_window_update_pixel_ratio",
-                &[Val::I32(app), Val::F32(1.0_f32.to_bits())],
+                &[Val::I32(app), Val::F64(1.0_f64.to_bits())],
             )?;
         }
         "web_set_title" => {
@@ -208,7 +220,11 @@ pub fn run(store: &mut Store<HostState>, instance: &Instance) -> Result<()> {
                         store,
                         instance,
                         "mty_window_update_size",
-                        &[Val::I32(app), Val::I32(w), Val::I32(h)],
+                        &[
+                            Val::I32(app),
+                            Val::F64((w as f64).to_bits()),
+                            Val::F64((h as f64).to_bits()),
+                        ],
                     )?;
                     ("mty_window_size", vec![app])
                 }
