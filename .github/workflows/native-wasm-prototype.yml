@@ -52,7 +52,11 @@ jobs:
           if (!$allocator.instantiated -or !$allocator.allocator_roundtrip) { throw 'Actual guest allocator not verified' }
           $boot = Get-Content "$artifact/boot.json" -Raw | ConvertFrom-Json
           if (!$boot.instantiated -or $boot.video_rendered -or $boot.network_enabled) { throw 'Incorrect bootstrap status' }
-          if ($boot.host.boundary -ne 'env::parsec_web_init') { throw 'The pinned core did not reach its native client-backend boundary' }
+          if (!$boot.native_backend.initialized -or $boot.host.boundary -eq 'env::parsec_web_init') { throw 'The pinned core did not initialize the native client backend' }
+          & $exe transport-probe "$artifact/transport.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Native WebRTC transport failed' }
+          $transport = Get-Content "$artifact/transport.json" -Raw | ConvertFrom-Json
+          if ($transport.connected_peers -ne 2 -or $transport.binary_messages_verified -ne 6 -or !$transport.peers_closed) { throw 'Native data-channel exchange or cleanup not verified' }
           $boot.host | ConvertTo-Json -Depth 5
           $boot.threads | ConvertTo-Json -Depth 5
           $boot.start_error

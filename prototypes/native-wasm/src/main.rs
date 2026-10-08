@@ -1,7 +1,9 @@
+mod backend;
 mod filesystem;
 mod host;
 mod memory;
 mod threads;
+mod transport;
 
 use anyhow::{bail, Context, Result};
 use host::HostState;
@@ -67,6 +69,7 @@ struct Report {
     video_rendered: bool,
     host: Option<HostState>,
     threads: Vec<threads::ThreadRecord>,
+    native_backend: Option<serde_json::Value>,
 }
 
 fn main() {
@@ -79,9 +82,23 @@ fn main() {
 fn run() -> Result<()> {
     let mut args = env::args().skip(1);
     let mode = args.next().unwrap_or_else(|| "help".into());
+    if mode == "transport-probe" {
+        let path = args.next().map(PathBuf::from);
+        if args.next().is_some() {
+            bail!("too many arguments");
+        }
+        let report = transport::probe()?;
+        let json = serde_json::to_string_pretty(&report)?;
+        if let Some(path) = path {
+            fs::write(path, &json)?;
+        }
+        println!("{json}");
+        return Ok(());
+    }
     if mode == "help" || mode == "--help" {
         println!(
             "parsec-native-wasm <inspect|allocator|boot> <parsecd.wasm> [report.json]\n\
+                  parsec-native-wasm transport-probe [report.json]\n\
                   Offline WASM host prototype. No browser, login, network or video renderer.\n\
                   boot reports the first unimplemented bridge; it is not a connected client."
         );
@@ -140,6 +157,7 @@ fn run() -> Result<()> {
         video_rendered: false,
         host: None,
         threads: Vec::new(),
+        native_backend: None,
     };
     if mode != "inspect" {
         let _deadline = ExecutionDeadline::start();
@@ -162,6 +180,13 @@ fn run() -> Result<()> {
             std::thread::sleep(Duration::from_millis(100));
             report.threads = runtime.snapshot();
         }
+        report.native_backend = Some(serde_json::to_value(
+            &*store
+                .data()
+                .backend
+                .lock()
+                .map_err(|_| anyhow::anyhow!("backend lock poisoned"))?,
+        )?);
         report.host = Some(store.into_data());
     }
     let json = serde_json::to_string_pretty(&report)?;
@@ -203,6 +228,7 @@ fn instantiate_with_runtime(
     let mut host = HostState::new(runtime.memory.clone());
     host.threads = Some(runtime.clone());
     host.filesystem = runtime.filesystem.clone();
+    host.backend = runtime.backend.clone();
     let mut store = Store::new(engine, host);
     store.set_fuel(50_000_000)?;
     store.set_epoch_deadline(1);
@@ -253,6 +279,71 @@ fn allocator_roundtrip(store: &mut Store<HostState>, instance: &Instance) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_backend_bridge_is_shared_and_preserves_guest_abi() {
+        let mut config = Config::new();
+        config
+            .wasm_threads(true)
+            .consume_fuel(true)
+            .epoch_interruption(true);
+        let engine = Engine::new(&config).unwrap();
+        let module = Module::new(&engine, r#"(module
+            (import "env" "memory" (memory 1 1 shared))
+            (import "env" "parsec_web_init" (func $init))
+            (import "env" "parsec_web_destroy" (func $destroy))
+            (import "env" "parsec_web_get_status" (func $status (result i32)))
+            (import "env" "parsec_web_get_guests" (func $guests (param i32 i32)))
+            (import "env" "parsec_web_get_self" (func $self (param i32 i32)))
+            (import "env" "parsec_web_get_metrics" (func $metrics (param i32 i32 i32 i32 i32 i32 i32)))
+            (func (export "init") call $init)
+            (func (export "destroy") call $destroy)
+            (func (export "status") (result i32) call $status)
+            (func (export "guests") i32.const 100 i32.const 3 call $guests)
+            (func (export "self") i32.const 104 i32.const 108 call $self)
+            (func (export "metrics") i32.const 120 i32.const 124 i32.const 128 i32.const 129
+                i32.const 132 i32.const 136 i32.const 140 call $metrics))"#).unwrap();
+        let (mut main, instance) = instantiate(&engine, &module).unwrap();
+        let runtime = main.data().threads.clone().unwrap();
+        let (mut worker, other) = instantiate_with_runtime(runtime).unwrap();
+        instance
+            .get_typed_func::<(), ()>(&mut main, "init")
+            .unwrap()
+            .call(&mut main, ())
+            .unwrap();
+        assert_eq!(
+            other
+                .get_typed_func::<(), i32>(&mut worker, "status")
+                .unwrap()
+                .call(&mut worker, ())
+                .unwrap(),
+            -3
+        );
+        let m = main.data().memory.clone();
+        m.write(100, &[255; 44]).unwrap();
+        for name in ["guests", "self", "metrics"] {
+            instance
+                .get_typed_func::<(), ()>(&mut main, name)
+                .unwrap()
+                .call(&mut main, ())
+                .unwrap();
+        }
+        assert_eq!(m.read(100, 4).unwrap(), b"[]\0\xff");
+        assert_eq!(m.read(104, 4).unwrap(), vec![0, 255, 255, 255]);
+        assert_eq!(m.u32(108).unwrap(), 0);
+        assert_eq!(m.read(128, 4).unwrap(), vec![0, 0, 255, 255]);
+        assert_eq!(m.u32(140).unwrap(), 0);
+        other
+            .get_typed_func::<(), ()>(&mut worker, "destroy")
+            .unwrap()
+            .call(&mut worker, ())
+            .unwrap();
+        assert!(instance
+            .get_typed_func::<(), i32>(&mut main, "status")
+            .unwrap()
+            .call(&mut main, ())
+            .is_err());
+    }
 
     #[test]
     fn unsupported_bridges_trap_instead_of_claiming_success() {

@@ -16,6 +16,8 @@ pub struct HostState {
     #[serde(skip)]
     pub filesystem: std::sync::Arc<std::sync::Mutex<crate::filesystem::VirtualFs>>,
     #[serde(skip)]
+    pub backend: std::sync::Arc<std::sync::Mutex<crate::backend::Backend>>,
+    #[serde(skip)]
     pub started: Instant,
     pub calls: BTreeMap<String, u64>,
     pub boundary: Option<String>,
@@ -33,6 +35,7 @@ impl HostState {
             memory,
             threads: None,
             filesystem: Default::default(),
+            backend: Default::default(),
             started: Instant::now(),
             calls: BTreeMap::new(),
             boundary: None,
@@ -60,6 +63,20 @@ pub fn implemented(module: &str, name: &str) -> bool {
                 | "web_set_title"
                 | "web_set_app"
                 | "MTY_GetRandomBytes"
+                | "parsec_web_init"
+                | "parsec_web_destroy"
+                | "parsec_web_disconnect"
+                | "parsec_web_get_status"
+                | "parsec_web_get_guests"
+                | "parsec_web_poll_events"
+                | "parsec_web_get_buffer_size"
+                | "parsec_web_get_buffer"
+                | "parsec_web_get_metrics"
+                | "parsec_web_get_network_failure"
+                | "parsec_web_get_self"
+                | "parsec_web_get_host_mode"
+                | "parsec_web_poll_audio"
+                | "parsec_client_set_config"
         ),
         "wasi_snapshot_preview1" => matches!(
             name,
@@ -143,6 +160,9 @@ pub fn dispatch(
         return Ok(());
     }
     if module == "env" {
+        if name.starts_with("parsec_") {
+            return backend_call(&caller, name, args, results);
+        }
         match name {
             "flock" => result(results, 0),
             "web_get_hostname" => {
@@ -385,6 +405,76 @@ pub fn dispatch(
         _ => unreachable!(),
     };
     result(results, errno);
+    Ok(())
+}
+
+fn backend_call(
+    caller: &Caller<'_, HostState>,
+    name: &str,
+    args: &[Val],
+    results: &mut [Val],
+) -> Result<()> {
+    let m = &caller.data().memory;
+    let mut b = caller
+        .data()
+        .backend
+        .lock()
+        .map_err(|_| anyhow::anyhow!("backend lock poisoned"))?;
+    match name {
+        "parsec_web_init" => b.init(),
+        "parsec_web_destroy" => b.destroy(),
+        _ => {
+            b.require_initialized()?;
+            match name {
+                "parsec_web_disconnect" => b.disconnect(int(args, 0)?, int(args, 1)?)?,
+                "parsec_web_get_status" => {
+                    result(results, b.status.context("backend status missing")?)
+                }
+                "parsec_client_set_config" => {
+                    b.set_video_protocol(crate::backend::VideoProtocol {
+                        version: ptr(args, 0)?,
+                        message_size: ptr(args, 1)?,
+                        version_offset: ptr(args, 2)?,
+                        flag_offset: ptr(args, 3)?,
+                    })?
+                }
+                "parsec_web_get_guests" => {
+                    m.c_string(ptr(args, 0)?, ptr(args, 1)? as usize, "[]")?
+                }
+                "parsec_web_poll_events" => {
+                    if let Some(event) = b.peek_event() {
+                        let json = serde_json::to_string(event)?;
+                        // Consume only after a successful copy, so a bad guest
+                        // buffer cannot silently discard an event.
+                        m.c_string(ptr(args, 0)?, ptr(args, 1)? as usize, &json)?;
+                        b.poll_event();
+                        result(results, 1);
+                    } else {
+                        result(results, 0);
+                    }
+                }
+                "parsec_web_get_self" => {
+                    m.write(ptr(args, 0)?, &[0])?;
+                    m.set_u32(ptr(args, 1)?, 0)?;
+                }
+                "parsec_web_get_metrics" => {
+                    // Idle values from X's constructor, NOT measured telemetry.
+                    for i in [0, 1, 4, 5, 6] {
+                        m.set_u32(ptr(args, i)?, 0)?;
+                    }
+                    for i in [2, 3] {
+                        m.write(ptr(args, i)?, &[0])?;
+                    }
+                }
+                "parsec_web_get_buffer" => {} // No buffers exist before a live attempt.
+                "parsec_web_get_buffer_size"
+                | "parsec_web_get_network_failure"
+                | "parsec_web_get_host_mode"
+                | "parsec_web_poll_audio" => result(results, 0),
+                _ => unreachable!(),
+            }
+        }
+    }
     Ok(())
 }
 
