@@ -87,3 +87,24 @@ References: retained 2026-10-08 Matoya main/worker files, pinned WASM import
 signatures, public Matoya header, [tokio-tungstenite documentation](https://docs.rs/tokio-tungstenite/latest/tokio_tungstenite/).
 The Matoya/Parsec ABI adapter is snapshot-specific; RFC 6455 handling is delegated
 to the native WebSocket library.
+
+## Verified build
+
+Source commit `8712f03f8979f020065fc722d7d58222e8f86822`, prototype 0.10.0:
+[Windows CI run 37848438828](https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37848438828)
+passed formatting, all 40 tests, Clippy with warnings denied, the release build,
+original-core inspect/allocator/bootstrap and every native acceptance probe.
+The HTTP fixture explicitly resets accepted sockets to blocking mode on Windows
+before its bounded reads/writes; its listener remains nonblocking.
+
+The downloaded release executable also passed `guest-websocket-probe` locally:
+four fixture connections, all 13 boolean verification checks, the server joined
+and no remaining handles. Its report is packaged separately from the CI report.
+The debug build's HTTP and WebSocket probes passed locally as well.
+
+The packaged original core remains version `150-104a`, SHA-256
+`d663dd96df477c65479fb93eb88756c7fcafff581cc93be563625cd195a4b4a6`.
+`BUILD-INFO.json` and `SHA256SUMS` identify the source, documentation and package.
+These results prove the controlled loopback transport, not authenticated
+original-core signaling, external WSS/TLS, a real host or decoded video.
+The production main/dev branches were not changed.
