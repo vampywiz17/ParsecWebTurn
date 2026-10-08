@@ -22,6 +22,7 @@ pub struct HostState {
     pub stdout: String,
     pub title: Option<String>,
     pub app_pointer: Option<u32>,
+    pub filesystem_requests: Vec<(String, String, i32)>,
     #[serde(skip)]
     pub keys: BTreeMap<i32, String>,
 }
@@ -38,6 +39,7 @@ impl HostState {
             stdout: String::new(),
             title: None,
             app_pointer: None,
+            filesystem_requests: Vec::new(),
             keys: BTreeMap::new(),
         }
     }
@@ -221,7 +223,25 @@ pub fn dispatch(
             let mut fs = fs
                 .lock()
                 .map_err(|_| anyhow::anyhow!("virtual filesystem lock poisoned"))?;
-            filesystem_call(&m, &mut fs, name, args)?
+            let errno = filesystem_call(&m, &mut fs, name, args)?;
+            drop(fs);
+            if name.starts_with("path_") && caller.data().filesystem_requests.len() < 32 {
+                let index = if name == "path_create_directory" {
+                    1
+                } else {
+                    2
+                };
+                let len = ptr(args, index + 1)? as usize;
+                if len <= 4096 {
+                    let path =
+                        String::from_utf8_lossy(&m.read(ptr(args, index)?, len)?).into_owned();
+                    caller
+                        .data_mut()
+                        .filesystem_requests
+                        .push((name.into(), path, errno));
+                }
+            }
+            errno
         }
         "fd_fdstat_get" => {
             let fd = ptr(args, 0)?;
