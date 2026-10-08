@@ -127,10 +127,9 @@ async fn serve(listener: tokio::net::TcpListener) -> Result<usize> {
 
     let (stream, _) = listener.accept().await?;
     let rejected = tokio_tungstenite::accept_hdr_async(stream, |_, _| {
-        Err(ErrorResponse::builder()
-            .status(403)
-            .body(Some("fixture rejection".into()))
-            .unwrap())
+        let mut response = ErrorResponse::new(Some("fixture rejection".into()));
+        *response.status_mut() = tokio_tungstenite::tungstenite::http::StatusCode::FORBIDDEN;
+        Err(response)
     })
     .await;
     if rejected.is_ok() {
@@ -195,7 +194,7 @@ pub fn probe() -> Result<serde_json::Value> {
     {
         bail!("Unicode WebSocket retry failed");
     }
-    if read.call(&mut store, (id, 1000, 2048, 128))? != 0 || memory.string(2048, 128)? != "" {
+    if read.call(&mut store, (id, 1000, 2048, 128))? != 0 || !memory.string(2048, 128)?.is_empty() {
         bail!("Empty text frame lost");
     }
     memory.c_string(2048, 128, "sentinel")?;
