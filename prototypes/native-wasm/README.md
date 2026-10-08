@@ -56,6 +56,9 @@ Use the retained audit copy or audit and explicitly pin the replacement.
   No host filesystem, environment variables, real clipboard or user profile access.
 - No HTTP/WebSocket/WebRTC implementation and no account credentials.
 - Unsupported functions are correctly typed traps, **not zero-returning success stubs**.
+  The optional maintenance hooks already empty in the audited web client are an
+  explicit exception: they retain their zero/unavailable handle and are labeled
+  `unavailable-as-in-web-client`, never as a working maintenance service.
 - Guest pointers/strings/iovecs are bounds checked. Host shared-memory access uses atomic bytes.
 - Guest instruction fuel and a five-second epoch deadline limit bootstrap execution.
   A separate 15-second process deadline also handles blocking guest atomic waits;

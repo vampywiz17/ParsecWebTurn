@@ -46,6 +46,9 @@ impl HostState {
 }
 
 pub fn implemented(module: &str, name: &str) -> bool {
+    if disabled_web_stub(module, name) {
+        return true;
+    }
     match module {
         "env" => matches!(
             name,
@@ -84,6 +87,20 @@ pub fn implemented(module: &str, name: &str) -> bool {
     }
 }
 
+/// The audited weblib.js leaves these optional services empty. Its undefined
+/// result becomes a null/zero WASM handle. Preserve unavailability, not a
+/// fabricated maintenance service or native feature.
+pub fn disabled_web_stub(module: &str, name: &str) -> bool {
+    module == "env"
+        && matches!(
+            name,
+            "maintenance_create"
+                | "maintenance_destroy"
+                | "maintenance_force_poll"
+                | "maintenance_get_state"
+        )
+}
+
 fn int(args: &[Val], index: usize) -> Result<i32> {
     args.get(index)
         .and_then(Val::i32)
@@ -112,6 +129,10 @@ pub fn dispatch(
         bail!("native bridge not implemented: {id}");
     }
     let m = caller.data().memory.clone();
+    if disabled_web_stub(module, name) {
+        result(results, 0);
+        return Ok(());
+    }
     if module == "wasi" {
         let runtime = caller
             .data()

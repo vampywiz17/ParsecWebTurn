@@ -119,6 +119,8 @@ fn run() -> Result<()> {
                 signature: format!("{:?}", i.ty()),
                 bridge: if matches!(i.ty(), ExternType::Memory(_)) {
                     "shared-memory"
+                } else if host::disabled_web_stub(i.module(), i.name()) {
+                    "unavailable-as-in-web-client"
                 } else if host::implemented(i.module(), i.name()) {
                     "implemented"
                 } else {
@@ -384,5 +386,33 @@ mod tests {
             store.data().memory.string(pointer as u32, 15).unwrap(),
             "web.parsec.app"
         );
+    }
+
+    #[test]
+    fn optional_web_maintenance_returns_an_unavailable_handle() {
+        let mut config = Config::new();
+        config
+            .wasm_threads(true)
+            .consume_fuel(true)
+            .epoch_interruption(true);
+        let engine = Engine::new(&config).unwrap();
+        let module = Module::new(
+            &engine,
+            r#"(module
+            (import "env" "memory" (memory 1 1 shared))
+            (import "env" "maintenance_create" (func $maintenance (result i32)))
+            (func (export "probe") (result i32) call $maintenance))"#,
+        )
+        .unwrap();
+        let (mut store, instance) = instantiate(&engine, &module).unwrap();
+        assert_eq!(
+            instance
+                .get_typed_func::<(), i32>(&mut store, "probe")
+                .unwrap()
+                .call(&mut store, ())
+                .unwrap(),
+            0
+        );
+        assert!(store.data().boundary.is_none());
     }
 }
