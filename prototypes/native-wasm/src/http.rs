@@ -8,10 +8,7 @@ use reqwest::{
 use std::{
     io::Read,
     ops::Range,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        OnceLock,
-    },
+    sync::{Mutex, OnceLock},
     time::Duration,
 };
 use wasmtime::{Caller, Val};
@@ -24,7 +21,7 @@ const MAX_TIMEOUT: Duration = Duration::from_secs(5);
 pub struct Network {
     loopback_port: Option<u16>,
     client: OnceLock<Client>,
-    active: AtomicUsize,
+    active: Mutex<usize>,
 }
 
 struct Request {
@@ -35,10 +32,10 @@ struct Request {
     timeout: Duration,
 }
 
-struct Active<'a>(&'a AtomicUsize);
+struct Active<'a>(&'a Mutex<usize>);
 impl Drop for Active<'_> {
     fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::SeqCst);
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) -= 1;
     }
 }
 
@@ -64,11 +61,13 @@ impl Network {
         if !self.allowed(&request.url) {
             bail!("HTTP destination not enabled");
         }
-        self.active
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
-                (n < 8).then_some(n + 1)
-            })
-            .map_err(|_| anyhow::anyhow!("HTTP concurrency limit"))?;
+        {
+            let mut active = self.active.lock().unwrap_or_else(|e| e.into_inner());
+            if *active >= 8 {
+                bail!("HTTP concurrency limit");
+            }
+            *active += 1;
+        }
         let _active = Active(&self.active);
         // No URL/header/body/error is logged. No proxy, cookie jar or redirect:
         // even a loopback redirect must never reach an unintended destination.

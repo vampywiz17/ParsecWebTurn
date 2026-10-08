@@ -543,8 +543,9 @@ mod tests {
             &engine,
             r#"(module
             (import "env" "memory" (memory 1 1 shared))
-            (import "env" "MTY_HttpRequest" (func $connect (result i32)))
-            (func (export "probe") (result i32) call $connect))"#,
+            (import "env" "MTY_WebSocketConnect" (func $connect (param i32 i32 i32 i32 i32) (result i32)))
+            (func (export "probe") (result i32)
+                i32.const 0 i32.const 0 i32.const 0 i32.const 0 i32.const 0 call $connect))"#,
         )
         .unwrap();
         let (mut store, instance) = instantiate(&engine, &module).unwrap();
@@ -555,7 +556,7 @@ mod tests {
             .is_err());
         assert_eq!(
             store.data().boundary.as_deref(),
-            Some("env::MTY_HttpRequest")
+            Some("env::MTY_WebSocketConnect")
         );
     }
 
