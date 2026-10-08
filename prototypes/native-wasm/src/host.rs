@@ -161,7 +161,11 @@ pub fn dispatch(
     *caller.data_mut().calls.entry(id.clone()).or_default() += 1;
     #[cfg(windows)]
     if module == "env" && caller.data().window.is_some() && crate::desktop::handles(name) {
-        return crate::desktop::dispatch(caller, name, args, results);
+        let outcome = crate::desktop::dispatch(&mut caller, name, args, results);
+        if outcome.is_err() && name != "web_run_and_yield" {
+            caller.data_mut().boundary = Some(id);
+        }
+        return outcome;
     }
     if !implemented(module, name) {
         caller.data_mut().boundary = Some(id.clone());

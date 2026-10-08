@@ -27,6 +27,7 @@ pub struct Window {
     pub events: Mutex<std::collections::VecDeque<Event>>,
     pub dimensions: Mutex<(i32, i32)>,
     pub graphics: Mutex<Option<crate::graphics::GraphicsReport>>,
+    pub capture: Mutex<Option<std::path::PathBuf>>,
 }
 
 impl Window {
@@ -38,6 +39,7 @@ impl Window {
             events: Default::default(),
             dimensions: Mutex::new((1024, 720)),
             graphics: Default::default(),
+            capture: Default::default(),
         });
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         let ui = state.clone();
@@ -69,6 +71,19 @@ impl Window {
 
     pub fn handle(&self) -> HWND {
         self.hwnd.load(Ordering::Acquire) as HWND
+    }
+    pub fn initial_geometry(&self) -> (i32, i32, i32, i32, bool) {
+        unsafe {
+            let mut origin = POINT { x: 0, y: 0 };
+            ClientToScreen(self.handle(), &mut origin);
+            (
+                origin.x,
+                origin.y,
+                GetSystemMetrics(SM_CXSCREEN),
+                GetSystemMetrics(SM_CYSCREEN),
+                GetForegroundWindow() == self.handle(),
+            )
+        }
     }
     pub fn close(&self) {
         self.closing.store(true, Ordering::Release);

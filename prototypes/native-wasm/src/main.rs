@@ -119,6 +119,12 @@ fn run() -> Result<()> {
     }
     let path = PathBuf::from(args.next().context("WASM path required")?);
     let report_path = args.next().map(PathBuf::from);
+    #[cfg(windows)]
+    let capture_path = if mode == "window" {
+        args.next().map(PathBuf::from)
+    } else {
+        None
+    };
     if args.next().is_some() {
         bail!("too many arguments");
     }
@@ -135,7 +141,7 @@ fn run() -> Result<()> {
     let engine = Engine::new(&config)?;
     let module = Module::new(&engine, &bytes).context("compiling the original WASM")?;
     let mut report = Report {
-        schema: 1,
+        schema: 2,
         wasm_sha256: hash,
         mode: mode.clone(),
         imports: module
@@ -179,6 +185,10 @@ fn run() -> Result<()> {
         } else {
             None
         };
+        #[cfg(windows)]
+        if let Some(window) = &native_window {
+            *window.capture.lock().unwrap_or_else(|e| e.into_inner()) = capture_path;
+        }
         #[cfg(windows)]
         let (mut store, instance) = instantiate_mode(&engine, &module, native_window.clone())?;
         #[cfg(not(windows))]
@@ -250,6 +260,7 @@ fn run() -> Result<()> {
     Ok(())
 }
 
+#[cfg(any(test, not(windows)))]
 fn instantiate(engine: &Engine, module: &Module) -> Result<(Store<HostState>, Instance)> {
     #[cfg(windows)]
     {

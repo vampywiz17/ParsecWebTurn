@@ -42,6 +42,7 @@ pub struct Graphics {
     objects: BTreeMap<u32, Object>,
     next: u32,
     report: GraphicsReport,
+    unpack_alignment: usize,
     // A current GL context must never be moved to another OS thread.
     _thread: std::marker::PhantomData<std::rc::Rc<()>>,
 }
@@ -52,11 +53,14 @@ impl Graphics {
             let dc = GetDC(window.handle());
             let temporary = wglCreateContext(dc);
             if temporary.is_null() || wglMakeCurrent(dc, temporary) == 0 {
+                if !temporary.is_null() {
+                    wglDeleteContext(temporary);
+                }
                 ReleaseDC(window.handle(), dc);
                 bail!("WGL bootstrap failed");
             }
             let modern = wglGetProcAddress(c"wglCreateContextAttribsARB".as_ptr().cast());
-            let context = if let Some(proc) = modern {
+            let context = if let Some(proc) = modern.filter(|p| valid_proc(*p as usize)) {
                 let create: unsafe extern "system" fn(HDC, HGLRC, *const i32) -> HGLRC =
                     std::mem::transmute(proc);
                 // OpenGL 4.1 compatibility includes standardized ES2 shader
@@ -76,6 +80,12 @@ impl Graphics {
                 bail!("Native OpenGL 4.1/ES2 shader compatibility required");
             }
             let module = LoadLibraryW("opengl32.dll\0".encode_utf16().collect::<Vec<_>>().as_ptr());
+            if module.is_null() {
+                wglMakeCurrent(dc, std::ptr::null_mut());
+                wglDeleteContext(context);
+                ReleaseDC(window.handle(), dc);
+                bail!("Loading the system OpenGL library failed");
+            }
             let gl = glow::Context::from_loader_function(|name| {
                 let name = CString::new(name).unwrap();
                 let p = wglGetProcAddress(name.as_ptr().cast())
@@ -89,7 +99,9 @@ impl Graphics {
                         .unwrap_or(std::ptr::null())
                 }
             });
-            if let Some(proc) = wglGetProcAddress(c"wglSwapIntervalEXT".as_ptr().cast()) {
+            if let Some(proc) = wglGetProcAddress(c"wglSwapIntervalEXT".as_ptr().cast())
+                .filter(|p| valid_proc(*p as usize))
+            {
                 let interval: unsafe extern "system" fn(i32) -> i32 = std::mem::transmute(proc);
                 interval(1);
             }
@@ -101,7 +113,16 @@ impl Graphics {
                 accelerated_pixel_format: true,
                 ..Default::default()
             };
-            let vao = gl.create_vertex_array().map_err(anyhow::Error::msg)?;
+            let vao = match gl.create_vertex_array() {
+                Ok(vao) => vao,
+                Err(error) => {
+                    wglMakeCurrent(dc, std::ptr::null_mut());
+                    wglDeleteContext(context);
+                    ReleaseDC(window.handle(), dc);
+                    FreeLibrary(module);
+                    bail!("GPU vertex array allocation failed: {error}");
+                }
+            };
             gl.bind_vertex_array(Some(vao));
             *window.graphics.lock().unwrap_or_else(|e| e.into_inner()) = Some(report.clone());
             window
@@ -116,6 +137,7 @@ impl Graphics {
                 objects: BTreeMap::new(),
                 next: 1,
                 report,
+                unpack_alignment: 4,
                 _thread: std::marker::PhantomData,
             })
         }
@@ -159,6 +181,38 @@ impl Graphics {
     }
 
     pub fn present(&mut self) -> Result<()> {
+        // Explicit optional test artifact only: one readback, never the normal
+        // presentation path. Capture the rendered backbuffer before swapping.
+        if self.report.frames_presented == 10 {
+            let capture = self
+                .window
+                .capture
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take();
+            if let Some(path) = capture {
+                let (w, h) = *self
+                    .window
+                    .dimensions
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                let mut pixels = vec![0; texture_size(w, h, glow::RGBA, glow::UNSIGNED_BYTE)?];
+                unsafe {
+                    self.gl.read_pixels(
+                        0,
+                        0,
+                        w,
+                        h,
+                        glow::RGBA,
+                        glow::UNSIGNED_BYTE,
+                        glow::PixelPackData::Slice(Some(&mut pixels)),
+                    );
+                }
+                let image = image::RgbaImage::from_raw(w as u32, h as u32, pixels)
+                    .context("Invalid GPU capture size")?;
+                image::imageops::flip_vertical(&image).save(path)?;
+            }
+        }
         unsafe {
             self.gl.flush();
             if SwapBuffers(self.dc) == 0 {
@@ -359,8 +413,14 @@ impl Graphics {
                     let log = self.gl.get_shader_info_log(self.shader(u(0)?)?);
                     let max = bounded(i(1)?, 65536)?;
                     if max > 0 {
-                        let copied = &log[..log.len().min(max - 1)];
-                        m.c_string(u(3)?, max, copied)?;
+                        let copied = &log.as_bytes()[..log.len().min(max - 1)];
+                        m.write(u(3)?, copied)?;
+                        m.write(
+                            u(3)?
+                                .checked_add(copied.len() as u32)
+                                .context("shader log overflow")?,
+                            &[0],
+                        )?;
                         if u(2)? != 0 {
                             m.set_u32(u(2)?, copied.len() as u32)?;
                         }
@@ -401,8 +461,10 @@ impl Graphics {
                 "glUniformMatrix4fv" => {
                     let bytes = m.read(u(3)?, bounded(i(1)?, 64)? * 64)?;
                     let values: Vec<f32> = bytes
-                        .chunks_exact(4)
-                        .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .map(|b| f32::from_le_bytes(*b))
                         .collect();
                     self.gl.uniform_matrix_4_f32_slice(
                         self.uniform(u(0)?)?.as_ref(),
@@ -416,7 +478,7 @@ impl Graphics {
                     } else {
                         (i(4)?, i(5)?, u(6)?, u(7)?, u(8)?)
                     };
-                    let size = texture_size(w, h, format, typ)?;
+                    let size = upload_size(w, h, format, typ, self.unpack_alignment)?;
                     let bytes = if pointer != 0 {
                         Some(m.read(pointer, size)?)
                     } else {
@@ -442,9 +504,10 @@ impl Graphics {
                 }
                 "glTexParameteri" => self.gl.tex_parameter_i32(u(0)?, u(1)?, i(2)?),
                 "glPixelStorei" => {
-                    if u(0)? != glow::UNPACK_ALIGNMENT || i(1)? != 1 {
-                        bail!("Only tightly packed native UI texture upload is supported");
+                    if u(0)? != glow::UNPACK_ALIGNMENT || !matches!(i(1)?, 1 | 2 | 4 | 8) {
+                        bail!("Unsupported native UI pixel storage");
                     }
+                    self.unpack_alignment = i(1)? as usize;
                     self.gl.pixel_store_i32(u(0)?, i(1)?);
                 }
                 "glVertexAttribPointer" => {
@@ -502,6 +565,9 @@ fn bounded(value: i32, max: usize) -> Result<usize> {
     }
     Ok(value)
 }
+fn valid_proc(pointer: usize) -> bool {
+    pointer > 3 && pointer != usize::MAX
+}
 fn texture_size(w: i32, h: i32, format: u32, typ: u32) -> Result<usize> {
     if typ != glow::UNSIGNED_BYTE {
         bail!("unsupported native UI pixel type");
@@ -523,10 +589,42 @@ fn texture_size(w: i32, h: i32, format: u32, typ: u32) -> Result<usize> {
     Ok(bytes)
 }
 
+fn upload_size(w: i32, h: i32, format: u32, typ: u32, alignment: usize) -> Result<usize> {
+    if !matches!(alignment, 1 | 2 | 4 | 8) {
+        bail!("Invalid pixel alignment");
+    }
+    let row = texture_size(w, 1, format, typ)?;
+    let stride = row
+        .checked_add(alignment - 1)
+        .context("GPU stride overflow")?
+        & !(alignment - 1);
+    let height = bounded(h, 4096)?;
+    let bytes = if height == 0 {
+        0
+    } else {
+        stride
+            .checked_mul(height - 1)
+            .and_then(|n| n.checked_add(row))
+            .context("GPU upload overflow")?
+    };
+    if bytes > 16 * 1024 * 1024 {
+        bail!("GPU texture limit exceeded");
+    }
+    Ok(bytes)
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
     fn texture_uploads_are_checked_before_guest_memory_access() {
+        assert_eq!(
+            super::upload_size(3, 2, glow::RGB, glow::UNSIGNED_BYTE, 4).unwrap(),
+            21
+        );
+        assert_eq!(
+            super::upload_size(3, 2, glow::RGB, glow::UNSIGNED_BYTE, 1).unwrap(),
+            18
+        );
         assert_eq!(
             super::texture_size(32, 16, glow::RGBA, glow::UNSIGNED_BYTE).unwrap(),
             2048

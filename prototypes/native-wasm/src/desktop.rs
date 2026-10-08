@@ -32,7 +32,7 @@ fn invoke(caller: &mut Caller<'_, HostState>, name: &str, args: &[Val]) -> Resul
 }
 
 pub fn dispatch(
-    mut caller: Caller<'_, HostState>,
+    caller: &mut Caller<'_, HostState>,
     name: &str,
     args: &[Val],
     results: &mut [Val],
@@ -76,23 +76,24 @@ pub fn dispatch(
             let app = int(0)?;
             caller.data_mut().app_pointer = Some(app as u32);
             let (w, h) = *window.dimensions.lock().unwrap_or_else(|e| e.into_inner());
+            let (x, y, screen_w, screen_h, focused) = window.initial_geometry();
             for (name, values) in [
-                ("mty_window_update_position", vec![app, 0, 0]),
-                ("mty_window_update_screen", vec![app, w, h]),
+                ("mty_window_update_position", vec![app, x, y]),
+                ("mty_window_update_screen", vec![app, screen_w, screen_h]),
                 ("mty_window_update_size", vec![app, w, h]),
-                ("mty_window_update_focus", vec![app, 1]),
+                ("mty_window_update_focus", vec![app, focused as i32]),
                 ("mty_window_update_fullscreen", vec![app, 0]),
                 ("mty_window_update_visibility", vec![app, 1]),
                 ("mty_window_update_relative_mouse", vec![app, 0]),
             ] {
                 invoke(
-                    &mut caller,
+                    caller,
                     name,
                     &values.into_iter().map(Val::I32).collect::<Vec<_>>(),
                 )?;
             }
             invoke(
-                &mut caller,
+                caller,
                 "mty_window_update_pixel_ratio",
                 &[Val::I32(app), Val::F32(1.0_f32.to_bits())],
             )?;
@@ -116,10 +117,11 @@ pub fn dispatch(
             }
         }
         "MTY_DecompressImage" => {
-            let bytes = m.read(int(0)? as u32, usize::try_from(int(1)?)?)?;
-            if bytes.len() > 16 * 1024 * 1024 {
+            let size = usize::try_from(int(1)?)?;
+            if size > 16 * 1024 * 1024 {
                 bail!("Encoded UI image limit exceeded");
             }
+            let bytes = m.read(int(0)? as u32, size)?;
             let mut decoder =
                 image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?;
             let mut limits = image::Limits::default();
@@ -133,8 +135,8 @@ pub fn dispatch(
                 .get_export("mty_system_alloc")
                 .and_then(|e| e.into_func())
                 .context("guest allocator missing")?
-                .typed::<(i32, i32), i32>(&caller)?;
-            let p = alloc.call(&mut caller, (image.as_raw().len() as i32, 1))? as u32;
+                .typed::<(i32, i32), i32>(&*caller)?;
+            let p = alloc.call(&mut *caller, (image.as_raw().len() as i32, 1))? as u32;
             if p == 0 {
                 bail!("Guest UI image allocation failed");
             }
