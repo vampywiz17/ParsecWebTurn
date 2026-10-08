@@ -534,11 +534,14 @@ fn worker(
         .block_on(async { tokio::time::timeout(Duration::from_secs(2), peer.close()).await });
     let is_closed =
         matches!(closed, Ok(Ok(()))) && peer.connection_state() == RTCPeerConnectionState::Closed;
-    shared
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .progress
-        .closed = is_closed;
+    {
+        let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
+        state.progress.closed = is_closed;
+        if is_closed {
+            state.progress.transport_connected = false;
+            state.progress.open_mask = 0;
+        }
+    }
     if !is_closed {
         bail!("native offer peer did not close within the deadline");
     }

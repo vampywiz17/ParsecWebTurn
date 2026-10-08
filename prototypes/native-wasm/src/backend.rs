@@ -87,8 +87,8 @@ impl Backend {
         if self.events.len() >= 32 {
             bail!("backend event queue limit reached");
         }
-        // No live attempt exists at this milestone. Match the idle JS branch;
-        // never produce a connected event or invented attempt identifier.
+        // No Parsec control session exists yet. Preserve the idle/pending JS
+        // branch; a native transport must not invent a connected session event.
         if state == 4 && self.status != Some(0) {
             self.events.push_back(json!({
                 "type": 7, "status": status, "state": state,
