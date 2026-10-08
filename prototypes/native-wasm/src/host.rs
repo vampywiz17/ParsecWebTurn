@@ -131,8 +131,10 @@ pub fn dispatch(
                     .and_then(|e| e.into_func())
                     .context("guest allocator missing")?
                     .typed::<(i32, i32), i32>(&caller)?;
-                let p = alloc.call(&mut caller, (14, 1))? as u32;
-                m.c_string(p, 14, "web.parsec.app")?;
+                let hostname = "web.parsec.app";
+                let capacity = hostname.len() + 1;
+                let p = alloc.call(&mut caller, (capacity as i32, 1))? as u32;
+                m.c_string(p, capacity, hostname)?;
                 result(results, p as i32);
             }
             "web_platform" => m.c_string(ptr(args, 0)?, ptr(args, 1)? as usize, "Win32")?,

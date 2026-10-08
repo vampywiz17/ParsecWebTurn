@@ -148,6 +148,9 @@ fn run() -> Result<()> {
         if mode == "boot" {
             let start = instance.get_typed_func::<(), ()>(&mut store, "_start")?;
             let outcome = start.call(&mut store, ());
+            if outcome.is_err() {
+                engine.increment_epoch();
+            }
             report.start_returned = outcome.is_ok();
             report.start_error = outcome.err().map(|e| format!("{e:#}"));
         }
@@ -349,5 +352,37 @@ mod tests {
         assert!(record.finished);
         assert!(record.error.is_none(), "{:?}", record.error);
         assert_eq!(store.data().memory.u32(100).unwrap(), 42);
+    }
+
+    #[test]
+    fn hostname_bridge_allocates_the_nul_terminator() {
+        let mut config = Config::new();
+        config
+            .wasm_threads(true)
+            .consume_fuel(true)
+            .epoch_interruption(true);
+        let engine = Engine::new(&config).unwrap();
+        let module = Module::new(
+            &engine,
+            r#"(module
+            (import "env" "memory" (memory 1 1 shared))
+            (import "env" "web_get_hostname" (func $hostname (result i32)))
+            (func (export "mty_system_alloc") (param $size i32) (param i32) (result i32)
+                i32.const 200 local.get $size i32.store i32.const 256)
+            (func (export "probe") (result i32) call $hostname))"#,
+        )
+        .unwrap();
+        let (mut store, instance) = instantiate(&engine, &module).unwrap();
+        let pointer = instance
+            .get_typed_func::<(), i32>(&mut store, "probe")
+            .unwrap()
+            .call(&mut store, ())
+            .unwrap();
+        assert_eq!(pointer, 256);
+        assert_eq!(store.data().memory.u32(200).unwrap(), 15);
+        assert_eq!(
+            store.data().memory.string(pointer as u32, 15).unwrap(),
+            "web.parsec.app"
+        );
     }
 }
