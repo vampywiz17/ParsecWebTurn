@@ -512,6 +512,7 @@ fn backend_call(
                         .is_some_and(|attempt| attempt.failed())
                     {
                         b.status = Some(-3);
+                        b.native_attempt.take();
                     }
                     result(results, b.status.context("backend status missing")?)
                 }

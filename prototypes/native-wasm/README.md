@@ -25,6 +25,15 @@ description installation and sync, and verifies all three binary channels.
 No credentials, real host session or guest live-attempt bridge is enabled yet.
 Read [M3a scope and acceptance criteria](../../docs/NATIVE_M3.md).
 
+## WASM offer bridge stage M3b
+
+`guest-offer-probe [report.json]` executes the real native offer import from a
+controlled WASM fixture, verifies the shared-memory completion handshake and
+actual native credentials, then cancels and checks peer cleanup. The worker is
+asynchronous, bounded and isolated from backend locks. The original guest's
+remote begin/candidate imports and login remain later work; this is not a live
+Parsec host session. Read [M3b details](../../docs/NATIVE_M3B.md).
+
 ## Runtime milestone M0, 2026-10-08
 
 On Windows, the unchanged Parsec core compiles, instantiates, allocates/frees

@@ -311,7 +311,12 @@ fn worker(shared: &Arc<Mutex<Completion>>, cancel: mpsc::Receiver<()>) -> Result
         // Retain the real offer/peer/channels for the following begin_p2p
         // integration. M3b intentionally does not install a remote description.
         if ready {
-            let _ = cancel.recv_timeout(Duration::from_secs(30));
+            if matches!(
+                cancel.recv_timeout(Duration::from_secs(30)),
+                Err(mpsc::RecvTimeoutError::Timeout)
+            ) {
+                bail!("native pending offer expired");
+            }
         }
         drop((offer, channels));
         Ok(())
