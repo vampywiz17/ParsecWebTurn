@@ -59,6 +59,18 @@ the raw M3c transport diagnostic remains unchanged. This does not verify real
 host compatibility, video, audio or a functioning clipboard.
 Read [M3d scope and limitations](../../docs/NATIVE_M3D.md).
 
+## Guest buffers stage M3e
+
+`guest-buffer-probe [report.json]` extends the controlled native connection
+with cursor metadata/image bytes, binary and empty user data, one-shot guest
+buffer copies, retry after invalid destinations and disconnect cleanup.
+It also verifies outbound UTF-8 user data through the actual WASM import.
+Opaque handles are bounded and never recycled during backend reinitialization.
+Payloads retain the incoming frame through `Bytes` slices, avoiding another
+Rust-side payload copy. No real cursor is displayed and clipboard integration,
+account signaling and media decoding remain separate work.
+Read [M3e scope and verification](../../docs/NATIVE_M3E.md).
+
 ## Runtime milestone M0, 2026-10-08
 
 On Windows, the unchanged Parsec core compiles, instantiates, allocates/frees

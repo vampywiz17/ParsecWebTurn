@@ -26,6 +26,8 @@ pub struct Backend {
     #[serde(skip)]
     pub native_attempt: Option<crate::attempt::Attempt>,
     #[serde(skip)]
+    pub buffers: crate::buffers::Buffers,
+    #[serde(skip)]
     events: VecDeque<Value>,
 }
 
@@ -52,6 +54,7 @@ impl Backend {
         self.status = None;
         self.video_protocol = None;
         self.events.clear();
+        self.buffers.clear();
         self.idle_messages_discarded = 0;
         self.host_mode = 0;
         self.encode_latency = 0.0;
@@ -67,6 +70,16 @@ impl Backend {
             bail!("Parsec backend has not been initialized");
         }
         Ok(())
+    }
+
+    pub fn prepare_attempt(&mut self) {
+        self.events.clear();
+        self.buffers.clear();
+        self.guests.clear();
+        self.me = Value::Null;
+        self.host_mode = 0;
+        self.encode_latency = 0.0;
+        self.control_frames_received = 0;
     }
 
     pub fn discard_idle_message(&mut self) -> Result<()> {
@@ -102,25 +115,33 @@ impl Backend {
 
     pub fn disconnect(&mut self, status: i32, state: i32) -> Result<()> {
         self.require_initialized()?;
-        if self.events.len() >= 32 {
-            bail!("backend event queue limit reached");
-        }
-        if state == 4 && self.status != Some(0) {
-            self.events.push_back(json!({
+        let event = if state == 4 && self.status != Some(0) {
+            Some(json!({
                 "type": 7, "status": status, "state": state,
                 "attemptID": self.attempt_id, "duration": 0
-            }));
+            }))
         } else if state == 8 && self.status == Some(0) {
-            self.events.push_back(
+            Some(
                 json!({"type":7,"status":0,"state":state,"attemptID":self.attempt_id,
                 "duration":self.attempt_started.map_or(0,|t|t.elapsed().as_secs())}),
-            );
-        }
+            )
+        } else {
+            None
+        };
         self.native_attempt.take();
+        self.events
+            .retain(|event| !matches!(event["type"].as_i64(), Some(1 | 3)));
+        self.buffers.clear();
         self.status = Some(status);
         self.guests.clear();
         self.me = Value::Null;
         self.host_mode = 0;
+        if let Some(event) = event {
+            if self.events.len() >= 32 {
+                bail!("backend event queue limit reached after disconnect cleanup");
+            }
+            self.events.push_back(event);
+        }
         Ok(())
     }
 
@@ -134,6 +155,7 @@ impl Backend {
             self.native_attempt.take();
             self.status = Some(-3);
             self.events.clear();
+            self.buffers.clear();
             self.guests.clear();
             self.me = Value::Null;
             self.host_mode = 0;
@@ -179,6 +201,15 @@ impl Backend {
                         crate::control::Message::Guests { list, me } => {
                             self.guests = list;
                             self.me = me;
+                        }
+                        crate::control::Message::Buffer { mut event, payload } => {
+                            let key = if let Some(range) = payload {
+                                self.buffers.insert(bytes, range)?
+                            } else {
+                                0
+                            };
+                            event["key"] = json!(key);
+                            self.events.push_back(event);
                         }
                         crate::control::Message::Ignored => {}
                     }
@@ -247,5 +278,45 @@ mod tests {
         };
         assert!(b.set_video_protocol(bad).is_err());
         assert_eq!(b.video_protocol, Some(good));
+    }
+    #[test]
+    fn guest_handles_expire_across_attempt_and_backend_lifecycles() {
+        let mut b = Backend::default();
+        b.init();
+        let first = b
+            .buffers
+            .insert(bytes::Bytes::from_static(b"one"), 0..3)
+            .unwrap();
+        b.prepare_attempt();
+        assert_eq!(b.buffers.size(first), 0);
+        let second = b
+            .buffers
+            .insert(bytes::Bytes::from_static(b"two"), 0..3)
+            .unwrap();
+        b.disconnect(-3, 4).unwrap();
+        assert_eq!(b.buffers.size(second), 0);
+        b.destroy();
+        b.init();
+        let third = b
+            .buffers
+            .insert(bytes::Bytes::from_static(b"three"), 0..5)
+            .unwrap();
+        assert!(first < second && second < third);
+        assert_eq!(b.buffers.size(first), 0);
+    }
+    #[test]
+    fn full_event_queue_cannot_prevent_disconnect_buffer_cleanup() {
+        let mut b = Backend::default();
+        b.init();
+        let key = b
+            .buffers
+            .insert(bytes::Bytes::from_static(b"unread"), 0..6)
+            .unwrap();
+        for _ in 0..32 {
+            b.events.push_back(json!({"type":2}));
+        }
+        assert!(b.disconnect(-3, 4).is_err());
+        assert_eq!(b.buffers.size(key), 0);
+        assert_eq!(b.status, Some(-3));
     }
 }

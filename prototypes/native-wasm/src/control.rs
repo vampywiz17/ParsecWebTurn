@@ -48,7 +48,14 @@ pub enum Message {
     EncodeLatency(f32),
     Event(Value),
     HostMode(i32),
-    Guests { list: Vec<Value>, me: Value },
+    Guests {
+        list: Vec<Value>,
+        me: Value,
+    },
+    Buffer {
+        event: Value,
+        payload: Option<std::ops::Range<usize>>,
+    },
     Ignored,
 }
 
@@ -81,7 +88,37 @@ pub fn decode(bytes: &[u8]) -> Result<Message> {
                 .unwrap_or_else(|| json!({}));
             Message::Guests { list, me }
         }
-        9 | 17 => bail!("cursor/user-data buffer bridge is not implemented"),
+        17 => {
+            let size = usize::try_from(a).context("negative user-data length")?;
+            let end = 13usize
+                .checked_add(size)
+                .context("user-data length overflow")?;
+            if end > bytes.len() {
+                bail!("truncated user-data payload");
+            }
+            Message::Buffer {
+                event: json!({"type":3,"id":b}),
+                payload: Some(13..end),
+            }
+        }
+        9 => {
+            if bytes.len() < 34 {
+                bail!("truncated cursor header");
+            }
+            let size = usize::try_from(number(16)).context("negative cursor image length")?;
+            let end = 34usize
+                .checked_add(size)
+                .context("cursor image length overflow")?;
+            if end > bytes.len() {
+                bail!("truncated cursor image");
+            }
+            let short = |offset| i16::from_be_bytes(bytes[offset..offset + 2].try_into().unwrap());
+            let flags = short(32);
+            Message::Buffer {
+                event: json!({"type":1,"cursor":{"size":size,"positionX":short(24),"positionY":short(26),"width":short(20),"height":short(22),"hotX":short(28),"hotY":short(30),"imageUpdate":size>0,"relative":flags&256!=0,"hidden":flags&512!=0,"stream":0}}),
+                payload: if size > 0 { Some(34..end) } else { None },
+            }
+        }
         _ => Message::Ignored, // Same default branch as the pinned client.
     })
 }
@@ -170,6 +207,39 @@ mod tests {
         assert_eq!(
             input(&json!({"type":1,"code":65,"mod":2,"pressed":true})).unwrap(),
             header(0, 65, 2, 1)
+        );
+    }
+    #[test]
+    fn cursor_and_user_data_ranges_validate_before_access() {
+        assert!(decode(&header(17, -1, 7, 0)).is_err());
+        assert!(decode(&header(17, 1, 7, 0)).is_err());
+        assert!(decode(&header(9, 0, 0, 0)).is_err());
+        let mut cursor = vec![0; 34];
+        cursor[12] = 9;
+        cursor[16..20].copy_from_slice(&(-1i32).to_be_bytes());
+        assert!(decode(&cursor).is_err());
+        cursor[16..20].copy_from_slice(&1i32.to_be_bytes());
+        assert!(decode(&cursor).is_err());
+        cursor.push(255);
+        cursor[24..26].copy_from_slice(&(-12i16).to_be_bytes());
+        cursor[32..34].copy_from_slice(&768i16.to_be_bytes());
+        match decode(&cursor).unwrap() {
+            Message::Buffer { event, payload } => {
+                assert_eq!(payload, Some(34..35));
+                assert_eq!(event["cursor"]["positionX"], -12);
+                assert_eq!(event["cursor"]["relative"], true);
+                assert_eq!(event["cursor"]["hidden"], true);
+            }
+            _ => panic!("not a cursor buffer"),
+        }
+        cursor.truncate(34);
+        cursor[16..20].copy_from_slice(&0i32.to_be_bytes());
+        assert!(matches!(
+            decode(&cursor).unwrap(),
+            Message::Buffer { payload: None, .. }
+        ));
+        assert!(
+            matches!(decode(&header(17,0,7,0)).unwrap(),Message::Buffer {payload:Some(range),..} if range.is_empty())
         );
     }
 }

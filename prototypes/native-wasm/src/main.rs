@@ -1,6 +1,7 @@
 mod attempt;
 mod attempt_probe;
 mod backend;
+mod buffers;
 mod control;
 #[cfg(windows)]
 mod desktop;
@@ -112,13 +113,15 @@ fn run() -> Result<()> {
     let mode = args.next().unwrap_or_else(|| "help".into());
     if matches!(
         mode.as_str(),
-        "guest-offer-probe" | "guest-session-probe" | "guest-control-probe"
+        "guest-offer-probe" | "guest-session-probe" | "guest-control-probe" | "guest-buffer-probe"
     ) {
         let path = args.next().map(PathBuf::from);
         if args.next().is_some() {
             bail!("too many arguments");
         }
-        let report = if mode == "guest-control-probe" {
+        let report = if mode == "guest-buffer-probe" {
+            session_probe::buffer_probe()?
+        } else if mode == "guest-control-probe" {
             session_probe::control_probe()?
         } else if mode == "guest-session-probe" {
             session_probe::probe()?
@@ -158,6 +161,7 @@ fn run() -> Result<()> {
                   parsec-native-wasm guest-offer-probe [report.json]\n\
                   parsec-native-wasm guest-session-probe [report.json]\n\
                   parsec-native-wasm guest-control-probe [report.json]\n\
+                  parsec-native-wasm guest-buffer-probe [report.json]\n\
                   WASM UI remains offline; probes use native peers. No browser, login or decoded remote video.\n\
                   boot reports the first unimplemented bridge; it is not a connected client."
         );

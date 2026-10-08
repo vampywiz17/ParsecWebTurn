@@ -83,6 +83,7 @@ pub fn implemented(module: &str, name: &str) -> bool {
                 | "parsec_web_disconnect"
                 | "parsec_web_get_status"
                 | "parsec_web_send_message"
+                | "parsec_web_send_user_data"
                 | "parsec_web_get_guests"
                 | "parsec_web_poll_events"
                 | "parsec_web_get_buffer_size"
@@ -488,6 +489,7 @@ fn backend_call(
                     if b.status != Some(-3) || b.native_attempt.is_some() {
                         output.finish(None)?;
                     } else {
+                        b.prepare_attempt();
                         // Spawn returns immediately. Native async work never
                         // needs this backend lock or a Wasmtime Store/Caller.
                         let config = b.video_protocol.as_ref().map(|p| crate::control::Config {
@@ -547,6 +549,18 @@ fn backend_call(
                             .as_ref()
                             .context("native control attempt missing")?
                             .send_binary(0, frame)?;
+                    } else {
+                        b.discard_idle_message()?;
+                    }
+                }
+                "parsec_web_send_user_data" => {
+                    let text = m.string(ptr(args, 1)?, 1024 * 1024)?;
+                    b.pump_native_events()?;
+                    if b.status == Some(0) {
+                        b.native_attempt
+                            .as_ref()
+                            .context("native control attempt missing")?
+                            .send_binary(0, crate::control::text(17, int(args, 0)?, &text)?)?;
                     } else {
                         b.discard_idle_message()?;
                     }
@@ -620,10 +634,20 @@ fn backend_call(
                     b.pump_native_events()?;
                     result(results, b.host_mode);
                 }
-                "parsec_web_get_buffer" => {} // No buffers exist before a live attempt.
-                "parsec_web_get_buffer_size"
-                | "parsec_web_get_network_failure"
-                | "parsec_web_poll_audio" => result(results, 0),
+                "parsec_web_get_buffer" => {
+                    b.pump_native_events()?;
+                    let key = ptr(args, 0)?;
+                    if let Some(bytes) = b.buffers.get(key) {
+                        // Retain the handle if destination validation/copy fails.
+                        m.write(ptr(args, 1)?, bytes)?;
+                        b.buffers.remove(key);
+                    }
+                }
+                "parsec_web_get_buffer_size" => {
+                    b.pump_native_events()?;
+                    result(results, b.buffers.size(ptr(args, 0)?) as i32);
+                }
+                "parsec_web_get_network_failure" | "parsec_web_poll_audio" => result(results, 0),
                 _ => unreachable!(),
             }
         }

@@ -21,14 +21,26 @@ use webrtc::{
 };
 
 pub fn probe() -> Result<serde_json::Value> {
-    probe_mode(false)
+    probe_mode(Mode::Transport)
 }
 
 pub fn control_probe() -> Result<serde_json::Value> {
-    probe_mode(true)
+    probe_mode(Mode::Control)
 }
 
-fn probe_mode(control: bool) -> Result<serde_json::Value> {
+pub fn buffer_probe() -> Result<serde_json::Value> {
+    probe_mode(Mode::Buffers)
+}
+
+enum Mode {
+    Transport,
+    Control,
+    Buffers,
+}
+
+fn probe_mode(mode: Mode) -> Result<serde_json::Value> {
+    let control = !matches!(mode, Mode::Transport);
+    let buffers = matches!(mode, Mode::Buffers);
     let mut config = Config::new();
     config
         .wasm_threads(true)
@@ -48,6 +60,10 @@ fn probe_mode(control: bool) -> Result<serde_json::Value> {
       (import "env" "parsec_client_set_config" (func $config (param i32 i32 i32 i32)))
       (import "env" "parsec_web_get_status" (func $status (result i32)))
       (import "env" "parsec_web_send_message" (func $send (param i32)))
+      (import "env" "parsec_web_send_user_data" (func $send_user (param i32 i32)))
+      (import "env" "parsec_web_get_buffer_size" (func $buffer_size (param i32) (result i32)))
+      (import "env" "parsec_web_get_buffer" (func $buffer (param i32 i32)))
+      (import "env" "parsec_web_disconnect" (func $disconnect (param i32 i32)))
       (import "env" "parsec_web_get_guests" (func $guests (param i32 i32)))
       (import "env" "parsec_web_get_self" (func $self (param i32 i32) (result i32)))
       (import "env" "parsec_web_get_host_mode" (func $mode (result i32)))
@@ -71,6 +87,10 @@ fn probe_mode(control: bool) -> Result<serde_json::Value> {
         i32.const 4096 local.get $capacity call $poll)
       (func (export "status") (result i32) call $status)
       (func (export "send") i32.const 8192 call $send)
+      (func (export "send_user") (param $id i32) local.get $id i32.const 8192 call $send_user)
+      (func (export "buffer_size") (param $key i32) (result i32) local.get $key call $buffer_size)
+      (func (export "buffer") (param $key i32) (param $ptr i32) local.get $key local.get $ptr call $buffer)
+      (func (export "disconnect") i32.const -3 i32.const 8 call $disconnect)
       (func (export "guests") i32.const 10000 i32.const 4096 call $guests)
       (func (export "self") (result i32) i32.const 14300 i32.const 14304 call $self)
       (func (export "mode") (result i32) call $mode)
@@ -255,6 +275,17 @@ fn probe_mode(control: bool) -> Result<serde_json::Value> {
         } else {
             None
         };
+        let buffer_report = if buffers {
+            Some(buffer_exchange(
+                &mut store,
+                &instance,
+                &runtime,
+                &channels[0],
+                &mut rx,
+            )?)
+        } else {
+            None
+        };
         let mut attempt = backend
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -328,13 +359,34 @@ fn probe_mode(control: bool) -> Result<serde_json::Value> {
         })();
         attempt.cancel();
         attempt.wait_finished(Duration::from_secs(12))?;
+        let mut buffer_report = buffer_report;
+        if let Some((report, key)) = &mut buffer_report {
+            instance
+                .get_typed_func::<(), ()>(&mut store, "disconnect")?
+                .call(&mut store, ())?;
+            let size = instance
+                .get_typed_func::<i32, i32>(&mut store, "buffer_size")?
+                .call(&mut store, *key as i32)?;
+            if size != 0 {
+                bail!("disconnect retained a guest buffer");
+            }
+            memory.write(30000, b"sentinel")?;
+            instance
+                .get_typed_func::<(i32, i32), ()>(&mut store, "buffer")?
+                .call(&mut store, (*key as i32, 30000))?;
+            if memory.read(30000, 8)? != b"sentinel" {
+                bail!("stale handle wrote guest memory");
+            }
+            report["disconnect_cleanup_verified"] = serde_json::json!(true);
+            report["stale_handle_noop_verified"] = serde_json::json!(true);
+        }
         let connected = exchange?;
         let closed = attempt.snapshot();
         if closed["peer_closed"] != true || closed["failed"] != false {
             bail!("native attempt cleanup failed");
         }
         Ok(
-            serde_json::json!({"schema":1,"scope":if control {"controlled-wasm-native-parsec-control"} else {"controlled-wasm-guest-native-ice-dtls-sctp"},"original_parsec_guest_attempt_exercised":false,"guest_begin_and_candidate_verified":true,"guest_local_candidate_events":local_count,"guest_sync_ack_verified":ack,"guest_buffer_retry_verified":buffer_retry,"remote_candidates_submitted":remote_count,"connected_peers":2,"binary_messages_verified":if control {0} else {6},"control":control_report,"native_connected":connected,"native_closed":closed,"parsec_host_connected":false,"video_decoded":false}),
+            serde_json::json!({"schema":1,"scope":if buffers {"controlled-wasm-native-cursor-user-buffers"} else if control {"controlled-wasm-native-parsec-control"} else {"controlled-wasm-guest-native-ice-dtls-sctp"},"original_parsec_guest_attempt_exercised":false,"guest_begin_and_candidate_verified":true,"guest_local_candidate_events":local_count,"guest_sync_ack_verified":ack,"guest_buffer_retry_verified":buffer_retry,"remote_candidates_submitted":remote_count,"connected_peers":2,"binary_messages_verified":if control {0} else {6},"control":control_report,"buffers":buffer_report.map(|p|p.0),"native_connected":connected,"native_closed":closed,"parsec_host_connected":false,"video_decoded":false}),
         )
     })();
     // Tear down even when negotiation or validation fails.
@@ -488,6 +540,175 @@ fn control_exchange(
     )
 }
 
+fn buffer_exchange(
+    store: &mut wasmtime::Store<crate::host::HostState>,
+    instance: &wasmtime::Instance,
+    runtime: &tokio::runtime::Runtime,
+    channel: &Arc<webrtc::data_channel::RTCDataChannel>,
+    receipts: &mut tokio::sync::mpsc::Receiver<(u16, bool, Bytes)>,
+) -> Result<(serde_json::Value, u32)> {
+    let memory = store.data().memory.clone();
+    let binary = [0, 255, 16, 128, 0];
+    let image = b"fixture-image";
+    let mut data = crate::control::header(17, 5, 7, 0).to_vec();
+    data.extend_from_slice(&binary);
+    let mut cursor = vec![0; 34 + image.len()];
+    cursor[12] = 9;
+    cursor[16..20].copy_from_slice(&(image.len() as i32).to_be_bytes());
+    for (offset, value) in [
+        (20, 24i16),
+        (22, 16),
+        (24, -12),
+        (26, 42),
+        (28, 3),
+        (30, 4),
+        (32, 768),
+    ] {
+        cursor[offset..offset + 2].copy_from_slice(&value.to_be_bytes());
+    }
+    cursor[34..].copy_from_slice(image);
+    let mut position = cursor[..34].to_vec();
+    position[16..20].copy_from_slice(&0i32.to_be_bytes());
+    let frames = [
+        Bytes::from(data),
+        Bytes::from(cursor),
+        Bytes::from(position),
+        crate::control::header(17, 0, 8, 0),
+    ];
+    for frame in frames {
+        runtime.block_on(async {
+            tokio::time::timeout(Duration::from_secs(5), channel.send(&frame)).await
+        })??;
+    }
+    let poll = instance.get_typed_func::<i32, i32>(&mut *store, "poll")?;
+    let size = instance.get_typed_func::<i32, i32>(&mut *store, "buffer_size")?;
+    let copy = instance.get_typed_func::<(i32, i32), ()>(&mut *store, "buffer")?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut seen = 0u8;
+    let mut retained = 0;
+    while seen != 15 && Instant::now() < deadline {
+        if poll.call(&mut *store, 2048)? == 0 {
+            std::thread::sleep(Duration::from_millis(10));
+            continue;
+        }
+        let event: serde_json::Value = serde_json::from_str(&memory.string(4096, 2048)?)?;
+        if event["type"] == 8 {
+            continue;
+        }
+        let key = u32::try_from(event["key"].as_u64().context("buffer event key missing")?)?;
+        let (bit, expected): (u8, &[u8]) = match event["type"].as_i64() {
+            Some(3) if event["id"] == 7 => (1, &binary),
+            Some(3) if event["id"] == 8 => (8, &[]),
+            Some(1) if event["cursor"]["imageUpdate"] == true => {
+                if event["cursor"]["positionX"] != -12
+                    || event["cursor"]["positionY"] != 42
+                    || event["cursor"]["width"] != 24
+                    || event["cursor"]["height"] != 16
+                    || event["cursor"]["hotX"] != 3
+                    || event["cursor"]["hotY"] != 4
+                    || event["cursor"]["relative"] != true
+                    || event["cursor"]["hidden"] != true
+                {
+                    bail!("cursor metadata mismatch");
+                }
+                (2, image)
+            }
+            Some(1)
+                if event["cursor"]["imageUpdate"] == false
+                    && event["cursor"]["size"] == 0
+                    && key == 0 =>
+            {
+                (4, &[])
+            }
+            _ => bail!("unexpected buffer event"),
+        };
+        if seen & bit != 0 {
+            bail!("duplicate buffer event");
+        }
+        seen |= bit;
+        if bit == 4 {
+            memory.write(20000, b"unchanged")?;
+            copy.call(&mut *store, (0, 20000))?;
+            if memory.read(20000, 9)? != b"unchanged" {
+                bail!("no-image cursor wrote guest memory");
+            }
+            continue;
+        }
+        if key == 0 || size.call(&mut *store, key as i32)? != expected.len() as i32 {
+            bail!("buffer size mismatch");
+        }
+        if copy.call(&mut *store, (key as i32, -1)).is_ok() {
+            bail!("invalid guest destination accepted");
+        }
+        if size.call(&mut *store, key as i32)? != expected.len() as i32 {
+            bail!("failed copy consumed buffer");
+        }
+        copy.call(&mut *store, (key as i32, 20000))?;
+        if memory.read(20000, expected.len())? != expected
+            || size.call(&mut *store, key as i32)? != 0
+        {
+            bail!("one-shot buffer copy mismatch");
+        }
+        memory.write(20000, b"unchanged")?;
+        copy.call(&mut *store, (key as i32, 20000))?;
+        if memory.read(20000, 9)? != b"unchanged" {
+            bail!("consumed key was reused");
+        }
+        if bit == 1 {
+            // Leave a second real incoming payload unread for disconnect cleanup.
+            let mut frame = crate::control::header(17, 1, 9, 0).to_vec();
+            frame.push(77);
+            runtime.block_on(async {
+                tokio::time::timeout(Duration::from_secs(5), channel.send(&Bytes::from(frame)))
+                    .await
+            })??;
+        }
+    }
+    if seen != 15 {
+        bail!("buffer exchange incomplete");
+    }
+    while retained == 0 && Instant::now() < deadline {
+        if poll.call(&mut *store, 2048)? == 0 {
+            std::thread::sleep(Duration::from_millis(10));
+            continue;
+        }
+        let event: serde_json::Value = serde_json::from_str(&memory.string(4096, 2048)?)?;
+        if event["type"] == 8 {
+            continue;
+        }
+        if event["type"] != 3 || event["id"] != 9 {
+            bail!("cleanup payload event missing");
+        }
+        retained = u32::try_from(event["key"].as_u64().context("cleanup key missing")?)?;
+    }
+    if retained == 0 || size.call(&mut *store, retained as i32)? != 1 {
+        bail!("cleanup payload not retained");
+    }
+    let text = "árvíz ✓";
+    memory.c_string(8192, 1024, text)?;
+    instance
+        .get_typed_func::<i32, ()>(&mut *store, "send_user")?
+        .call(&mut *store, 7)?;
+    let (id, is_text, packet) = runtime
+        .block_on(async { tokio::time::timeout(Duration::from_secs(5), receipts.recv()).await })?
+        .context("outbound user data missing")?;
+    if id != 0
+        || is_text
+        || packet.len() != 14 + text.len()
+        || packet[12] != 17
+        || i32::from_be_bytes(packet[..4].try_into()?) != text.len() as i32 + 1
+        || i32::from_be_bytes(packet[4..8].try_into()?) != 7
+        || &packet[13..packet.len() - 1] != text.as_bytes()
+        || packet.last() != Some(&0)
+    {
+        bail!("Unicode user-data packet mismatch");
+    }
+    Ok((
+        serde_json::json!({"cursor_metadata_verified":true,"cursor_payload_verified":true,"no_image_cursor_verified":true,"binary_user_data_verified":true,"empty_user_data_verified":true,"failed_copy_retry_verified":true,"one_shot_consumption_verified":true,"unicode_outbound_verified":true,"cursor_rendered":false,"clipboard_synchronized":false}),
+        retained,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -503,6 +724,15 @@ mod tests {
         let report = super::control_probe().unwrap();
         assert_eq!(report["control"]["startup_configuration_verified"], true);
         assert_eq!(report["control"]["wasm_input_packet_verified"], true);
+        assert_eq!(report["peers_closed"], true);
+        assert_eq!(report["parsec_host_connected"], false);
+    }
+    #[test]
+    fn native_cursor_and_userdata_buffers_cross_actual_wasm_imports() {
+        let report = super::buffer_probe().unwrap();
+        assert_eq!(report["buffers"]["failed_copy_retry_verified"], true);
+        assert_eq!(report["buffers"]["one_shot_consumption_verified"], true);
+        assert_eq!(report["buffers"]["disconnect_cleanup_verified"], true);
         assert_eq!(report["peers_closed"], true);
         assert_eq!(report["parsec_host_connected"], false);
     }
