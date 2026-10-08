@@ -69,3 +69,18 @@ References: retained 2026-10-08 Matoya worker/main HTTP functions and actual
 pinned-core import signatures; [reqwest blocking client documentation](https://docs.rs/reqwest/latest/reqwest/blocking/struct.ClientBuilder.html),
 [redirect policy](https://docs.rs/reqwest/latest/reqwest/redirect/struct.Policy.html).
 The Parsec ABI is snapshot-specific compatibility code, not a public standard.
+
+## Verified build
+
+Source: `a0e83b71592b46f6d34faf4f21d9421c870c261f`, prototype version 0.9.0.
+[Windows CI](https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37831800775)
+passed formatting, all 38 tests, Clippy with warnings denied, the optimized
+release build, original pinned-core probes and all native acceptance probes.
+The downloaded release EXE also passed `guest-http-probe` locally: nine
+fixture requests, all boolean verification flags true and the server closed.
+
+The original core remains 150-104a, SHA-256
+`d663dd96df477c65479fb93eb88756c7fcafff581cc93be563625cd195a4b4a6`.
+This verifies the HTTP ABI with a controlled guest and loopback server; external
+TLS/authentication, original-guest HTTP and live-host interoperability remain
+unverified. Failure diagnostics expose only fixed categories, never request data.
