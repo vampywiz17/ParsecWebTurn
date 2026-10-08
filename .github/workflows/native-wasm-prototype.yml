@@ -69,6 +69,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Native WebRTC transport failed' }
           $transport = Get-Content "$artifact/transport.json" -Raw | ConvertFrom-Json
           if ($transport.connected_peers -ne 2 -or $transport.binary_messages_verified -ne 6 -or !$transport.peers_closed) { throw 'Native data-channel exchange or cleanup not verified' }
+          & $exe signaling-probe "$artifact/signaling.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Compact Parsec signaling adapter failed' }
+          $signaling = Get-Content "$artifact/signaling.json" -Raw | ConvertFrom-Json
+          if ($signaling.connected_peers -ne 2 -or $signaling.binary_messages_verified -ne 6 -or !$signaling.peers_closed -or $signaling.compact_candidates_added -lt 1 -or $signaling.parsec_host_connected) { throw 'Incorrect compact signaling proof' }
           $boot.host | ConvertTo-Json -Depth 5
           $boot.threads | ConvertTo-Json -Depth 5
           $boot.start_error

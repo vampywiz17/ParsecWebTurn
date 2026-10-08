@@ -16,6 +16,15 @@ Read [M2 details and test instructions](../../docs/NATIVE_M2.md).
 The M0/M1 sections below describe the earlier headless milestones; `boot` retains
 its original boundary diagnostic behavior.
 
+## Compact signaling stage M3a
+
+`signaling-probe [report.json]` validates the client-side compact Parsec
+ICE/DTLS/candidate mapping against two real native peers. The client reconstructs
+a standard SDP answer from compact fields, releases bounded candidates after
+description installation and sync, and verifies all three binary channels.
+No credentials, real host session or guest live-attempt bridge is enabled yet.
+Read [M3a scope and acceptance criteria](../../docs/NATIVE_M3.md).
+
 ## Runtime milestone M0, 2026-10-08
 
 On Windows, the unchanged Parsec core compiles, instantiates, allocates/frees

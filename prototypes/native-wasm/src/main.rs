@@ -7,6 +7,7 @@ mod graphics;
 mod host;
 mod memory;
 mod poll;
+mod signaling;
 mod threads;
 mod transport;
 #[cfg(windows)]
@@ -105,12 +106,16 @@ fn main() {
 fn run() -> Result<()> {
     let mut args = env::args().skip(1);
     let mode = args.next().unwrap_or_else(|| "help".into());
-    if mode == "transport-probe" {
+    if matches!(mode.as_str(), "transport-probe" | "signaling-probe") {
         let path = args.next().map(PathBuf::from);
         if args.next().is_some() {
             bail!("too many arguments");
         }
-        let report = transport::probe()?;
+        let report = if mode == "signaling-probe" {
+            transport::signaling_probe()?
+        } else {
+            transport::probe()?
+        };
         let json = serde_json::to_string_pretty(&report)?;
         if let Some(path) = path {
             fs::write(path, &json)?;
@@ -123,6 +128,7 @@ fn run() -> Result<()> {
             "parsec-native-wasm <inspect|allocator|boot> <parsecd.wasm> [report.json]\n\
                   parsec-native-wasm window <parsecd.wasm> [report.json]\n\
                   parsec-native-wasm transport-probe [report.json]\n\
+                  parsec-native-wasm signaling-probe [report.json]\n\
                   Offline WASM host prototype. No browser, login, network or video renderer.\n\
                   boot reports the first unimplemented bridge; it is not a connected client."
         );

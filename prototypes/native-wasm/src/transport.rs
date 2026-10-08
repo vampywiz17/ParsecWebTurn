@@ -1,5 +1,6 @@
 //! Native data-channel transport proof, deliberately separate from host login.
 //! Public webrtc-rs APIs; no browser, JS, account, STUN or TURN server involved.
+use crate::signaling::{Candidate, CandidateGate, Description};
 use anyhow::{bail, Context, Result};
 use bytes::Bytes;
 use serde::Serialize;
@@ -15,7 +16,7 @@ use webrtc::{
     ice_transport::ice_gathering_state::RTCIceGatheringState,
     peer_connection::{
         configuration::RTCConfiguration, peer_connection_state::RTCPeerConnectionState,
-        RTCPeerConnection,
+        sdp::session_description::RTCSessionDescription, RTCPeerConnection,
     },
 };
 
@@ -38,6 +39,8 @@ pub struct ProbeReport {
     pub binary_messages_verified: u32,
     pub channels: Vec<ChannelReport>,
     pub peers_closed: bool,
+    pub signaling: &'static str,
+    pub compact_candidates_added: usize,
 }
 
 #[derive(Serialize)]
@@ -90,11 +93,16 @@ async fn peer(side: usize, received: mpsc::Sender<Receipt>) -> Result<Peer> {
     })
 }
 
-async fn exchange(a: &Peer, b: &Peer, rx: &mut mpsc::Receiver<Receipt>) -> Result<ProbeReport> {
+async fn exchange(
+    a: &Peer,
+    b: &Peer,
+    rx: &mut mpsc::Receiver<Receipt>,
+    compact: bool,
+) -> Result<ProbeReport> {
+    let offer = a.connection.create_offer(None).await?;
+    let local = Description::from_sdp(&offer.sdp)?;
     let mut gathered = a.connection.gathering_complete_promise().await;
-    a.connection
-        .set_local_description(a.connection.create_offer(None).await?)
-        .await?;
+    a.connection.set_local_description(offer).await?;
     // This public helper signals completion by CLOSING the channel, not by
     // sending a unit value. Confirm the actual state after it wakes up.
     let _ = gathered.recv().await;
@@ -117,14 +125,49 @@ async fn exchange(a: &Peer, b: &Peer, rx: &mut mpsc::Receiver<Receipt>) -> Resul
     if b.connection.ice_gathering_state() != RTCIceGatheringState::Complete {
         bail!("answer gathering did not complete");
     }
-    a.connection
-        .set_remote_description(
-            b.connection
-                .local_description()
-                .await
-                .context("answer missing")?,
-        )
-        .await?;
+    let answer = b
+        .connection
+        .local_description()
+        .await
+        .context("answer missing")?;
+    let mut compact_candidates_added = 0;
+    if compact {
+        let remote = Description::from_sdp(&answer.sdp)?;
+        if remote.mid != local.mid || !answer.sdp.lines().any(|line| line == "a=setup:active") {
+            bail!("test answer does not match the pinned Parsec role/MID contract");
+        }
+        let mut candidates = CandidateGate::new("local-test-attempt")?;
+        for line in answer
+            .sdp
+            .lines()
+            .filter(|line| line.starts_with("a=candidate:"))
+        {
+            candidates.push("local-test-attempt", Candidate::from_sdp_line(line)?)?;
+        }
+        // Exercise buffering before begin_p2p, then the independent sync gate.
+        if candidates.pop_ready().is_some() {
+            bail!("candidate released before description");
+        }
+        a.connection
+            .set_remote_description(RTCSessionDescription::answer(
+                local.answer(&remote.credentials)?,
+            )?)
+            .await?;
+        candidates.remote_ready("local-test-attempt", &local.mid, &remote.credentials.ufrag)?;
+        if candidates.pop_ready().is_some() {
+            bail!("candidate released before sync");
+        }
+        candidates.sync("local-test-attempt")?;
+        while let Some(candidate) = candidates.pop_ready() {
+            a.connection.add_ice_candidate(candidate).await?;
+            compact_candidates_added += 1;
+        }
+        if compact_candidates_added == 0 {
+            bail!("no compact UDP candidate was applied");
+        }
+    } else {
+        a.connection.set_remote_description(answer).await?;
+    }
     while a
         .channels
         .iter()
@@ -184,10 +227,24 @@ async fn exchange(a: &Peer, b: &Peer, rx: &mut mpsc::Receiver<Receipt>) -> Resul
             })
             .collect(),
         peers_closed: false,
+        signaling: if compact {
+            "parsec-compact-parameters-to-standard-sdp"
+        } else {
+            "complete-native-sdp"
+        },
+        compact_candidates_added,
     })
 }
 
 pub fn probe() -> Result<ProbeReport> {
+    run_probe(false)
+}
+
+pub fn signaling_probe() -> Result<ProbeReport> {
+    run_probe(true)
+}
+
+fn run_probe(compact: bool) -> Result<ProbeReport> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -202,7 +259,7 @@ pub fn probe() -> Result<ProbeReport> {
                 return Err(error);
             }
         };
-        let outcome = timeout(Duration::from_secs(20), exchange(&a, &b, &mut rx)).await;
+        let outcome = timeout(Duration::from_secs(20), exchange(&a, &b, &mut rx, compact)).await;
         // Close both peers even on negotiation failure or timeout. Do not rely
         // on process termination to release UDP sockets and async tasks.
         let closed = timeout(Duration::from_secs(5), async {
@@ -226,6 +283,16 @@ pub fn probe() -> Result<ProbeReport> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn compact_parameters_establish_real_dtls_sctp_channels() {
+        let report = super::signaling_probe().unwrap();
+        assert_eq!(report.binary_messages_verified, 6);
+        assert_eq!(report.connected_peers, 2);
+        assert!(report.compact_candidates_added > 0);
+        assert!(report.peers_closed);
+        assert!(!report.parsec_host_connected);
+    }
+
     #[test]
     fn native_negotiated_channels_exchange_binary_data_and_close() {
         let report = super::probe().unwrap();
