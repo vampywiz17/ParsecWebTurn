@@ -71,6 +71,17 @@ failure and timeout close both peers before reporting an error.
 
 ## Next integration
 
+Verified 2026-10-08 at source commit
+`ec3de83c978af8f6ceead09663591896dc4b78af`:
+[Windows CI run 37814786826](https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37814786826)
+passed formatting, all 21 tests, Clippy with warnings denied, the release build,
+the original pinned WASM diagnostics and both native transport probes. The same
+release executable also passed the local Windows compact-signaling probe:
+two connected peers, three compact candidates applied, six verified binary
+messages and both peers closed. Local sandbox networking initially timed out;
+the explicitly authorized native-network run succeeded. No actual Parsec host
+compatibility or new GPU/video performance result is claimed by this milestone.
+
 Attach a managed native attempt to the shared WASM backend. Implement the
 `parsec_web_new_attempt` asynchronous completion and `MTY_SignalPtr` contract,
 `parsec_web_begin_p2p`, `parsec_web_add_candidate`, candidate polling and real
