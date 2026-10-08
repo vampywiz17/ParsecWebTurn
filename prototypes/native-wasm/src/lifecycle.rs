@@ -79,7 +79,12 @@ mod tests {
         let module = wasmtime::Module::new(
             &engine,
             r#"(module
-            (func (export "tick") (result i32) i32.const 7))"#,
+            (func (export "tick") (result i32) (local $count i32)
+                i32.const 20 local.set $count
+                (loop $next
+                    local.get $count i32.const 1 i32.sub local.tee $count
+                    br_if $next)
+                i32.const 7))"#,
         )
         .unwrap();
         let stop = Arc::new(StopSignal::default());
