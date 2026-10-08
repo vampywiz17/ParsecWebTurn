@@ -5,6 +5,20 @@ Parsec WASM binary and supplies host imports in Rust using Wasmtime. It does not
 link Tauri, WebView2, a JavaScript engine, or a browser. The production app is
 not changed and this directory is not part of its build or releases.
 
+## Verified milestone, 2026-10-08
+
+On Windows, the unchanged Parsec core compiles, instantiates, allocates/frees
+memory, creates native WASM threads and enters `main_entry_client_start`.
+Its own startup log reports `Parsec release (150-104a, Service: -1, Loader: -1)`.
+It then stops explicitly at **`env::parsec_web_init`**: this is where the original
+weblib.js creates the JavaScript Parsec backend and its remote-video canvas.
+
+This proves the standalone Rust host can run the real core's client startup
+without WebView2. It does **not** prove a functioning UI or connection. The next
+substantial component is the native implementation behind `parsec_web_*`,
+followed by the native graphics/window bridge. The CI asserts this boundary for
+the pinned binary so an earlier silent exit cannot count as a successful bootstrap.
+
 ## What this first milestone proves
 
 - Compile the actual audited Parsec WASM in a native WASM runtime.

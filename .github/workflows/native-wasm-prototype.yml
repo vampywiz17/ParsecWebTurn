@@ -52,6 +52,7 @@ jobs:
           if (!$allocator.instantiated -or !$allocator.allocator_roundtrip) { throw 'Actual guest allocator not verified' }
           $boot = Get-Content "$artifact/boot.json" -Raw | ConvertFrom-Json
           if (!$boot.instantiated -or $boot.video_rendered -or $boot.network_enabled) { throw 'Incorrect bootstrap status' }
+          if ($boot.host.boundary -ne 'env::parsec_web_init') { throw 'The pinned core did not reach its native client-backend boundary' }
           $boot.host | ConvertTo-Json -Depth 5
           $boot.threads | ConvertTo-Json -Depth 5
           $boot.start_error
