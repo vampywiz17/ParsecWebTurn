@@ -101,7 +101,9 @@ mod tests {
         .unwrap();
         let stop = Arc::new(StopSignal::default());
         let mut store = wasmtime::Store::new(&engine, ());
-        store.set_fuel(100).unwrap();
+        // Leave enough fuel to reach the first loop's epoch checkpoint.
+        // Fuel exhaustion can trap before epoch callbacks are invoked.
+        store.set_fuel(10_000).unwrap();
         store.set_epoch_deadline(1);
         configure_store(&mut store, stop.clone());
         let instance = wasmtime::Instance::new(&mut store, &module, &[]).unwrap();
@@ -112,7 +114,7 @@ mod tests {
             engine.increment_epoch();
             assert_eq!(tick.call(&mut store, ()).unwrap(), 7);
         }
-        assert!(store.get_fuel().unwrap() > 100);
+        assert!(store.get_fuel().unwrap() > 10_000);
         stop.stop();
         engine.increment_epoch();
         let error = tick.call(&mut store, ()).unwrap_err();
