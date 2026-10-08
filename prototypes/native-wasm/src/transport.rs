@@ -13,8 +13,8 @@ use webrtc::{
     },
     ice::network_type::NetworkType,
     peer_connection::{
-        configuration::RTCConfiguration, peer_connection_state::RTCPeerConnectionState,
-        RTCPeerConnection,
+        configuration::RTCConfiguration, ice_gathering_state::RTCIceGatheringState,
+        peer_connection_state::RTCPeerConnectionState, RTCPeerConnection,
     },
 };
 
@@ -94,7 +94,12 @@ async fn exchange(a: &Peer, b: &Peer, rx: &mut mpsc::Receiver<Receipt>) -> Resul
     a.connection
         .set_local_description(a.connection.create_offer(None).await?)
         .await?;
-    gathered.recv().await.context("offer gathering aborted")?;
+    // This public helper signals completion by CLOSING the channel, not by
+    // sending a unit value. Confirm the actual state after it wakes up.
+    let _ = gathered.recv().await;
+    if a.connection.ice_gathering_state() != RTCIceGatheringState::Complete {
+        bail!("offer gathering did not complete");
+    }
     b.connection
         .set_remote_description(
             a.connection
@@ -107,7 +112,10 @@ async fn exchange(a: &Peer, b: &Peer, rx: &mut mpsc::Receiver<Receipt>) -> Resul
     b.connection
         .set_local_description(b.connection.create_answer(None).await?)
         .await?;
-    gathered.recv().await.context("answer gathering aborted")?;
+    let _ = gathered.recv().await;
+    if b.connection.ice_gathering_state() != RTCIceGatheringState::Complete {
+        bail!("answer gathering did not complete");
+    }
     a.connection
         .set_remote_description(
             b.connection

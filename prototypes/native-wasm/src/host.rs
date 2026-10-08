@@ -106,7 +106,7 @@ pub fn implemented(module: &str, name: &str) -> bool {
 
 /// The audited weblib.js leaves these optional services empty. Its undefined
 /// result becomes a null/zero WASM handle. Preserve unavailability, not a
-/// fabricated maintenance service or native feature.
+/// fabricated maintenance service, USB forwarding or native feature.
 pub fn disabled_web_stub(module: &str, name: &str) -> bool {
     module == "env"
         && matches!(
@@ -115,6 +115,11 @@ pub fn disabled_web_stub(module: &str, name: &str) -> bool {
                 | "maintenance_destroy"
                 | "maintenance_force_poll"
                 | "maintenance_get_state"
+                | "usb_devices_create"
+                | "usb_devices_destroy"
+                | "usb_device_submit"
+                | "usb_devices_set_config"
+                | "usb_devices_get"
         )
 }
 
