@@ -80,6 +80,13 @@ impl ThreadRuntime {
                         .get_typed_func::<(i32, i32), ()>(&mut store, "wasi_thread_start")
                         .context("WASI thread entry export missing")?;
                     let result = entry.call(&mut store, (id, argument as i32));
+                    #[cfg(windows)]
+                    let result =
+                        if store.data().window.is_some() && store.data().event_loop.is_some() {
+                            crate::desktop::run_worker(&mut store, &instance)
+                        } else {
+                            result
+                        };
                     host = Some(store.into_data());
                     result
                 })();

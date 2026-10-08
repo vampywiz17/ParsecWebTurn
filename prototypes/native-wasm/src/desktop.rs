@@ -189,6 +189,14 @@ fn export(
 }
 
 pub fn run(store: &mut Store<HostState>, instance: &Instance) -> Result<()> {
+    run_loop(store, instance, true)
+}
+
+pub fn run_worker(store: &mut Store<HostState>, instance: &Instance) -> Result<()> {
+    run_loop(store, instance, false)
+}
+
+fn run_loop(store: &mut Store<HostState>, instance: &Instance, input: bool) -> Result<()> {
     let window = store
         .data()
         .window
@@ -202,63 +210,67 @@ pub fn run(store: &mut Store<HostState>, instance: &Instance) -> Result<()> {
         Some(wasmtime::Ref::Func(Some(f))) => f.typed::<i32, i32>(&*store)?,
         _ => bail!("invalid event-loop callback"),
     };
-    export(store, instance, "mty_app_set_keys", &[])?;
+    if input {
+        export(store, instance, "mty_app_set_keys", &[])?;
+    }
     let until = Instant::now() + Duration::from_secs(8);
     while !window.closing.load(Ordering::Acquire) && Instant::now() < until {
         store.set_fuel(50_000_000)?;
-        let app = store.data().app_pointer.context("app pointer missing")? as i32;
-        let events = window
-            .events
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .drain(..)
-            .collect::<Vec<_>>();
-        for event in events {
-            let (name, values) = match event {
-                Event::Size(w, h) => {
-                    export(
-                        store,
-                        instance,
-                        "mty_window_update_size",
-                        &[
-                            Val::I32(app),
-                            Val::F64((w as f64).to_bits()),
-                            Val::F64((h as f64).to_bits()),
-                        ],
-                    )?;
-                    ("mty_window_size", vec![app])
-                }
-                Event::Focus(f) => {
-                    export(
-                        store,
-                        instance,
-                        "mty_window_update_focus",
-                        &[Val::I32(app), Val::I32(f as i32)],
-                    )?;
-                    ("mty_window_focus", vec![app, f as i32])
-                }
-                Event::Motion(x, y) => ("mty_window_motion", vec![app, 0, x, y]),
-                Event::Button(down, button, x, y) => {
-                    ("mty_window_button", vec![app, down as i32, button, x, y])
-                }
-                Event::Text(code) => {
-                    let Some(ch) = char::from_u32(code) else {
-                        continue;
-                    };
-                    let mut bytes = [0; 4];
-                    ch.encode_utf8(&mut bytes);
-                    (
-                        "mty_window_keyboard",
-                        vec![app, 1, 0, u32::from_le_bytes(bytes) as i32, 0],
-                    )
-                }
-            };
-            export(
-                store,
-                instance,
-                name,
-                &values.into_iter().map(Val::I32).collect::<Vec<_>>(),
-            )?;
+        if input {
+            let app = store.data().app_pointer.context("app pointer missing")? as i32;
+            let events = window
+                .events
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .drain(..)
+                .collect::<Vec<_>>();
+            for event in events {
+                let (name, values) = match event {
+                    Event::Size(w, h) => {
+                        export(
+                            store,
+                            instance,
+                            "mty_window_update_size",
+                            &[
+                                Val::I32(app),
+                                Val::F64((w as f64).to_bits()),
+                                Val::F64((h as f64).to_bits()),
+                            ],
+                        )?;
+                        ("mty_window_size", vec![app])
+                    }
+                    Event::Focus(f) => {
+                        export(
+                            store,
+                            instance,
+                            "mty_window_update_focus",
+                            &[Val::I32(app), Val::I32(f as i32)],
+                        )?;
+                        ("mty_window_focus", vec![app, f as i32])
+                    }
+                    Event::Motion(x, y) => ("mty_window_motion", vec![app, 0, x, y]),
+                    Event::Button(down, button, x, y) => {
+                        ("mty_window_button", vec![app, down as i32, button, x, y])
+                    }
+                    Event::Text(code) => {
+                        let Some(ch) = char::from_u32(code) else {
+                            continue;
+                        };
+                        let mut bytes = [0; 4];
+                        ch.encode_utf8(&mut bytes);
+                        (
+                            "mty_window_keyboard",
+                            vec![app, 1, 0, u32::from_le_bytes(bytes) as i32, 0],
+                        )
+                    }
+                };
+                export(
+                    store,
+                    instance,
+                    name,
+                    &values.into_iter().map(Val::I32).collect::<Vec<_>>(),
+                )?;
+            }
         }
         if callback.call(&mut *store, opaque as i32)? == 0 {
             break;
