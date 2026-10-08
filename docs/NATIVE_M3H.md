@@ -68,3 +68,22 @@ References: [tokio-tungstenite TLS connector](https://docs.rs/tokio-tungstenite/
 [rustls client configuration](https://docs.rs/rustls/latest/rustls/struct.ClientConfig.html),
 [reqwest blocking client](https://docs.rs/reqwest/0.12.28/reqwest/blocking/struct.ClientBuilder.html),
 [rcgen fixture certificates](https://docs.rs/rcgen/0.13.2/rcgen/fn.generate_simple_self_signed.html).
+
+## Verified build
+
+Source `2c9ba23c8b42f0cb1eeb2d779a46819cd4511133`, prototype 0.11.0:
+[Windows CI 37850043589](https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37850043589)
+passed formatting, all 42 tests, Clippy with warnings denied, the optimized build,
+original WASM inspect/allocator/bootstrap and all native acceptance probes.
+
+Both the downloaded diagnostic executable and the final release executable
+passed the TLS probe locally: six attempts, four certificate rejections, all
+eight boolean verification checks and both servers joined. The release report
+is included separately from the CI report in the package.
+
+The core remains `150-104a`, SHA-256
+`d663dd96df477c65479fb93eb88756c7fcafff581cc93be563625cd195a4b4a6`.
+BUILD-INFO.json and SHA256SUMS identify source/documentation commits and files.
+This evidence is limited to controlled guest imports and synthetic loopback
+TLS, not the original core's authenticated account/signaling lifecycle.
+Production main/dev are unchanged.
