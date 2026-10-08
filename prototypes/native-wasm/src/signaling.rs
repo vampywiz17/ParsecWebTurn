@@ -139,6 +139,9 @@ impl Candidate {
     }
 
     pub fn from_sdp_line(line: &str) -> Result<Self> {
+        if line.len() > 1024 {
+            bail!("candidate line exceeds the adapter limit");
+        }
         let fields: Vec<_> = line
             .strip_prefix("a=candidate:")
             .context("candidate prefix missing")?

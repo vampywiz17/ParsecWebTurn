@@ -142,6 +142,11 @@ async fn exchange(
             .lines()
             .filter(|line| line.starts_with("a=candidate:"))
         {
+            // webrtc-rs's SDP serializer also emits the component-2 copy.
+            // SCTP/DTLS uses one ICE component; there is no RTP/RTCP here.
+            if line.split_ascii_whitespace().nth(1) == Some("2") {
+                continue;
+            }
             candidates.push("local-test-attempt", Candidate::from_sdp_line(line)?)?;
         }
         // Exercise buffering before begin_p2p, then the independent sync gate.
