@@ -179,6 +179,10 @@ pub fn dispatch(
     args: &[Val],
     results: &mut [Val],
 ) -> Result<()> {
+    #[cfg(windows)]
+    if let Some(window) = caller.data().window.clone().filter(|window| window.live) {
+        crate::lifecycle::renew_fuel(&mut caller, &window.stop)?;
+    }
     let id = format!("{module}::{name}");
     *caller.data_mut().calls.entry(id.clone()).or_default() += 1;
     #[cfg(windows)]

@@ -38,9 +38,11 @@ in the bounded, in-memory WASI filesystem and are not persisted to disk.
 ## Lifetime and shutdown
 
 All guest instances share one stop signal and one 100 ms epoch ticker. The
-documented Wasmtime epoch callback renews the execution budget while running
-and traps executing guest code after cancellation. Frame callbacks retain
-their existing bounded fuel budgets. This is a cooperative lifetime, not a
+documented Wasmtime epoch callback continues while running and traps executing
+guest code after cancellation. Fuel is renewed at Rust host-call boundaries,
+where the compiled counter is saved/reloaded, not inside the epoch callback.
+Pure guest loops without host calls retain a finite fuel budget; UI frames keep
+their existing initial budgets. This is a cooperative lifetime, not a
 promise to interrupt blocking guest atomic waits.
 
 Closing the window signals cancellation, refuses new HTTP/WebSocket work,
@@ -62,7 +64,8 @@ It submits no login and enables no external destination:
 ```
 
 Tests cover cancellation before/after wait registration, live epoch continuation
-and cancellation of guest execution, HTTP rejection before client creation
+and cancellation of guest execution, persistent host-boundary refueling and
+fuel exhaustion of pure guest loops, HTTP rejection before client creation
 after shutdown, and actual local WebSocket close/join with reconnect refusal.
 Existing native transport, HTTP/WSS/TLS and original-core diagnostics remain
 required. Local original-core UI validation and CI results are recorded below

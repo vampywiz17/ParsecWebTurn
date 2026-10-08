@@ -45,19 +45,29 @@ impl StopSignal {
     }
 }
 
-/// Documented Wasmtime epoch callback: replenish bounded fuel between ticks;
-/// stop traps executing code, including instances sharing the same engine.
+/// Epoch callbacks handle cancellation only. Replenish fuel at host-call
+/// boundaries, where Wasmtime saves/reloads its compiled fuel counter.
 pub fn configure_store<T: 'static>(
     store: &mut wasmtime::Store<T>,
     stop: std::sync::Arc<StopSignal>,
 ) {
-    store.epoch_deadline_callback(move |mut context| {
+    store.epoch_deadline_callback(move |_context| {
         if stop.stopped() {
             return Err(anyhow::Error::new(SessionStopped));
         }
-        context.set_fuel(context.get_fuel()?.max(50_000_000))?;
         Ok(wasmtime::UpdateDeadline::Continue(1))
     });
+}
+
+pub fn renew_fuel<T>(
+    caller: &mut wasmtime::Caller<'_, T>,
+    stop: &StopSignal,
+) -> anyhow::Result<()> {
+    if stop.stopped() {
+        return Err(anyhow::Error::new(SessionStopped));
+    }
+    caller.set_fuel(caller.get_fuel()?.max(50_000_000))?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -91,12 +101,15 @@ mod tests {
         let module = wasmtime::Module::new(
             &engine,
             r#"(module
+            (import "test" "renew" (func $renew))
             (func (export "tick") (result i32) (local $count i32)
+                call $renew
                 i32.const 20 local.set $count
                 (loop $next
                     local.get $count i32.const 1 i32.sub local.tee $count
                     br_if $next)
-                i32.const 7))"#,
+                i32.const 7)
+            (func (export "spin") (loop $again br $again)))"#,
         )
         .unwrap();
         let stop = Arc::new(StopSignal::default());
@@ -106,7 +119,12 @@ mod tests {
         store.set_fuel(10_000).unwrap();
         store.set_epoch_deadline(1);
         configure_store(&mut store, stop.clone());
-        let instance = wasmtime::Instance::new(&mut store, &module, &[]).unwrap();
+        let signal = stop.clone();
+        let renew =
+            wasmtime::Func::wrap(&mut store, move |mut caller: wasmtime::Caller<'_, ()>| {
+                renew_fuel(&mut caller, &signal)
+            });
+        let instance = wasmtime::Instance::new(&mut store, &module, &[renew.into()]).unwrap();
         let tick = instance
             .get_typed_func::<(), i32>(&mut store, "tick")
             .unwrap();
@@ -115,6 +133,16 @@ mod tests {
             assert_eq!(tick.call(&mut store, ()).unwrap(), 7);
         }
         assert!(store.get_fuel().unwrap() > 10_000);
+        store.set_fuel(100).unwrap();
+        let spin = instance
+            .get_typed_func::<(), ()>(&mut store, "spin")
+            .unwrap();
+        let error = spin.call(&mut store, ()).unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<wasmtime::Trap>(),
+            Some(&wasmtime::Trap::OutOfFuel)
+        );
+        store.set_fuel(10_000).unwrap();
         stop.stop();
         engine.increment_epoch();
         let error = tick.call(&mut store, ()).unwrap_err();
