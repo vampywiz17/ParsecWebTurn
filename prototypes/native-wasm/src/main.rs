@@ -410,13 +410,13 @@ mod tests {
             (import "env" "parsec_web_destroy" (func $destroy))
             (import "env" "parsec_web_get_status" (func $status (result i32)))
             (import "env" "parsec_web_get_guests" (func $guests (param i32 i32)))
-            (import "env" "parsec_web_get_self" (func $self (param i32 i32)))
+            (import "env" "parsec_web_get_self" (func $self (param i32 i32) (result i32)))
             (import "env" "parsec_web_get_metrics" (func $metrics (param i32 i32 i32 i32 i32 i32 i32)))
             (func (export "init") call $init)
             (func (export "destroy") call $destroy)
             (func (export "status") (result i32) call $status)
             (func (export "guests") i32.const 100 i32.const 3 call $guests)
-            (func (export "self") i32.const 104 i32.const 108 call $self)
+            (func (export "self") (result i32) i32.const 104 i32.const 108 call $self)
             (func (export "metrics") i32.const 120 i32.const 124 i32.const 128 i32.const 129
                 i32.const 132 i32.const 136 i32.const 140 call $metrics))"#).unwrap();
         let (mut main, instance) = instantiate(&engine, &module).unwrap();
@@ -437,7 +437,15 @@ mod tests {
         );
         let m = main.data().memory.clone();
         m.write(100, &[255; 44]).unwrap();
-        for name in ["guests", "self", "metrics"] {
+        assert_eq!(
+            instance
+                .get_typed_func::<(), i32>(&mut main, "self")
+                .unwrap()
+                .call(&mut main, ())
+                .unwrap(),
+            0
+        );
+        for name in ["guests", "metrics"] {
             instance
                 .get_typed_func::<(), ()>(&mut main, name)
                 .unwrap()

@@ -497,6 +497,9 @@ fn backend_call(
                 "parsec_web_get_self" => {
                     m.write(ptr(args, 0)?, &[0])?;
                     m.set_u32(ptr(args, 1)?, 0)?;
+                    // The pinned import has an i32 result, although weblib.js
+                    // returns undefined. WebAssembly coerces that to zero.
+                    result(results, 0);
                 }
                 "parsec_web_get_metrics" => {
                     // Idle values from X's constructor, NOT measured telemetry.

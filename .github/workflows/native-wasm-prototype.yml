@@ -23,6 +23,16 @@ jobs:
         with:
           workspaces: prototypes/native-wasm
           cache-on-failure: true
+      - name: Build diagnostic executable for local GPU feedback
+        shell: pwsh
+        run: |
+          cargo build --locked --manifest-path prototypes/native-wasm/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { throw 'Diagnostic build failed' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Native-WASM-prototype-debug-win64
+          path: prototypes/native-wasm/target/debug/parsec-native-wasm.exe
+          if-no-files-found: error
       - name: Validate and build independent Rust host
         shell: pwsh
         run: |
