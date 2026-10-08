@@ -77,3 +77,30 @@ core manage its own login/session. Real-host transport and hardware decode follo
 No browser private interface, JavaScript or WebView2 is introduced. The native
 HTTP/WebSocket APIs and WASI ABI are unchanged; only the pinned adapter's
 observability/reporting is extended. Production main/dev are unchanged.
+
+## Verified build and original-core observation
+
+Source `d850a2062311789acac45f068fdc7cc8020f33cd`, prototype 0.12.0:
+[Windows CI 37852602841](https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37852602841)
+passed formatting, all 45 tests, Clippy with warnings denied, release build,
+original-core inspect/allocator/bootstrap and all native acceptance probes.
+
+The downloaded diagnostic and release executables both ran the original
+`login-audit` locally. All eight synthetic input stages completed and the
+**original core itself** constructed a HTTPS POST classified as API/authentication:
+133 body bytes, no Authorization header or query, policy_allowed=false. No
+request left the process. The final release rendered its own login UI on AMD
+Radeon 780M: two shaders, 74 draw calls, 14 presentations, no main execution
+error. These are UI counters, not remote-video FPS or decoder performance.
+
+The final release also passed the separate two-instance import/stdio audit
+probe with all four verification flags true. Its original-core login report
+and controlled-probe report are packaged separately. An earlier idle UI audit
+observed no intents; that idle result alone did not reveal the login behavior.
+
+The unchanged core is `150-104a`, SHA-256
+`d663dd96df477c65479fb93eb88756c7fcafff581cc93be563625cd195a4b4a6`.
+BUILD-INFO.json and SHA256SUMS identify source, documentation and files.
+This proves the native input-to-original-login-request boundary **offline**.
+It does not prove server acceptance, authentication, MFA, session persistence,
+host connection or video decoding. Main/dev were not changed.
