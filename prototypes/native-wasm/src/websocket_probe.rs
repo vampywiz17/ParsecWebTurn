@@ -4,7 +4,7 @@ use futures_util::{SinkExt, StreamExt};
 use std::{net::TcpListener, sync::Arc, time::Duration};
 use tokio::sync::oneshot;
 use tokio_tungstenite::tungstenite::{
-    handshake::server::ErrorResponse,
+    handshake::server::{ErrorResponse, Request, Response},
     protocol::{frame::coding::CloseCode, CloseFrame},
     Message,
 };
@@ -126,7 +126,7 @@ async fn serve(listener: tokio::net::TcpListener) -> Result<usize> {
     }
 
     let (stream, _) = listener.accept().await?;
-    let rejected = tokio_tungstenite::accept_hdr_async(stream, |_, _| {
+    let rejected = tokio_tungstenite::accept_hdr_async(stream, |_: &Request, _: Response| {
         let mut response = ErrorResponse::new(Some("fixture rejection".into()));
         *response.status_mut() = tokio_tungstenite::tungstenite::http::StatusCode::FORBIDDEN;
         Err(response)

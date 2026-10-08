@@ -336,10 +336,14 @@ impl Default for Network {
 }
 impl Network {
     pub fn diagnostic(port: u16, heartbeat: Duration) -> Self {
-        let mut network = Self::default();
-        network.port = Some(port);
-        network.heartbeat = heartbeat;
-        network
+        Self {
+            port: Some(port),
+            heartbeat,
+            registry: Mutex::new(Registry {
+                next: 1,
+                sockets: BTreeMap::new(),
+            }),
+        }
     }
     fn allowed(&self, url: &reqwest::Url) -> bool {
         self.port.is_some()
