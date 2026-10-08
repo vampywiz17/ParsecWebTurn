@@ -158,7 +158,8 @@ pub fn dispatch(
         }
         return Ok(());
     }
-    // Standard WASI preview1 ABI. No preopened directories, env or user files.
+    // Standard WASI preview1 ABI. One empty synthetic root, no host directories,
+    // environment or user files. The libc bootstrap expects a root preopen.
     // Unsupported operations fail rather than returning fabricated success.
     let errno = match name {
         "args_sizes_get" => {
@@ -189,15 +190,63 @@ pub fn dispatch(
             m.write(ptr(args, 2)?, &(u64::try_from(ns)?).to_le_bytes())?;
             0
         }
-        "fd_prestat_get" | "fd_prestat_dir_name" => 8, // BADF: no filesystem capability
-        "path_open" | "path_filestat_get" => 8,
+        "fd_prestat_get" => {
+            if int(args, 0)? != 3 {
+                8
+            } else {
+                let mut prestat = [0u8; 8];
+                prestat[4..8].copy_from_slice(&1u32.to_le_bytes());
+                m.write(ptr(args, 1)?, &prestat)?;
+                0
+            }
+        }
+        "fd_prestat_dir_name" => {
+            if int(args, 0)? != 3 {
+                8
+            } else if ptr(args, 2)? < 1 {
+                37
+            } else {
+                m.write(ptr(args, 1)?, b"/")?;
+                0
+            }
+        }
+        "path_open" => {
+            if int(args, 0)? == 3 {
+                44
+            } else {
+                8
+            }
+        } // NOENT: empty virtual root
+        "path_filestat_get" => {
+            if int(args, 0)? != 3 {
+                8
+            } else {
+                let len = ptr(args, 3)? as usize;
+                if len > 4096 {
+                    bail!("path exceeds limit");
+                }
+                let path = m.read(ptr(args, 2)?, len)?;
+                if path == b"." || path == b"/" {
+                    let mut stat = [0u8; 64];
+                    stat[16] = 3; // directory
+                    m.write(ptr(args, 4)?, &stat)?;
+                    0
+                } else {
+                    44
+                }
+            }
+        }
         "fd_fdstat_get" => {
-            if !(0..=2).contains(&int(args, 0)?) {
+            if !(0..=3).contains(&int(args, 0)?) {
                 8
             } else {
                 let mut stat = [0u8; 24];
-                stat[0] = 2; // character device
-                let rights: u64 = if int(args, 0)? == 0 { 2 } else { 64 };
+                stat[0] = if int(args, 0)? == 3 { 3 } else { 2 };
+                let rights: u64 = match int(args, 0)? {
+                    0 => 2,
+                    3 => 8192 | 262144,
+                    _ => 64,
+                };
                 stat[8..16].copy_from_slice(&rights.to_le_bytes());
                 m.write(ptr(args, 1)?, &stat)?;
                 0

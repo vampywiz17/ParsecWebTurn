@@ -48,7 +48,8 @@ impl ThreadRuntime {
             if records.len() >= 8 {
                 return -1;
             }
-            let id = records.len() as i32 + 1;
+            // Match the audited Matoya loader: main is ID 1, children start at 2.
+            let id = records.len() as i32 + 2;
             records.push(ThreadRecord {
                 id,
                 finished: false,
@@ -90,7 +91,7 @@ impl ThreadRuntime {
         let failed = error.is_some();
         {
             let mut records = self.records.lock().unwrap_or_else(|e| e.into_inner());
-            let record = &mut records[id as usize - 1];
+            let record = &mut records[id as usize - 2];
             record.finished = true;
             record.error = error;
             if let Some(host) = host {

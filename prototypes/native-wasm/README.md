@@ -50,7 +50,8 @@ Use the retained audit copy or audit and explicitly pin the replacement.
 
 ## Isolation and limits
 
-- No filesystem preopens, environment variables, real clipboard or user profile access.
+- Only an empty synthetic `/` directory is preopened for WASI libc startup.
+  No host filesystem, environment variables, real clipboard or user profile access.
 - No HTTP/WebSocket/WebRTC implementation and no account credentials.
 - Unsupported functions are correctly typed traps, **not zero-returning success stubs**.
 - Guest pointers/strings/iovecs are bounds checked. Host shared-memory access uses atomic bytes.
@@ -72,7 +73,8 @@ error instead produces a nonzero exit code.
 
 The adapter currently presents `web.parsec.app` and `Win32` to the guest to match
 the audited Windows web ABI; this does not establish an origin, permissions or
-browser sandbox. Unsupported filesystem operations return WASI errors. This is
+browser sandbox. The root contains no files; opens return WASI NOENT, and
+unsupported filesystem operations fail explicitly. This is
 deliberately different from the browser shim's localStorage-backed virtual files.
 
 ## Next milestones

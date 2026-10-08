@@ -305,7 +305,11 @@ mod tests {
                 .unwrap()
                 .call(&mut store, ())
                 .unwrap(),
-            8
+            0
+        );
+        assert_eq!(
+            store.data().memory.read(16, 8).unwrap(),
+            vec![0, 0, 0, 0, 1, 0, 0, 0]
         );
     }
 
@@ -333,7 +337,7 @@ mod tests {
             .unwrap()
             .call(&mut store, ())
             .unwrap();
-        assert_eq!(id, 1);
+        assert_eq!(id, 2);
         let runtime = store.data().threads.clone().unwrap();
         let limit = std::time::Instant::now() + Duration::from_secs(2);
         while !runtime.snapshot()[0].finished && std::time::Instant::now() < limit {
