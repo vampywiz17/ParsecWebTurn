@@ -5,6 +5,15 @@ Parsec WASM binary and supplies host imports in Rust using Wasmtime. It does not
 link Tauri, WebView2, a JavaScript engine, or a browser. The production app is
 not changed and this directory is not part of its build or releases.
 
+## Native HTTP import stage M3f
+
+`guest-http-probe [report.json]` exercises the pinned `MTY_HttpRequest` import
+against a local HTTP test server. The controlled WASM fixture verifies binary
+and empty responses, status codes, response ownership/cleanup, UTF-8 request
+bodies, headers containing colons, timeout/bounds failures and redirect refusal.
+The normal original-core modes remain offline. External authentication and
+WebSocket signaling are not enabled yet. Read [M3f details](../../docs/NATIVE_M3F.md).
+
 ## Native window / graphics stage M2
 
 `window <parsecd.wasm> [report.json] [optional-capture.png]` adds a bounded native

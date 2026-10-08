@@ -89,6 +89,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Native cursor/user-data guest buffers failed' }
           $buffer = Get-Content "$artifact/guest-buffer.json" -Raw | ConvertFrom-Json
           if (!$buffer.buffers.cursor_payload_verified -or !$buffer.buffers.binary_user_data_verified -or !$buffer.buffers.empty_user_data_verified -or !$buffer.buffers.failed_copy_retry_verified -or !$buffer.buffers.one_shot_consumption_verified -or !$buffer.buffers.unicode_outbound_verified -or !$buffer.buffers.disconnect_cleanup_verified -or !$buffer.peers_closed -or $buffer.parsec_host_connected -or $buffer.buffers.cursor_rendered) { throw 'Incorrect guest buffer proof' }
+          & $exe guest-http-probe "$artifact/guest-http.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Native guest HTTP import failed' }
+          $http = Get-Content "$artifact/guest-http.json" -Raw | ConvertFrom-Json
+          if ($http.requests_verified -ne 9 -or !$http.binary_response_verified -or !$http.body_read_timeout_verified -or !$http.allocation_failure_cleanup_verified -or !$http.redirect_not_followed_verified -or !$http.offline_policy_verified -or !$http.server_closed -or $http.authentication_integrated -or $http.external_requests_enabled) { throw 'Incorrect guest HTTP proof' }
           $boot.host | ConvertTo-Json -Depth 5
           $boot.threads | ConvertTo-Json -Depth 5
           $boot.start_error

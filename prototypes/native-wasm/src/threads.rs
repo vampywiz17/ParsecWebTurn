@@ -13,6 +13,7 @@ pub struct ThreadRuntime {
     pub memory: GuestMemory,
     pub filesystem: Arc<Mutex<crate::filesystem::VirtualFs>>,
     pub backend: Arc<Mutex<crate::backend::Backend>>,
+    pub http: Arc<crate::http::Network>,
     pub started: std::time::Instant,
     pub(crate) records: Mutex<Vec<ThreadRecord>>,
     #[cfg(windows)]
@@ -36,6 +37,7 @@ impl ThreadRuntime {
             memory,
             filesystem: Default::default(),
             backend: Default::default(),
+            http: Default::default(),
             started: std::time::Instant::now(),
             records: Mutex::new(Vec::new()),
             #[cfg(windows)]

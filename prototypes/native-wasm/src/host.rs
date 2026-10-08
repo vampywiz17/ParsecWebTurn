@@ -18,6 +18,8 @@ pub struct HostState {
     #[serde(skip)]
     pub backend: std::sync::Arc<std::sync::Mutex<crate::backend::Backend>>,
     #[serde(skip)]
+    pub http: std::sync::Arc<crate::http::Network>,
+    #[serde(skip)]
     pub started: Instant,
     pub calls: BTreeMap<String, u64>,
     pub boundary: Option<String>,
@@ -43,6 +45,7 @@ impl HostState {
             threads: None,
             filesystem: Default::default(),
             backend: Default::default(),
+            http: Default::default(),
             started: Instant::now(),
             calls: BTreeMap::new(),
             boundary: None,
@@ -68,6 +71,7 @@ pub fn implemented(module: &str, name: &str) -> bool {
         "env" => matches!(
             name,
             "flock"
+                | "MTY_HttpRequest"
                 | "web_get_hostname"
                 | "web_platform"
                 | "web_set_key"
@@ -179,6 +183,9 @@ pub fn dispatch(
         bail!("native bridge not implemented: {id}");
     }
     let m = caller.data().memory.clone();
+    if module == "env" && name == "MTY_HttpRequest" {
+        return crate::http::dispatch(&mut caller, args, results);
+    }
     if disabled_web_stub(module, name) {
         result(results, 0);
         return Ok(());
