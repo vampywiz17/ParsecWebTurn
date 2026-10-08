@@ -61,6 +61,9 @@ impl Drop for Server {
 }
 
 fn serve(mut stream: TcpStream) -> Result<bool> {
+    // Accepted sockets can inherit the listener's nonblocking mode on Windows.
+    // This fixture uses bounded blocking reads/writes, unlike its accept loop.
+    stream.set_nonblocking(false)?;
     stream.set_read_timeout(Some(Duration::from_secs(2)))?;
     stream.set_write_timeout(Some(Duration::from_secs(2)))?;
     let mut header = Vec::new();
