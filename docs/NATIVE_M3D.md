@@ -73,3 +73,17 @@ also future work; native cancellation/resource cleanup already remains bounded.
 
 References: the retained 2026-10-08 `parsec.js` and `weblib.js` snapshot,
 [documented native data-channel API](https://docs.rs/webrtc/0.14.0/webrtc/data_channel/struct.RTCDataChannel.html).
+
+## Verified build, 2026-10-08
+
+Source: `5ae5919c0cfb52d8f1040da74cb35eff48993b48`.
+[Windows CI run 37824392982](https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37824392982)
+passed formatting, all 29 tests, Clippy with warnings denied, the release build,
+the unchanged core diagnostics and every native transport/guest probe.
+
+The same release EXE passed the local Windows `guest-control-probe`: startup
+configuration, exact WASM key packet, all six synthetic host control frames,
+status/rumble/clipboard-request events, guest/self data, host mode and encode
+latency verified. Unsupported absolute mouse input was rejected. Three native
+channels opened and both peers closed; the worker finished without failure.
+No GPU/video performance or real-host compatibility claim follows from this.
