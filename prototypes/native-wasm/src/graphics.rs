@@ -43,6 +43,7 @@ pub struct Graphics {
     next: u32,
     report: GraphicsReport,
     unpack_alignment: usize,
+    unpack_row_length: usize,
     // A current GL context must never be moved to another OS thread.
     _thread: std::marker::PhantomData<std::rc::Rc<()>>,
     _activity: ContextActivity,
@@ -193,6 +194,7 @@ impl Graphics {
                 next: 1,
                 report,
                 unpack_alignment: 4,
+                unpack_row_length: 0,
                 _thread: std::marker::PhantomData,
                 _activity: activity,
             })
@@ -534,7 +536,14 @@ impl Graphics {
                     } else {
                         (i(4)?, i(5)?, u(6)?, u(7)?, u(8)?)
                     };
-                    let size = upload_size(w, h, format, typ, self.unpack_alignment)?;
+                    let size = upload_size(
+                        w,
+                        h,
+                        format,
+                        typ,
+                        self.unpack_alignment,
+                        self.unpack_row_length,
+                    )?;
                     let bytes = if pointer != 0 {
                         Some(m.read(pointer, size)?)
                     } else {
@@ -560,10 +569,17 @@ impl Graphics {
                 }
                 "glTexParameteri" => self.gl.tex_parameter_i32(u(0)?, u(1)?, i(2)?),
                 "glPixelStorei" => {
-                    if u(0)? != glow::UNPACK_ALIGNMENT || !matches!(i(1)?, 1 | 2 | 4 | 8) {
-                        bail!("Unsupported native UI pixel storage");
+                    match u(0)? {
+                        glow::UNPACK_ALIGNMENT if matches!(i(1)?, 1 | 2 | 4 | 8) => {
+                            self.unpack_alignment = i(1)? as usize
+                        }
+                        glow::UNPACK_ROW_LENGTH => self.unpack_row_length = bounded(i(1)?, 4096)?,
+                        _ => bail!(
+                            "Unsupported native UI pixel storage: parameter {:#x}, value {}",
+                            u(0)?,
+                            i(1)?
+                        ),
                     }
-                    self.unpack_alignment = i(1)? as usize;
                     self.gl.pixel_store_i32(u(0)?, i(1)?);
                 }
                 "glVertexAttribPointer" => {
@@ -670,12 +686,24 @@ fn texture_size(w: i32, h: i32, format: u32, typ: u32) -> Result<usize> {
     Ok(bytes)
 }
 
-fn upload_size(w: i32, h: i32, format: u32, typ: u32, alignment: usize) -> Result<usize> {
+fn upload_size(
+    w: i32,
+    h: i32,
+    format: u32,
+    typ: u32,
+    alignment: usize,
+    row_length: usize,
+) -> Result<usize> {
     if !matches!(alignment, 1 | 2 | 4 | 8) {
         bail!("Invalid pixel alignment");
     }
     let row = texture_size(w, 1, format, typ)?;
-    let stride = row
+    let source_row = if row_length == 0 {
+        row
+    } else {
+        texture_size(i32::try_from(row_length)?, 1, format, typ)?
+    };
+    let stride = source_row
         .checked_add(alignment - 1)
         .context("GPU stride overflow")?
         & !(alignment - 1);
@@ -699,12 +727,16 @@ mod tests {
     #[test]
     fn texture_uploads_are_checked_before_guest_memory_access() {
         assert_eq!(
-            super::upload_size(3, 2, glow::RGB, glow::UNSIGNED_BYTE, 4).unwrap(),
+            super::upload_size(3, 2, glow::RGB, glow::UNSIGNED_BYTE, 4, 0).unwrap(),
             21
         );
         assert_eq!(
-            super::upload_size(3, 2, glow::RGB, glow::UNSIGNED_BYTE, 1).unwrap(),
+            super::upload_size(3, 2, glow::RGB, glow::UNSIGNED_BYTE, 1, 0).unwrap(),
             18
+        );
+        assert_eq!(
+            super::upload_size(3, 2, glow::RGB, glow::UNSIGNED_BYTE, 4, 5).unwrap(),
+            25
         );
         assert_eq!(
             super::texture_size(32, 16, glow::RGBA, glow::UNSIGNED_BYTE).unwrap(),
