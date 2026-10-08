@@ -82,3 +82,18 @@ References: retained 2026-10-08 `parsec.js::ea`, `fa`, `T`, `X.Z`, `X.X`,
 `weblib.js::parsec_web_get_buffer_size`, `parsec_web_get_buffer` and
 `parsec_web_send_user_data`; actual import signatures from the pinned core's
 `inspect` report. No private browser diagnostics or JavaScript engine is added.
+
+## Verified build
+
+Source: `93d91fbc573aaf7e616260423f1c185273ac34c7`, prototype version 0.8.0.
+[Windows CI](https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37827192142)
+passed formatting, all 35 tests, Clippy with warnings denied, release build,
+the original pinned core's bootstrap probes and every native transport/import
+probe. The unchanged core identifies as 150-104a, SHA-256
+`d663dd96df477c65479fb93eb88756c7fcafff581cc93be563625cd195a4b4a6`.
+
+The downloaded release executable also passed `guest-buffer-probe` locally:
+all eleven buffer verification flags were true, all three channels opened,
+both peers closed and the native worker finished. Cursor rendering, clipboard
+synchronization, original-guest connection and decoded video remain false.
+This evidence covers synthetic local interoperability, not a real Parsec host.
