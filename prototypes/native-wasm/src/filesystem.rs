@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub const BADF: i32 = 8;
 pub const EXIST: i32 = 20;
 pub const INVAL: i32 = 28;
+pub const ISDIR: i32 = 31;
 pub const NOENT: i32 = 44;
 pub const NOTCAPABLE: i32 = 76;
 pub const LIMIT: usize = 1024 * 1024;
@@ -33,6 +34,44 @@ impl Default for VirtualFs {
 }
 
 impl VirtualFs {
+    pub fn unlink(&mut self, path: &[u8]) -> Result<(), i32> {
+        let path = Self::path(path)?;
+        if self.directories.contains(&path) {
+            return Err(ISDIR);
+        }
+        if !self.files.contains_key(&path) {
+            return Err(NOENT);
+        }
+        // Preserve open descriptors after removing the name. NUL-containing
+        // internal names are never addressable by a guest path, so recreating
+        // the original name produces a different file with independent bytes.
+        let opened = self.handles.values().any(|h| h.path == path);
+        let orphan = if opened {
+            let id = self.next;
+            self.next = self.next.checked_add(1).ok_or(INVAL)?;
+            Some(format!("\0unlinked:{id}"))
+        } else {
+            None
+        };
+        let bytes = self.files.remove(&path).ok_or(NOENT)?;
+        if let Some(orphan) = orphan {
+            for h in self.handles.values_mut().filter(|h| h.path == path) {
+                h.path = orphan.clone();
+            }
+            self.files.insert(orphan, bytes);
+        }
+        Ok(())
+    }
+
+    pub fn close(&mut self, fd: u32) -> bool {
+        let Some(handle) = self.handles.remove(&fd) else {
+            return false;
+        };
+        if handle.path.starts_with('\0') && !self.handles.values().any(|h| h.path == handle.path) {
+            self.files.remove(&handle.path);
+        }
+        true
+    }
     pub fn path(path: &[u8]) -> Result<String, i32> {
         let path = std::str::from_utf8(path).map_err(|_| INVAL)?;
         if path.contains('\0') || path.contains('\\') {
@@ -156,6 +195,24 @@ impl VirtualFs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unlink_removes_name_but_preserves_open_descriptors() {
+        let mut fs = VirtualFs::default();
+        let old = fs.open(b"test", 1, 2 | 4 | 64, 0).unwrap();
+        fs.write(old, b"old").unwrap();
+        fs.unlink(b"test").unwrap();
+        assert_eq!(fs.open(b"test", 0, 2, 0), Err(NOENT));
+        let new = fs.open(b"test", 1, 2 | 4 | 64, 0).unwrap();
+        fs.write(new, b"new").unwrap();
+        fs.seek(old, 0, 0).unwrap();
+        assert_eq!(fs.read(old, 3).unwrap(), b"old");
+        assert_eq!(fs.files.len(), 2);
+        assert!(fs.close(old));
+        assert_eq!(fs.files.len(), 1);
+        assert_eq!(fs.unlink(b"missing"), Err(NOENT));
+        assert_eq!(fs.unlink(b"../host"), Err(NOTCAPABLE));
+        assert_eq!(fs.unlink(b"/"), Err(ISDIR));
+    }
     #[test]
     fn virtual_files_are_ephemeral_bounded_and_capability_checked() {
         let mut fs = VirtualFs::default();

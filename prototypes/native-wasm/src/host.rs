@@ -109,6 +109,7 @@ pub fn implemented(module: &str, name: &str) -> bool {
                 | "path_open"
                 | "path_filestat_get"
                 | "path_create_directory"
+                | "path_unlink_file"
                 | "fd_read"
                 | "fd_seek"
                 | "proc_exit"
@@ -296,7 +297,12 @@ pub fn dispatch(
                 0
             }
         }
-        "path_open" | "path_filestat_get" | "path_create_directory" | "fd_read" | "fd_seek" => {
+        "path_open"
+        | "path_filestat_get"
+        | "path_create_directory"
+        | "path_unlink_file"
+        | "fd_read"
+        | "fd_seek" => {
             let fs = caller.data().filesystem.clone();
             let mut fs = fs
                 .lock()
@@ -304,7 +310,7 @@ pub fn dispatch(
             let errno = filesystem_call(&m, &mut fs, name, args)?;
             drop(fs);
             if name.starts_with("path_") && caller.data().filesystem_requests.len() < 32 {
-                let index = if name == "path_create_directory" {
+                let index = if matches!(name, "path_create_directory" | "path_unlink_file") {
                     1
                 } else {
                     2
@@ -359,7 +365,7 @@ pub fn dispatch(
                 let mut fs = fs
                     .lock()
                     .map_err(|_| anyhow::anyhow!("virtual filesystem lock poisoned"))?;
-                if fs.handles.remove(&fd).is_some() {
+                if fs.close(fd) {
                     0
                 } else {
                     8
@@ -530,11 +536,11 @@ fn filesystem_call(
 ) -> Result<i32> {
     use crate::filesystem::*;
     match name {
-        "path_open" | "path_filestat_get" | "path_create_directory" => {
+        "path_open" | "path_filestat_get" | "path_create_directory" | "path_unlink_file" => {
             if ptr(args, 0)? != 3 {
                 return Ok(BADF);
             }
-            let index = if name == "path_create_directory" {
+            let index = if matches!(name, "path_create_directory" | "path_unlink_file") {
                 1
             } else {
                 2
@@ -544,6 +550,9 @@ fn filesystem_call(
                 return Ok(INVAL);
             }
             let path = m.read(ptr(args, index)?, len)?;
+            if name == "path_unlink_file" {
+                return Ok(fs.unlink(&path).err().unwrap_or(0));
+            }
             if name == "path_open" {
                 let rights = args.get(5).and_then(Val::i64).context("expected rights")? as u64;
                 match fs.open(&path, ptr(args, 4)?, rights, ptr(args, 7)? as u16) {
