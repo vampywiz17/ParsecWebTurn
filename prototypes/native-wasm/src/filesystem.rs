@@ -5,6 +5,8 @@ pub const BADF: i32 = 8;
 pub const EXIST: i32 = 20;
 pub const INVAL: i32 = 28;
 pub const ISDIR: i32 = 31;
+pub const NOTDIR: i32 = 54;
+pub const NOTEMPTY: i32 = 55;
 pub const NOENT: i32 = 44;
 pub const NOTCAPABLE: i32 = 76;
 pub const LIMIT: usize = 1024 * 1024;
@@ -34,6 +36,26 @@ impl Default for VirtualFs {
 }
 
 impl VirtualFs {
+    pub fn remove_directory(&mut self, path: &[u8]) -> Result<(), i32> {
+        let path = Self::path(path)?;
+        if path == "/" {
+            return Err(10);
+        } // WASI BUSY: the mounted synthetic root.
+        if self.files.contains_key(&path) {
+            return Err(NOTDIR);
+        }
+        if !self.directories.contains(&path) {
+            return Err(NOENT);
+        }
+        let prefix = format!("{path}/");
+        if self.files.keys().any(|p| p.starts_with(&prefix))
+            || self.directories.iter().any(|p| p.starts_with(&prefix))
+        {
+            return Err(NOTEMPTY);
+        }
+        self.directories.remove(&path);
+        Ok(())
+    }
     pub fn unlink(&mut self, path: &[u8]) -> Result<(), i32> {
         let path = Self::path(path)?;
         if self.directories.contains(&path) {
@@ -195,6 +217,21 @@ impl VirtualFs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn directory_removal_checks_type_children_and_the_mounted_root() {
+        let mut fs = VirtualFs::default();
+        fs.directories.insert("/dir".into());
+        assert_eq!(fs.remove_directory(b"missing"), Err(NOENT));
+        assert_eq!(fs.remove_directory(b"/"), Err(10));
+        let fd = fs.open(b"dir/file", 1, 2, 0).unwrap();
+        assert_eq!(fs.remove_directory(b"dir/file"), Err(NOTDIR));
+        assert_eq!(fs.remove_directory(b"dir"), Err(NOTEMPTY));
+        fs.close(fd);
+        fs.unlink(b"dir/file").unwrap();
+        fs.remove_directory(b"dir").unwrap();
+        assert!(!fs.directories.contains("/dir"));
+        assert_eq!(fs.remove_directory(b"../outside"), Err(NOTCAPABLE));
+    }
     #[test]
     fn unlink_removes_name_but_preserves_open_descriptors() {
         let mut fs = VirtualFs::default();
