@@ -1,15 +1,48 @@
 mod host;
 mod memory;
+mod threads;
 
 use anyhow::{bail, Context, Result};
 use host::HostState;
 use memory::GuestMemory;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use std::{env, fs, path::PathBuf, time::Duration};
+use std::{
+    env, fs,
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 use wasmtime::{Config, Engine, ExternType, Func, Instance, Linker, Module, SharedMemory, Store};
 
 const PINNED_SHA256: &str = "d663dd96df477c65479fb93eb88756c7fcafff581cc93be563625cd195a4b4a6";
+
+struct ExecutionDeadline(Arc<AtomicBool>);
+impl ExecutionDeadline {
+    fn start() -> Self {
+        let done = Arc::new(AtomicBool::new(false));
+        let flag = done.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(15));
+            if !flag.load(Ordering::SeqCst) {
+                // Epoch interruption does not interrupt every blocking atomic
+                // wait. This standalone CLI has no persistent writes/session
+                // to clean up, so enforce a hard execution limit as well.
+                eprintln!("WASM execution exceeded the 15-second process deadline");
+                std::process::exit(124);
+            }
+        });
+        Self(done)
+    }
+}
+impl Drop for ExecutionDeadline {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
 
 #[derive(Serialize)]
 struct ImportInfo {
@@ -32,6 +65,7 @@ struct Report {
     network_enabled: bool,
     video_rendered: bool,
     host: Option<HostState>,
+    threads: Vec<threads::ThreadRecord>,
 }
 
 fn main() {
@@ -102,8 +136,10 @@ fn run() -> Result<()> {
         network_enabled: false,
         video_rendered: false,
         host: None,
+        threads: Vec::new(),
     };
     if mode != "inspect" {
+        let _deadline = ExecutionDeadline::start();
         let (mut store, instance) = instantiate(&engine, &module)?;
         report.instantiated = true;
         allocator_roundtrip(&mut store, &instance)?;
@@ -113,6 +149,12 @@ fn run() -> Result<()> {
             let outcome = start.call(&mut store, ());
             report.start_returned = outcome.is_ok();
             report.start_error = outcome.err().map(|e| format!("{e:#}"));
+        }
+        if let Some(runtime) = &store.data().threads {
+            // Let workers already at their boundary publish their records.
+            // This does not wait indefinitely for guest threads.
+            std::thread::sleep(Duration::from_millis(100));
+            report.threads = runtime.snapshot();
         }
         report.host = Some(store.into_data());
     }
@@ -138,7 +180,23 @@ fn instantiate(engine: &Engine, module: &Module) -> Result<(Store<HostState>, In
         bail!("expected shared memory");
     }
     let memory = SharedMemory::new(engine, ty)?;
-    let mut store = Store::new(engine, HostState::new(GuestMemory(memory.clone())));
+    let runtime = Arc::new(threads::ThreadRuntime::new(
+        engine.clone(),
+        module.clone(),
+        GuestMemory(memory),
+    ));
+    instantiate_with_runtime(runtime)
+}
+
+fn instantiate_with_runtime(
+    runtime: Arc<threads::ThreadRuntime>,
+) -> Result<(Store<HostState>, Instance)> {
+    let engine = &runtime.engine;
+    let module = &runtime.module;
+    let memory = runtime.memory.0.clone();
+    let mut host = HostState::new(runtime.memory.clone());
+    host.threads = Some(runtime.clone());
+    let mut store = Store::new(engine, host);
     store.set_fuel(50_000_000)?;
     store.set_epoch_deadline(1);
     // Engine watchdog also bounds guest code that spends no fuel between epochs.
@@ -249,5 +307,41 @@ mod tests {
                 .unwrap(),
             8
         );
+    }
+
+    #[test]
+    fn wasi_thread_enters_a_new_instance_with_shared_memory() {
+        let mut config = Config::new();
+        config
+            .wasm_threads(true)
+            .consume_fuel(true)
+            .epoch_interruption(true);
+        let engine = Engine::new(&config).unwrap();
+        let module = Module::new(
+            &engine,
+            r#"(module
+            (import "env" "memory" (memory 1 1 shared))
+            (import "wasi" "thread-spawn" (func $spawn (param i32) (result i32)))
+            (func (export "probe") (result i32) i32.const 100 call $spawn)
+            (func (export "wasi_thread_start") (param $id i32) (param $arg i32)
+                local.get $arg i32.const 42 i32.atomic.store))"#,
+        )
+        .unwrap();
+        let (mut store, instance) = instantiate(&engine, &module).unwrap();
+        let id = instance
+            .get_typed_func::<(), i32>(&mut store, "probe")
+            .unwrap()
+            .call(&mut store, ())
+            .unwrap();
+        assert_eq!(id, 1);
+        let runtime = store.data().threads.clone().unwrap();
+        let limit = std::time::Instant::now() + Duration::from_secs(2);
+        while !runtime.snapshot()[0].finished && std::time::Instant::now() < limit {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let record = runtime.snapshot().remove(0);
+        assert!(record.finished);
+        assert!(record.error.is_none(), "{:?}", record.error);
+        assert_eq!(store.data().memory.u32(100).unwrap(), 42);
     }
 }

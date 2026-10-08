@@ -22,6 +22,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: prototypes/native-wasm
+          cache-on-failure: true
       - name: Validate and build independent Rust host
         shell: pwsh
         run: |
@@ -52,6 +53,7 @@ jobs:
           $boot = Get-Content "$artifact/boot.json" -Raw | ConvertFrom-Json
           if (!$boot.instantiated -or $boot.video_rendered -or $boot.network_enabled) { throw 'Incorrect bootstrap status' }
           $boot.host | ConvertTo-Json -Depth 5
+          $boot.threads | ConvertTo-Json -Depth 5
           $boot.start_error
           Copy-Item -LiteralPath $exe -Destination "$artifact/parsec-native-wasm.exe"
           Copy-Item -LiteralPath prototypes/native-wasm/README.md -Destination "$artifact/README.md"

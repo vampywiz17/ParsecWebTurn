@@ -13,7 +13,9 @@ not changed and this directory is not part of its build or releases.
 - Call the guest allocator, write/read through shared memory, then call the guest free function.
 - Enter `_start` and report the first host operation that is not implemented.
 - Provide a small WASI preview1 subset, OS randomness, guest hostname/platform and keyboard mapping.
-- Fail explicitly at missing Parsec/WebRTC, audio, graphics or threading bridges.
+- Start native OS threads with fresh WASM instances and the same shared memory,
+  following the legacy WASI-threads ABI used by the binary.
+- Fail explicitly at missing Parsec/WebRTC, audio or graphics bridges.
 
 **This is not yet a functioning remote desktop client. It does not log in,
 connect to a host, decode video, render a window, or play sound.** `boot` is a
@@ -52,10 +54,16 @@ Use the retained audit copy or audit and explicitly pin the replacement.
 - No HTTP/WebSocket/WebRTC implementation and no account credentials.
 - Unsupported functions are correctly typed traps, **not zero-returning success stubs**.
 - Guest pointers/strings/iovecs are bounds checked. Host shared-memory access uses atomic bytes.
-- Guest instruction fuel and a five-second epoch deadline bound bootstrap execution.
-- No thread-spawn or host-side indefinite waits are implemented.
+- Guest instruction fuel and a five-second epoch deadline limit bootstrap execution.
+  A separate 15-second process deadline also handles blocking guest atomic waits;
+  it exits with code 124 and does not claim a completed report.
+- At most eight native WASM threads may be created during a bootstrap run.
+  The legacy WASI-threads adapter is snapshot-specific, not a claim of support
+  for every WASI threading proposal. No indefinite host-side waits are implemented.
 - Captured stdout is limited to 64 KiB. Only import names/counts are traced, not arguments.
-- Missing bridges and WASM errors are represented in `start_error`/`host.boundary`.
+- Missing bridges and WASM errors are represented in `start_error`/`host.boundary`
+  and the per-thread `threads` records. A thread error interrupts other running
+  guest loops; blocked atomic waits remain subject to the process deadline.
 
 `boot` exits successfully when it produces a diagnostic report, even when `_start`
 traps. Consumers must inspect the report; process exit code is not an app-readiness
@@ -94,6 +102,6 @@ References:
 - https://docs.wasmtime.dev/api/wasmtime/struct.SharedMemory.html
 - https://docs.wasmtime.dev/api/wasmtime/struct.Linker.html
 - https://github.com/WebAssembly/WASI/blob/main/legacy/preview1/docs.md
+- https://github.com/WebAssembly/wasi-threads
 - https://web.parsec.app/lib/matoya-worker.js
 - https://web.parsec.app/lib/weblib.js
-

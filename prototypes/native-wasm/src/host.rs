@@ -12,6 +12,8 @@ pub struct HostState {
     #[serde(skip)]
     pub memory: GuestMemory,
     #[serde(skip)]
+    pub threads: Option<std::sync::Arc<crate::threads::ThreadRuntime>>,
+    #[serde(skip)]
     pub started: Instant,
     pub calls: BTreeMap<String, u64>,
     pub boundary: Option<String>,
@@ -26,6 +28,7 @@ impl HostState {
     pub fn new(memory: GuestMemory) -> Self {
         Self {
             memory,
+            threads: None,
             started: Instant::now(),
             calls: BTreeMap::new(),
             boundary: None,
@@ -68,6 +71,7 @@ pub fn implemented(module: &str, name: &str) -> bool {
                 | "path_filestat_get"
                 | "proc_exit"
         ),
+        "wasi" => name == "thread-spawn",
         _ => false,
     }
 }
@@ -100,6 +104,15 @@ pub fn dispatch(
         bail!("native bridge not implemented: {id}");
     }
     let m = caller.data().memory.clone();
+    if module == "wasi" {
+        let runtime = caller
+            .data()
+            .threads
+            .clone()
+            .context("thread runtime missing")?;
+        result(results, runtime.spawn(ptr(args, 0)?));
+        return Ok(());
+    }
     if module == "env" {
         match name {
             "flock" => result(results, 0),
