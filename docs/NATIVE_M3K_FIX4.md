@@ -34,6 +34,16 @@ Windows CI runs formatting, unit tests, strict Clippy, release compilation and
 the original-core/native bridge probes. Test results and the source commit are
 recorded in the accompanying test package's BUILD-INFO.json after verification.
 
+Verified source: `3b707d23b8fffd183f0cccf62c34845f3027d2e0`.
+[Windows CI 37900082609](https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37900082609)
+passed all 68 tests, formatting, strict Clippy, optimized release compilation and
+the native/original-core probes. On the downloaded release EXE, the local offline
+original login fixture completed all nine scripted steps, presented 15 GPU UI
+frames on the AMD Radeon 780M and released its window without a guest error or
+rejected worker spawn. The synthetic authentication request was recorded through
+the HTTP bridge, remained blocked offline, and omitted destination origins and
+fixture credentials. No real account or remote host was used in these checks.
+
 ## User test
 
 Run `START-NETWORK-DIAGNOSTIC.cmd`, log in and select Connect once. Close the
