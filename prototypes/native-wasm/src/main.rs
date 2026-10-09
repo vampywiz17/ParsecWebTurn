@@ -101,6 +101,7 @@ struct ImportInfo {
 #[derive(Serialize)]
 struct Report {
     schema: u32,
+    prototype_version: &'static str,
     wasm_sha256: String,
     mode: String,
     imports: Vec<ImportInfo>,
@@ -375,6 +376,7 @@ fn run() -> Result<()> {
     let module = Module::new(&engine, &bytes).context("compiling the original WASM")?;
     let mut report = Report {
         schema: 3,
+        prototype_version: env!("CARGO_PKG_VERSION"),
         wasm_sha256: hash,
         mode: mode.clone(),
         imports: module

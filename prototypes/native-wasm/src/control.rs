@@ -123,6 +123,15 @@ pub fn decode(bytes: &[u8]) -> Result<Message> {
     })
 }
 
+#[derive(Debug)]
+pub struct AbsoluteMouseUnavailable;
+impl std::fmt::Display for AbsoluteMouseUnavailable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("absolute mouse requires presented video dimensions")
+    }
+}
+impl std::error::Error for AbsoluteMouseUnavailable {}
+
 /// Relative mouse coordinates only until decoded dimensions/presentation exist.
 /// Absolute positioning is rejected instead of guessing a viewport transform.
 pub fn input(value: &Value) -> Result<Bytes> {
@@ -152,10 +161,11 @@ pub fn input(value: &Value) -> Result<Bytes> {
         ),
         3 => header(2, int(value, "x")?, int(value, "y")?, 0),
         4 => {
+            let (x, y) = (int(value, "x")?, int(value, "y")?);
             if !boolean(value, "relative")? {
-                bail!("absolute mouse mapping requires decoded video dimensions");
+                return Err(AbsoluteMouseUnavailable.into());
             }
-            header(3, 1, int(value, "x")?, int(value, "y")?)
+            header(3, 1, x, y)
         }
         5 => header(
             4,

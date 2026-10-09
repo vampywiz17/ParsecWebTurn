@@ -715,11 +715,34 @@ fn control_exchange(
         bail!("WASM key event binary mismatch");
     }
     memory.c_string(8192, 1024, r#"{"type":4,"relative":false,"x":1,"y":2}"#)?;
-    if send.call(&mut *store, ()).is_ok() {
-        bail!("unsupported absolute mouse input accepted");
+    send.call(&mut *store, ())?;
+    {
+        let backend = store
+            .data()
+            .backend
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        anyhow::ensure!(
+            backend.input_availability.absolute_mouse_events_not_sent == 1
+                && backend.input_availability.unavailable_reason
+                    == Some("absolute-mouse-requires-presented-video")
+                && backend.status == Some(0),
+            "absolute mouse unavailability not preserved"
+        );
     }
+    let received = runtime.block_on(async {
+        tokio::time::timeout(Duration::from_millis(100), receipts.recv()).await
+    });
+    anyhow::ensure!(
+        received.is_err(),
+        "absolute mouse without video unexpectedly sent a packet"
+    );
+    anyhow::ensure!(
+        status.call(&mut *store, ())? == 0,
+        "unavailable mouse disrupted connection"
+    );
     Ok(
-        serde_json::json!({"unavailable_media_ingress_verified":true,"media_metrics_import_continues_verified":true,"startup_configuration_verified":true,"wasm_input_packet_verified":true,"unsupported_absolute_mouse_rejected":true,"status_events_verified":true,"rumble_event_verified":true,"clipboard_request_event_verified":true,"guest_self_metadata_verified":true,"host_mode_verified":true,"encode_latency_verified":true,"host_frames_verified":6,"synthetic_host":true,"real_parsec_host_compatible":false}),
+        serde_json::json!({"unavailable_media_ingress_verified":true,"media_metrics_import_continues_verified":true,"startup_configuration_verified":true,"wasm_input_packet_verified":true,"unsupported_absolute_mouse_rejected":true,"absolute_mouse_unavailable_nonfatal_verified":true,"status_events_verified":true,"rumble_event_verified":true,"clipboard_request_event_verified":true,"guest_self_metadata_verified":true,"host_mode_verified":true,"encode_latency_verified":true,"host_frames_verified":6,"synthetic_host":true,"real_parsec_host_compatible":false}),
     )
 }
 

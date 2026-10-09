@@ -18,6 +18,7 @@ pub struct Backend {
     pub encode_latency: f32,
     pub control_frames_received: u64,
     pub media_ingress: crate::media_ingress::Ingress,
+    pub input_availability: InputAvailability,
     pub attempt_failure: Option<crate::attempt::FailureStage>,
     pub attempt_diagnostic: Option<Value>,
     pub remote_begin_diagnostic: Option<Value>,
@@ -37,6 +38,12 @@ pub struct Backend {
     pub buffers: crate::buffers::Buffers,
     #[serde(skip)]
     events: VecDeque<Value>,
+}
+
+#[derive(Default, Serialize)]
+pub struct InputAvailability {
+    pub absolute_mouse_events_not_sent: u64,
+    pub unavailable_reason: Option<&'static str>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -68,6 +75,7 @@ impl Backend {
         self.encode_latency = 0.0;
         self.control_frames_received = 0;
         self.media_ingress = Default::default();
+        self.input_availability = Default::default();
         self.guests.clear();
         self.me = Value::Null;
         self.attempt_id.clear();
@@ -107,6 +115,7 @@ impl Backend {
         self.encode_latency = 0.0;
         self.control_frames_received = 0;
         self.media_ingress = Default::default();
+        self.input_availability = Default::default();
     }
 
     /// Include a live attempt without consuming, cancelling or pumping it.
@@ -118,6 +127,26 @@ impl Backend {
             .map(|a| a.snapshot())
             .unwrap_or(Value::Null);
         Ok(value)
+    }
+
+    pub fn prepare_input(&mut self, message: &Value) -> Result<Option<bytes::Bytes>> {
+        match crate::control::input(message) {
+            Ok(packet) => Ok(Some(packet)),
+            Err(error)
+                if error
+                    .downcast_ref::<crate::control::AbsoluteMouseUnavailable>()
+                    .is_some() =>
+            {
+                self.input_availability.absolute_mouse_events_not_sent = self
+                    .input_availability
+                    .absolute_mouse_events_not_sent
+                    .saturating_add(1);
+                self.input_availability.unavailable_reason =
+                    Some("absolute-mouse-requires-presented-video");
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     pub fn discard_idle_message(&mut self) -> Result<()> {
@@ -306,6 +335,55 @@ impl Backend {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn unavailable_absolute_mouse_does_not_fail_connection_or_claim_delivery() {
+        let mut backend = Backend::default();
+        backend.init();
+        backend.status = Some(0);
+        assert!(backend
+            .prepare_input(&json!({"type":4,"relative":false,"x":123,"y":456}))
+            .unwrap()
+            .is_none());
+        assert_eq!(backend.status, Some(0));
+        assert_eq!(backend.input_availability.absolute_mouse_events_not_sent, 1);
+        let packet = backend
+            .prepare_input(&json!({"type":4,"relative":true,"x":-3,"y":4}))
+            .unwrap()
+            .unwrap();
+        assert_eq!(packet, crate::control::header(3, 1, -3, 4));
+        backend.prepare_attempt();
+        assert_eq!(backend.input_availability.absolute_mouse_events_not_sent, 0);
+    }
+    #[test]
+    fn malformed_input_is_not_silently_classified_as_unavailable() {
+        let mut backend = Backend::default();
+        backend.init();
+        for message in [
+            json!({"type":4,"relative":false,"x":"private-coordinate","y":0}),
+            json!({"type":4,"relative":false,"x":2147483648_i64,"y":0}),
+            json!({"type":4,"relative":0,"x":0,"y":0}),
+            json!({"type":999}),
+        ] {
+            assert!(backend.prepare_input(&message).is_err());
+        }
+        assert_eq!(backend.input_availability.absolute_mouse_events_not_sent, 0);
+    }
+    #[test]
+    fn unavailable_input_counter_saturates_and_diagnostics_omit_coordinates() {
+        let mut backend = Backend::default();
+        backend.init();
+        backend.input_availability.absolute_mouse_events_not_sent = u64::MAX;
+        backend
+            .prepare_input(&json!({"type":4,"relative":false,"x":123456789,"y":987654321}))
+            .unwrap();
+        assert_eq!(
+            backend.input_availability.absolute_mouse_events_not_sent,
+            u64::MAX
+        );
+        let report = backend.diagnostic().unwrap().to_string();
+        assert!(!report.contains("123456789") && !report.contains("987654321"));
+    }
+
     #[test]
     fn retry_history_keeps_failure_and_is_bounded_without_ids() {
         let mut b = Backend::default();

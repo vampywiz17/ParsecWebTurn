@@ -740,11 +740,12 @@ fn backend_call(
                         serde_json::from_str(&m.string(ptr(args, 0)?, 65536)?)?;
                     b.pump_native_events()?;
                     if b.status == Some(0) {
-                        let frame = crate::control::input(&message)?;
-                        b.native_attempt
-                            .as_ref()
-                            .context("native control attempt missing")?
-                            .send_binary(0, frame)?;
+                        if let Some(frame) = b.prepare_input(&message)? {
+                            b.native_attempt
+                                .as_ref()
+                                .context("native control attempt missing")?
+                                .send_binary(0, frame)?;
+                        }
                     } else {
                         b.discard_idle_message()?;
                     }

@@ -1,3 +1,7 @@
+## M3k-fix19
+
+Valid absolute mouse input without presented video is now reported as unavailable without terminating the WASM loop or sending guessed coordinates. Reports include the prototype version. See [fix19 notes](../../docs/NATIVE_M3K_FIX19.md). Video/audio decoding remains unavailable.
+
 ## M3k-fix18
 
 Binary media channels now have explicit unavailable-decoder ingress counters instead of trapping the main WASM callback. Invalid control/channel traffic becomes a connection failure with a retained diagnostic. This build does not decode/play media. See [fix18 notes](../../docs/NATIVE_M3K_FIX18.md).
