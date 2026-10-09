@@ -78,6 +78,10 @@ impl HostState {
 }
 
 pub fn implemented(module: &str, name: &str) -> bool {
+    #[cfg(windows)]
+    if module == "env" && crate::cursor::handles(name) {
+        return true;
+    }
     if disabled_web_stub(module, name) {
         return true;
     }
@@ -201,6 +205,17 @@ pub fn dispatch(
     }
     let id = format!("{module}::{name}");
     *caller.data_mut().calls.entry(id.clone()).or_default() += 1;
+    #[cfg(windows)]
+    if module == "env" && crate::cursor::handles(name) {
+        // Invalid/unsupported images fall back to the system arrow, just as a
+        // browser falls back when a CSS cursor image cannot be displayed.
+        let request = crate::cursor::decode(&caller.data().memory, name, args)
+            .unwrap_or(crate::cursor::Request::Image(None));
+        if let Some(window) = &caller.data().window {
+            window.set_cursor(request);
+        }
+        return Ok(());
+    }
     #[cfg(windows)]
     if module == "env" && caller.data().window.is_some() && crate::desktop::handles(name) {
         let outcome = crate::desktop::dispatch(&mut caller, name, args, results);

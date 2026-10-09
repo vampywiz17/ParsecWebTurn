@@ -39,6 +39,9 @@ pub struct Window {
     pub stop: Arc<crate::lifecycle::StopSignal>,
     pressed_keys: Mutex<std::collections::BTreeSet<&'static str>>,
     text_decoder: Mutex<crate::input::TextDecoder>,
+    cursor_pending: Mutex<crate::cursor::Pending>,
+    cursor_posted: AtomicBool,
+    cursor: Mutex<crate::cursor::State>,
 }
 
 impl Window {
@@ -59,6 +62,9 @@ impl Window {
             stop: Default::default(),
             pressed_keys: Default::default(),
             text_decoder: Default::default(),
+            cursor_pending: Default::default(),
+            cursor_posted: AtomicBool::new(false),
+            cursor: Default::default(),
         });
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         let ui = state.clone();
@@ -113,6 +119,22 @@ impl Window {
     pub fn request_stop(&self) {
         self.closing.store(true, Ordering::Release);
         self.stop.stop();
+    }
+    pub fn set_cursor(&self, request: crate::cursor::Request) {
+        if self.closing.load(Ordering::Acquire) {
+            return;
+        }
+        self.cursor_pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .submit(request);
+        if !self.cursor_posted.swap(true, Ordering::AcqRel) {
+            unsafe {
+                if PostMessageW(self.handle(), WM_APP + 2, 0, 0) == 0 {
+                    self.cursor_posted.store(false, Ordering::Release);
+                }
+            }
+        }
     }
     fn push(&self, event: Event) {
         let mut queue = self.events.lock().unwrap_or_else(|e| e.into_inner());
@@ -205,6 +227,34 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
                 DestroyWindow(hwnd);
                 return 0;
             }
+            m if m == WM_APP + 2 => {
+                s.cursor_posted.store(false, Ordering::Release);
+                let pending = std::mem::take(
+                    &mut *s.cursor_pending.lock().unwrap_or_else(|e| e.into_inner()),
+                );
+                let mut cursor = s.cursor.lock().unwrap_or_else(|e| e.into_inner());
+                cursor.apply(pending);
+                // Refresh stationary pointers too, without changing another
+                // window's cursor or the system resize/titlebar cursors.
+                let mut point: POINT = std::mem::zeroed();
+                if GetCursorPos(&mut point) != 0 && WindowFromPoint(point) == hwnd {
+                    ScreenToClient(hwnd, &mut point);
+                    let mut rect: RECT = std::mem::zeroed();
+                    GetClientRect(hwnd, &mut rect);
+                    if point.x >= rect.left
+                        && point.x < rect.right
+                        && point.y >= rect.top
+                        && point.y < rect.bottom
+                    {
+                        cursor.select();
+                    }
+                }
+                return 0;
+            }
+            WM_SETCURSOR if lp as u16 as u32 == HTCLIENT => {
+                s.cursor.lock().unwrap_or_else(|e| e.into_inner()).select();
+                return 1;
+            }
             WM_SIZE => {
                 let w = (lp as u32 & 0xffff) as i32;
                 let h = ((lp as u32 >> 16) & 0xffff) as i32;
@@ -265,6 +315,10 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
                 return 0;
             }
             WM_DESTROY => {
+                // Cursor resources are created, replaced and freed on this UI
+                // thread. The remaining Arc state owns no native cursor handle.
+                *s.cursor.lock().unwrap_or_else(|e| e.into_inner()) = Default::default();
+                *s.cursor_pending.lock().unwrap_or_else(|e| e.into_inner()) = Default::default();
                 PostQuitMessage(0);
                 return 0;
             }

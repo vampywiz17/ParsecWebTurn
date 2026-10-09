@@ -5,6 +5,8 @@ mod backend;
 mod buffers;
 mod control;
 #[cfg(windows)]
+mod cursor;
+#[cfg(windows)]
 mod desktop;
 mod filesystem;
 #[cfg(windows)]
