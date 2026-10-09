@@ -67,3 +67,19 @@ Extract into a new folder, run `START-CLOUDFLARE-STUN-DIAGNOSTIC.cmd`, log in an
 press Connect once. After the error or result, close normally without retrying
 and share `account-network-report.json`. The STUN configuration is implemented;
 real host connectivity, Cloudflare reachability here and decoding remain unverified.
+
+## Verified build
+
+Source commit: `c4fed50034c3e0e1077d484d80ccc1925ce52957`.
+[Windows CI run 37912194321](https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37912194321)
+passed formatting, strict Clippy, all 80 tests, the release build and all native/
+WASM bridge probes. The controlled session verified connected ICE/DTLS, stable
+signaling, complete gathering, both installed descriptions, sync and live report
+preservation. It exchanged six binary messages and closed cleanly. Its report
+records zero configured ICE servers and zero srflx candidates: the automated
+fixture remained offline and did not test public Cloudflare reachability.
+
+The downloaded release executable passed the local offline original-core login
+fixture: nine synthetic input steps, 15 GPU frames, clean window release and no
+startup error/rejected thread spawn. Default reports omitted fixture credentials
+and destination origins. Public STUN remains opt-in for the user's next test.
