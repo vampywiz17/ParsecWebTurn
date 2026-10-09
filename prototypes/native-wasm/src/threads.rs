@@ -55,6 +55,8 @@ impl Records {
             error: None,
             boundary: None,
             audio_output: None,
+            execution_failure: None,
+            last_host_call: None,
             exit_code: None,
             calls: Default::default(),
         });
@@ -98,6 +100,8 @@ pub struct ThreadRecord {
     pub finished: bool,
     pub cancelled: bool,
     pub error: Option<String>,
+    pub execution_failure: Option<crate::execution_diagnostics::Failure>,
+    pub last_host_call: Option<String>,
     pub boundary: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub audio_output: Option<crate::audio::Output>,
@@ -166,6 +170,7 @@ impl ThreadRuntime {
                     let entry = instance
                         .get_typed_func::<(i32, i32), ()>(&mut store, "wasi_thread_start")
                         .context("WASI thread entry export missing")?;
+                    store.data_mut().execution_stage = Some("guest-thread-start");
                     let result = entry.call(&mut store, (id, argument as i32));
                     #[cfg(windows)]
                     let result =
@@ -174,6 +179,13 @@ impl ThreadRuntime {
                         } else {
                             result
                         };
+                    if let Err(error) = &result {
+                        store.data_mut().execution_failure =
+                            Some(crate::execution_diagnostics::Failure::capture(
+                                error,
+                                store.data().execution_stage,
+                            ));
+                    }
                     host = Some(store.into_data());
                     result
                 })();
@@ -217,6 +229,8 @@ impl ThreadRuntime {
                 if host.audio_output.create_requests > 0 || host.audio_output.destroy_requests > 0 {
                     record.audio_output = Some(host.audio_output);
                 }
+                record.execution_failure = host.execution_failure;
+                record.last_host_call = host.last_host_call;
                 record.boundary = host.boundary;
                 record.calls = host.calls;
                 record.exit_code = host.guest_exit_code;

@@ -1,3 +1,7 @@
+## M3k-fix17
+
+The new main-thread failure is not yet diagnosed. Reports now retain a privacy-safe execution stage, runtime trap enum and bounded numeric WASM backtrace. See [diagnostic notes](../../docs/NATIVE_M3K_FIX17.md). This is a diagnostic build; native audio output is still unavailable.
+
 ## M3k-fix16
 
 Optional screen wake lock now uses the documented Windows API on the window UI thread. Rejection does not terminate the guest; minimize and shutdown release it. See [fix16 notes](../../docs/NATIVE_M3K_FIX16.md). Audio output remains unavailable.

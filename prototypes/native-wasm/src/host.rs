@@ -10,6 +10,9 @@ use wasmtime::{Caller, Val};
 #[derive(Serialize)]
 pub struct HostState {
     pub audio_output: crate::audio::Output,
+    pub execution_stage: Option<&'static str>,
+    pub execution_failure: Option<crate::execution_diagnostics::Failure>,
+    pub last_host_call: Option<String>,
     #[serde(skip)]
     pub memory: GuestMemory,
     #[serde(skip)]
@@ -52,6 +55,9 @@ impl HostState {
     pub fn new(memory: GuestMemory) -> Self {
         Self {
             audio_output: Default::default(),
+            execution_stage: None,
+            execution_failure: None,
+            last_host_call: None,
             memory,
             threads: None,
             filesystem: Default::default(),
@@ -212,6 +218,7 @@ pub fn dispatch(
     }
     let id = format!("{module}::{name}");
     *caller.data_mut().calls.entry(id.clone()).or_default() += 1;
+    caller.data_mut().last_host_call = Some(id.clone());
     // None of these optional capabilities can currently be acquired by this
     // prototype. Releasing an inactive capability is valid and idempotent;
     // acquisition still reaches the explicit unsupported boundary below.

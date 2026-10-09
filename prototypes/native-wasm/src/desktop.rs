@@ -171,9 +171,10 @@ pub fn dispatch(
 fn export(
     store: &mut Store<HostState>,
     instance: &Instance,
-    name: &str,
+    name: &'static str,
     args: &[Val],
 ) -> Result<()> {
+    store.data_mut().execution_stage = Some(name);
     instance
         .get_func(&mut *store, name)
         .with_context(|| format!("Missing {name}"))?
@@ -338,6 +339,7 @@ fn run_loop(store: &mut Store<HostState>, instance: &Instance, input: bool) -> R
                 )?;
             }
         }
+        store.data_mut().execution_stage = Some("event-loop-callback");
         if callback.call(&mut *store, opaque as i32)? == 0 {
             break;
         }

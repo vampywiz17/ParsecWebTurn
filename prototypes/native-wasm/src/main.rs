@@ -13,6 +13,7 @@ mod cursor;
 mod data_only_policy_tests;
 #[cfg(windows)]
 mod desktop;
+mod execution_diagnostics;
 mod filesystem;
 #[cfg(windows)]
 mod fullscreen;
@@ -215,12 +216,15 @@ fn run() -> Result<()> {
             | "guest-platform-probe"
             | "guest-window-probe"
             | "guest-wake-lock-probe"
+            | "guest-execution-diagnostic-probe"
     ) {
         let path = args.next().map(PathBuf::from);
         if args.next().is_some() {
             bail!("too many arguments");
         }
-        let report = if mode == "guest-wake-lock-probe" {
+        let report = if mode == "guest-execution-diagnostic-probe" {
+            execution_diagnostics::probe()?
+        } else if mode == "guest-wake-lock-probe" {
             #[cfg(windows)]
             {
                 wake_lock::probe()?
@@ -485,6 +489,7 @@ fn run() -> Result<()> {
         }
         if mode == "boot" || window_mode {
             let start = instance.get_typed_func::<(), ()>(&mut store, "_start")?;
+            store.data_mut().execution_stage = Some("guest-start");
             let outcome = start.call(&mut store, ());
             #[cfg(windows)]
             let handed_off = window_mode && store.data().event_loop.is_some();
@@ -494,13 +499,30 @@ fn run() -> Result<()> {
                 engine.increment_epoch();
             }
             report.start_returned = outcome.is_ok();
+            if !handed_off {
+                if let Err(error) = &outcome {
+                    store.data_mut().execution_failure =
+                        Some(execution_diagnostics::Failure::capture(
+                            error,
+                            store.data().execution_stage,
+                        ));
+                }
+            }
             report.start_error = outcome
                 .err()
                 .filter(|e| !lifecycle::is_cancellation(e))
                 .map(|e| format!("{e:#}"));
             #[cfg(windows)]
             if handed_off {
-                report.start_error = desktop::run(&mut store, &instance)
+                let result = desktop::run(&mut store, &instance);
+                if let Err(error) = &result {
+                    store.data_mut().execution_failure =
+                        Some(execution_diagnostics::Failure::capture(
+                            error,
+                            store.data().execution_stage,
+                        ));
+                }
+                report.start_error = result
                     .err()
                     .filter(|e| !lifecycle::is_cancellation(e))
                     .map(|e| format!("{e:#}"));
