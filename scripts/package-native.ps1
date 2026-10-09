@@ -5,7 +5,8 @@ Push-Location $taskRoot
 try {
     $taskVersion = (Get-Content VERSION -Raw).Trim()
     if ($taskVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid VERSION' }
-    if ((Get-Content src-native/Cargo.toml -Raw) -notmatch "(?m)^version = `"$taskVersion`"$") { throw 'Native version mismatch' }
+    $taskManifestVersion = [regex]::Match((Get-Content src-native/Cargo.toml -Raw), '(?m)^version = "([^"]+)"\r?$').Groups[1].Value
+    if ($taskManifestVersion -ne $taskVersion) { throw 'Native version mismatch' }
     $taskBinary = [IO.File]::ReadAllBytes((Join-Path $taskRoot 'src-native/target/x86_64-pc-windows-msvc/release/parsec-web-turn.exe'))
     $taskPeOffset = [BitConverter]::ToInt32($taskBinary, 0x3c)
     if ([BitConverter]::ToUInt16($taskBinary, $taskPeOffset + 24 + 68) -ne 2) { throw 'Only the normal Windows GUI executable may be packaged' }
