@@ -1,3 +1,12 @@
+## M3n / 0.17.0
+
+Native Opus decoding and shared-mode WASAPI playback, video-coordinate mouse
+mapping, and foreground Raw Input controlled by the original relative-mouse
+option are implemented. The pinned Matoya GUI is mirrored into a D3D11 alpha
+pass over the GPU video backbuffer. Focus loss releases cursor confinement.
+Live-host audio, control and original overlay interaction still require the new
+test package; see [M3n notes](../../docs/NATIVE_M3N.md).
+
 ## M3m-fix1 / 0.16.1
 
 The first live-host report confirmed 434 decoded/presented 1080p frames before

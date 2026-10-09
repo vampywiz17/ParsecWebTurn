@@ -280,9 +280,9 @@ impl Window {
         } else if self.relative_mouse.load(Ordering::Acquire) {
             ClipCursor(std::ptr::null());
         }
-        if self.relative_mouse.swap(acquired, Ordering::AcqRel) != acquired {
-            self.push(Event::RelativeMode(acquired));
-        }
+        // A rejected request must also report the actual state to the guest.
+        self.relative_mouse.store(acquired, Ordering::Release);
+        self.push(Event::RelativeMode(acquired));
     }
 
     pub fn initial_geometry(&self) -> (i32, i32, i32, i32, bool) {

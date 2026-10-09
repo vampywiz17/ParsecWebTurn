@@ -505,6 +505,21 @@ mod tests {
         assert!(shared.frame.batches.is_empty());
     }
     #[test]
+    fn gui_sampler_selects_its_bound_texture_unit() {
+        let mut capture = triangle();
+        capture.bindings.insert(0, 999);
+        capture.bindings.insert(2, 3);
+        capture.samplers.insert(1, 2);
+        capture
+            .draw(glow::TRIANGLES, 3, glow::UNSIGNED_SHORT, 0)
+            .unwrap();
+        assert_eq!(capture.frame.batches[0].texture.version, 1);
+        capture.bindings.remove(&2);
+        assert!(capture
+            .draw(glow::TRIANGLES, 3, glow::UNSIGNED_SHORT, 0)
+            .is_err());
+    }
+    #[test]
     fn bad_indices_and_missing_layout_fail_without_panics_or_stale_overlay() {
         let mut capture = triangle();
         assert!(capture
