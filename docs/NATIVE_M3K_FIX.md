@@ -26,3 +26,16 @@ Real-host connection and remote video/audio playback remain unverified. This fix
 removes the reported boundary; it does not establish that later stream-startup
 stages are complete. The prototype currently gathers native UDP host candidates;
 production STUN/TURN settings are not yet integrated into this separate prototype.
+
+## Verification
+
+Source: `883fa87c637e36ac4ccee463ec18ae3ebe01d7d4`.
+Windows CI: https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37894174495
+passed 61 tests, formatting, Clippy with warnings denied, release build and all
+original-core/native bridge probes.
+
+The downloaded release executable also passed the local host-wait offer probe.
+Its offline original-UI regression completed all nine Tab/paste/login steps,
+rendered 15 GPU frames, generated the expected blocked synthetic authentication
+request and released the window without startup error or rejected workers.
+No live account or remote host was used in these checks.
