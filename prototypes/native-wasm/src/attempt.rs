@@ -189,6 +189,9 @@ struct Completion {
     events: VecDeque<serde_json::Value>,
     messages: VecDeque<(u16, bool, Bytes)>,
     message_bytes: usize,
+    // Session media has no decoder yet; raw transport probes retain receipts.
+    discard_unavailable_media: bool,
+    media_ingress: crate::media_ingress::Ingress,
 }
 
 impl Completion {
@@ -227,6 +230,10 @@ impl Completion {
             self.progress.channel_bytes_received[i].saturating_add(bytes.len() as u64);
         self.progress.channel_max_message_bytes[i] =
             self.progress.channel_max_message_bytes[i].max(bytes.len());
+        if channel != 0 && self.discard_unavailable_media {
+            self.media_ingress.unavailable(channel, bytes.len());
+            return true;
+        }
         if self.messages.len() >= 16 || self.message_bytes + bytes.len() > 4 * MAX_CHANNEL_MESSAGE {
             self.fail_channel(FailureStage::InboundQueueFull, channel);
             return false;
@@ -332,6 +339,8 @@ impl Attempt {
             events: Default::default(),
             messages: Default::default(),
             message_bytes: 0,
+            discard_unavailable_media: config.is_some(),
+            media_ingress: Default::default(),
         }));
         let finished = Arc::new((Mutex::new(false), Condvar::new()));
         let shared = completion.clone();
@@ -417,6 +426,14 @@ impl Attempt {
             .control_ready
     }
 
+    pub fn media_ingress(&self) -> crate::media_ingress::Ingress {
+        self.completion
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .media_ingress
+            .clone()
+    }
+
     pub fn pop_binary(&self) -> Option<(u16, bool, Bytes)> {
         let mut state = self.completion.lock().unwrap_or_else(|e| e.into_inner());
         let message = state.messages.pop_front()?;
@@ -430,7 +447,7 @@ impl Attempt {
         "local_description_set":state.progress.local_description_set,"remote_description_set":state.progress.remote_description_set,"sync_received":state.progress.sync_received,"transport_states":state.progress.transport_states,"transport_states_before_close":state.progress.transport_states_before_close,"transport_states_at_failure":state.progress.transport_states_at_failure,
         "local_host_candidates":state.progress.local_host_candidates,"local_srflx_candidates":state.progress.local_srflx_candidates,
         "data_channel_only":true,"legacy_rsa_1024_enabled":state.progress.legacy_rsa_1024,"ice_servers_configured":state.progress.cloudflare_stun,"stun_provider":if state.progress.cloudflare_stun {Some("cloudflare")} else {None},"network_types":["udp4"],"connection_deadline_seconds":30,"connection_deadline_scope":"establishment-only","connection_established":state.progress.connection_established,
-        "channel_receive_api":"detached","channel_message_limit_bytes":MAX_CHANNEL_MESSAGE,
+        "channel_receive_api":"detached","unavailable_media_bypasses_control_queue":state.discard_unavailable_media,"queued_messages":state.messages.len(),"queued_message_bytes":state.message_bytes,"channel_message_limit_bytes":MAX_CHANNEL_MESSAGE,
         "channel_messages_received":state.progress.channel_messages_received,
         "channel_bytes_received":state.progress.channel_bytes_received,
         "channel_max_message_bytes":state.progress.channel_max_message_bytes,
@@ -984,6 +1001,8 @@ mod tests {
             events: VecDeque::new(),
             messages: VecDeque::new(),
             message_bytes: 0,
+            discard_unavailable_media: false,
+            media_ingress: Default::default(),
         }
     }
 
@@ -1009,6 +1028,41 @@ mod tests {
         ));
         assert_eq!(state.progress.failure_channel, Some(1));
         assert!(state.progress.failure_elapsed_ms.is_some());
+    }
+
+    #[test]
+    fn media_burst_without_ui_polling_preserves_control_and_constant_queue_memory() {
+        let mut state = empty_completion();
+        state.discard_unavailable_media = true;
+        assert!(state.receive(0, false, b"control"));
+        let payload = vec![0x5a; MAX_CHANNEL_MESSAGE];
+        for _ in 0..128 {
+            assert!(state.receive(1, false, &payload));
+            assert!(state.receive(2, false, b"audio"));
+        }
+        assert_eq!(state.messages.len(), 1);
+        assert_eq!(state.message_bytes, 7);
+        assert_eq!(state.messages[0].2.as_ref(), b"control");
+        assert_eq!(state.media_ingress.video_packets_received, 128);
+        assert_eq!(
+            state.media_ingress.video_bytes_received,
+            128 * MAX_CHANNEL_MESSAGE as u64
+        );
+        assert_eq!(state.media_ingress.audio_packets_received, 128);
+        assert_eq!(
+            state.media_ingress.packets_discarded_decoder_unavailable,
+            256
+        );
+        assert!(!state.progress.failed);
+        for _ in 0..15 {
+            assert!(state.receive(0, false, b"control"));
+        }
+        assert!(!state.receive(0, false, b"overflow"));
+        assert!(matches!(
+            state.progress.failure_stage,
+            Some(FailureStage::InboundQueueFull)
+        ));
+        assert_eq!(state.progress.failure_channel, Some(0));
     }
 
     #[test]

@@ -218,6 +218,7 @@ impl Backend {
 
     fn retain_attempt_diagnostic(&mut self) {
         if let Some(attempt) = self.native_attempt.take() {
+            self.media_ingress = attempt.media_ingress();
             self.attempt_diagnostic = Some(attempt.snapshot());
         }
     }
@@ -251,6 +252,7 @@ impl Backend {
 
     fn pump(&mut self) -> Result<()> {
         if let Some(attempt) = &self.native_attempt {
+            self.media_ingress = attempt.media_ingress();
             while self.events.len() < 32 {
                 let Some(event) = attempt.pop_event() else {
                     break;
@@ -269,8 +271,8 @@ impl Backend {
             .as_ref()
             .is_some_and(|a| a.control_ready())
         {
-            // Media packets do not enqueue UI events. Bound work even while
-            // their producer is faster than the UI's polling loop.
+            // Only control receipts enter this queue in configured sessions.
+            // Media is counted/discarded directly by the transport reader.
             for _ in 0..32 {
                 if self.events.len() >= 32 {
                     break;

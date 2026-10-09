@@ -746,6 +746,41 @@ fn control_exchange(
     if f32::from_le_bytes(memory.read(14416, 4)?.try_into().unwrap()) != 12.5 {
         bail!("encode latency mismatch");
     }
+    // Deliberately stop guest/UI polling while both media channels exceed the
+    // old shared queue's 16-message capacity. Control must survive the burst.
+    for _ in 0..64 {
+        for channel in &channels[1..=2] {
+            runtime.block_on(channel.send(&Bytes::from_static(b"synthetic-burst")))?;
+        }
+    }
+    let until = Instant::now() + Duration::from_secs(10);
+    loop {
+        let backend = store
+            .data()
+            .backend
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let attempt = backend
+            .native_attempt
+            .as_ref()
+            .context("burst attempt absent")?;
+        let ingress = attempt.media_ingress();
+        if ingress.video_packets_received == 68 && ingress.audio_packets_received == 65 {
+            anyhow::ensure!(
+                attempt.snapshot()["queued_messages"] == 0 && attempt.failure_stage().is_none(),
+                "media burst occupied control queue or failed"
+            );
+            break;
+        }
+        anyhow::ensure!(Instant::now() < until, "unpolled media burst not received");
+        drop(backend);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    metrics.call(&mut *store, ())?;
+    anyhow::ensure!(
+        status.call(&mut *store, ())? == 0,
+        "media burst disconnected session"
+    );
     // Cross the former worker lifetime bound before testing real encrypted
     // delivery through the guest import. No external account is used.
     std::thread::sleep(Duration::from_secs(31));
@@ -791,7 +826,7 @@ fn control_exchange(
         "unavailable mouse disrupted connection"
     );
     Ok(
-        serde_json::json!({"large_video_channel_messages_verified":true,"largest_video_message_verified":128 * 1024,"established_session_over_30_seconds_verified":true,"unavailable_media_ingress_verified":true,"media_metrics_import_continues_verified":true,"startup_configuration_verified":true,"wasm_input_packet_verified":true,"unsupported_absolute_mouse_rejected":true,"absolute_mouse_unavailable_nonfatal_verified":true,"status_events_verified":true,"rumble_event_verified":true,"clipboard_request_event_verified":true,"guest_self_metadata_verified":true,"host_mode_verified":true,"encode_latency_verified":true,"host_frames_verified":6,"synthetic_host":true,"real_parsec_host_compatible":false}),
+        serde_json::json!({"unpolled_media_burst_verified":true,"unpolled_media_burst_messages":128,"large_video_channel_messages_verified":true,"largest_video_message_verified":128 * 1024,"established_session_over_30_seconds_verified":true,"unavailable_media_ingress_verified":true,"media_metrics_import_continues_verified":true,"startup_configuration_verified":true,"wasm_input_packet_verified":true,"unsupported_absolute_mouse_rejected":true,"absolute_mouse_unavailable_nonfatal_verified":true,"status_events_verified":true,"rumble_event_verified":true,"clipboard_request_event_verified":true,"guest_self_metadata_verified":true,"host_mode_verified":true,"encode_latency_verified":true,"host_frames_verified":6,"synthetic_host":true,"real_parsec_host_compatible":false}),
     )
 }
 

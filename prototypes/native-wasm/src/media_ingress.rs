@@ -1,6 +1,6 @@
 //! Pinned Parsec channels: 1 video, 2 audio. No decoder or buffered sink.
 use serde::Serialize;
-#[derive(Default, Serialize)]
+#[derive(Clone, Default, Serialize)]
 pub struct Ingress {
     pub video_packets_received: u64,
     pub video_bytes_received: u64,
