@@ -33,3 +33,17 @@ Extract the package into a new folder and run `START-NETWORK-DIAGNOSTIC.cmd`.
 Log in, press Connect once, close normally and share `account-network-report.json`.
 This build improves diagnosis; it is not a connection fix and the same visible
 error is expected until the actual representation can be identified.
+
+## Verified build
+
+Source commit: `8ef1a244bdcebd75400d3f3aca04488cdd2a85f3`.
+[Windows CI run 37906524517](https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37906524517)
+passed formatting, strict Clippy, all 75 tests, the release build and native/WASM
+bridge probes. Both new diagnostic/privacy tests passed. The controlled session
+probe still connected two native peers, exchanged six binary messages and closed
+both cleanly. This is not evidence of a real Parsec host connection.
+
+The downloaded release executable passed the local offline original-core login
+fixture: nine synthetic input steps, 15 GPU frames and clean window release,
+with no startup error or rejected thread spawn. Networking was disabled; the
+default report omitted destination origins and fixture credentials.
