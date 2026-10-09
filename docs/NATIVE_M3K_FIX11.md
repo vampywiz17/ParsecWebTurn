@@ -51,3 +51,15 @@ lifetime remain unchanged. Real host connectivity and video decoding remain unve
 Extract the new test ZIP into a separate folder. Run
 `START-CLOUDFLARE-STUN-DIAGNOSTIC.cmd`, select Connect once, wait for the result,
 close normally and share `account-network-report.json`.
+
+## Verified build
+
+Source `c4161f7af139aee564a189227e85f59746606e99` passed
+[Windows CI 37914511997](https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37914511997):
+84 tests, formatting, Clippy with warnings denied, release compilation and all
+native/WASM bridge probes. The wrong-fingerprint regression test confirmed fresh
+failed DTLS/peer states with connected ICE and zero open native channels.
+The successful session still exchanged six binary messages and closed both peers.
+The local offline login audit completed nine synthetic steps, presented 15 GPU
+frames, closed cleanly and omitted the optional library diagnostic section.
+These results do not establish successful connection to the user's real host.
