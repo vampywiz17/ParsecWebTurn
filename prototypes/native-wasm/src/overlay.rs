@@ -26,6 +26,8 @@ pub struct Report {
     pub frames_published: u64,
     pub draw_calls_composited: u64,
     pub failure: Option<&'static str>,
+    pub failure_call: Option<String>,
+    pub failure_detail: Option<String>,
 }
 #[derive(Default)]
 pub struct Shared {
@@ -61,11 +63,15 @@ pub struct Capture {
     bytes: usize,
     frame: Frame,
     failed: bool,
+    failure_call: Option<String>,
+    failure_detail: Option<String>,
 }
 impl Capture {
     pub fn publish(&mut self, shared: &mut Shared) {
         if self.failed {
             shared.frame = Arc::default();
+            shared.report.failure_call = self.failure_call.clone();
+            shared.report.failure_detail = self.failure_detail.clone();
             shared.report.failure = Some("unsupported-or-invalid-pinned-gui-command");
             return;
         }
@@ -79,9 +85,14 @@ impl Capture {
         args: &[wasmtime::Val],
         result: Option<i32>,
     ) {
-        if !self.failed && self.record(name, m, args, result).is_err() {
-            self.failed = true;
-            self.frame = Frame::default();
+        if !self.failed {
+            if let Err(error) = self.record(name, m, args, result) {
+                self.failed = true;
+                self.failure_call = Some(name.into());
+                // These errors contain only fixed adapter categories, never UI strings/pixels.
+                self.failure_detail = Some(error.to_string());
+                self.frame = Frame::default();
+            }
         }
     }
     fn record(

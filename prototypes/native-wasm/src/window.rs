@@ -50,6 +50,7 @@ pub struct Window {
     pub stop: Arc<crate::lifecycle::StopSignal>,
     relative_mouse: AtomicBool,
     relative_pending: AtomicUsize,
+    pressed_buttons: AtomicUsize,
     pressed_keys: Mutex<std::collections::BTreeSet<&'static str>>,
     text_decoder: Mutex<crate::input::TextDecoder>,
     cursor_pending: Mutex<crate::cursor::Pending>,
@@ -108,6 +109,7 @@ impl Window {
             stop: Default::default(),
             relative_mouse: AtomicBool::new(false),
             relative_pending: AtomicUsize::new(0),
+            pressed_buttons: AtomicUsize::new(0),
             pressed_keys: Default::default(),
             text_decoder: Default::default(),
             cursor_pending: Default::default(),
@@ -205,6 +207,25 @@ impl Window {
         Some(viewport)
     }
 
+    unsafe fn mouse_button(&self, down: bool, button: i32, x: i32, y: i32) {
+        let bit = 1usize << button;
+        if down {
+            self.pressed_buttons.fetch_or(bit, Ordering::AcqRel);
+            SetCapture(self.handle());
+        } else if self.pressed_buttons.fetch_and(!bit, Ordering::AcqRel) & !bit == 0 {
+            ReleaseCapture();
+        }
+        self.push(Event::Button(down, button, x, y));
+    }
+    fn release_buttons(&self) {
+        let pressed = self.pressed_buttons.swap(0, Ordering::AcqRel);
+        for button in 0..5 {
+            if pressed & (1 << button) != 0 {
+                self.push(Event::Button(false, button, 0, 0));
+            }
+        }
+    }
+
     pub fn set_relative_mouse(&self, enabled: bool) {
         self.relative_pending
             .store(if enabled { 2 } else { 1 }, Ordering::Release);
@@ -282,6 +303,7 @@ impl Window {
         }
     }
     pub fn request_stop(&self) {
+        self.set_relative_mouse(false);
         self.closing.store(true, Ordering::Release);
         self.stop.stop();
     }
@@ -617,6 +639,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
             WM_SETFOCUS => s.push(Event::Focus(true)),
             WM_KILLFOCUS => {
                 s.apply_relative_mouse(false);
+                s.release_buttons();
                 let mut pressed = s.pressed_keys.lock().unwrap_or_else(|e| e.into_inner());
                 for code in std::mem::take(&mut *pressed) {
                     s.push(Event::Key(false, code, 0));
@@ -624,27 +647,24 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
                 s.push(Event::Focus(false));
                 *s.text_decoder.lock().unwrap_or_else(|e| e.into_inner()) = Default::default();
             }
+            WM_CAPTURECHANGED => s.release_buttons(),
             WM_MOUSEMOVE if !s.relative_mouse.load(Ordering::Acquire) => {
                 s.push(Event::Motion(x, y))
             }
-            WM_LBUTTONDOWN | WM_LBUTTONUP => {
-                s.push(Event::Button(message == WM_LBUTTONDOWN, 0, x, y))
-            }
+            WM_LBUTTONDOWN | WM_LBUTTONUP => s.mouse_button(message == WM_LBUTTONDOWN, 0, x, y),
             WM_MBUTTONDOWN | WM_MBUTTONUP => {
-                s.push(Event::Button(message == WM_MBUTTONDOWN, 1, x, y));
+                s.mouse_button(message == WM_MBUTTONDOWN, 1, x, y);
             }
             WM_XBUTTONDOWN | WM_XBUTTONUP => {
-                s.push(Event::Button(
+                s.mouse_button(
                     message == WM_XBUTTONDOWN,
                     if ((wp >> 16) & 0xffff) == 1 { 3 } else { 4 },
                     x,
                     y,
-                ));
+                );
                 return 1;
             }
-            WM_RBUTTONDOWN | WM_RBUTTONUP => {
-                s.push(Event::Button(message == WM_RBUTTONDOWN, 2, x, y))
-            }
+            WM_RBUTTONDOWN | WM_RBUTTONUP => s.mouse_button(message == WM_RBUTTONDOWN, 2, x, y),
             WM_KEYDOWN | WM_KEYUP | WM_SYSKEYDOWN | WM_SYSKEYUP => {
                 if let Some(code) =
                     crate::input::code(wp as u32, ((lp >> 16) & 0xFF) as u8, lp & (1 << 24) != 0)
