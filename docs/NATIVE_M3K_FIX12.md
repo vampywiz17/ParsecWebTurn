@@ -53,3 +53,15 @@ Extract into a separate folder, run `START-CLOUDFLARE-STUN-DIAGNOSTIC.cmd`, sele
 Connect once and close normally after the result. Share the resulting
 `account-network-report.json`. This is still a diagnostic build; real-host
 connectivity and decoding are not claimed to be fixed.
+
+## Verified build
+
+Source `2e4768487ffac9729eb2066a6bd835201a53af49` passed
+[Windows CI 37916269718](https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37916269718):
+86 tests, formatting, strict Clippy, release compilation and every bridge probe.
+The new actual DTLS diagnostic probe captured `verify-ecdsa-p256-sha256`,
+`certificate-fingerprint-mismatch` and downstream `dtls-not-established` events,
+with no external requests or real account and with both peers closed.
+Local offline login verification completed nine synthetic steps, presented
+15 GPU frames and released the window without a startup error. The default
+report omitted the optional transport diagnostic section.
