@@ -41,9 +41,8 @@ impl Ingress {
         };
         *packets = packets.saturating_add(1);
         *bytes = bytes.saturating_add(size as u64);
-        self.packets_discarded_decoder_unavailable = self
-            .packets_discarded_decoder_unavailable
-            .saturating_add(1);
+        self.packets_discarded_decoder_unavailable =
+            self.packets_discarded_decoder_unavailable.saturating_add(1);
     }
 }
 
@@ -127,8 +126,7 @@ impl Queue {
                     return self.depths(ingress);
                 };
                 if self.await_keyframe && !keyframe {
-                    ingress.video_frames_dropped =
-                        ingress.video_frames_dropped.saturating_add(1);
+                    ingress.video_frames_dropped = ingress.video_frames_dropped.saturating_add(1);
                     return self.depths(ingress);
                 }
                 if keyframe {
@@ -155,8 +153,7 @@ impl Queue {
             2 => {
                 if self.audio.len() == AUDIO_PACKETS {
                     self.audio.pop_front();
-                    ingress.audio_packets_dropped =
-                        ingress.audio_packets_dropped.saturating_add(1);
+                    ingress.audio_packets_dropped = ingress.audio_packets_dropped.saturating_add(1);
                 }
                 self.audio.push_back(Packet {
                     channel,

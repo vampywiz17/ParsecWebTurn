@@ -26,9 +26,9 @@ mod input;
 mod lifecycle;
 mod media_ingress;
 mod memory;
+mod native_media;
 mod network_audit;
 mod network_policy;
-mod native_media;
 mod platform;
 mod platform_probe;
 #[cfg(windows)]
