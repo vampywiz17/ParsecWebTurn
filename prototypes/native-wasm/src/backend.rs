@@ -284,6 +284,20 @@ impl Backend {
                 };
                 self.handle_message(channel, text, bytes)?;
             }
+            // Keep media independent from the lossless control queue. The
+            // bounded path is drained at the future decoder boundary; until a
+            // native decoder produces output, ingress remains explicitly
+            // reported as decoder-unavailable.
+            for _ in 0..32 {
+                let Some(packet) = self
+                    .native_attempt
+                    .as_ref()
+                    .and_then(|attempt| attempt.pop_media())
+                else {
+                    break;
+                };
+                drop(packet);
+            }
         }
         Ok(())
     }

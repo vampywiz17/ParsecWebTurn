@@ -17,6 +17,10 @@ pub struct Ingress {
     pub video_protocol_messages: u64,
     pub video_frames_queued: u64,
     pub audio_packets_queued: u64,
+    pub video_frames_dequeued: u64,
+    pub video_keyframes_dequeued: u64,
+    pub audio_packets_dequeued: u64,
+    pub media_bytes_dequeued: u64,
     pub video_frames_dropped: u64,
     pub audio_packets_dropped: u64,
     pub video_queue_depth: usize,
@@ -169,6 +173,26 @@ impl Queue {
 
     pub fn pop(&mut self, ingress: &mut Ingress) -> Option<Packet> {
         let packet = self.video.pop_front().or_else(|| self.audio.pop_front());
+        if let Some(packet) = &packet {
+            ingress.media_bytes_dequeued = ingress
+                .media_bytes_dequeued
+                .saturating_add(packet.bytes.len() as u64);
+            match packet.channel {
+                1 => {
+                    ingress.video_frames_dequeued =
+                        ingress.video_frames_dequeued.saturating_add(1);
+                    if packet.keyframe {
+                        ingress.video_keyframes_dequeued =
+                            ingress.video_keyframes_dequeued.saturating_add(1);
+                    }
+                }
+                2 => {
+                    ingress.audio_packets_dequeued =
+                        ingress.audio_packets_dequeued.saturating_add(1);
+                }
+                _ => {}
+            }
+        }
         self.depths(ingress);
         packet
     }
