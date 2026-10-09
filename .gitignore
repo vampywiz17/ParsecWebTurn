@@ -1,14 +1,12 @@
 # Sensitive local configuration
 settings.json
 ice.json
-extension/inject.js
-
-# Runtime profile and local data
-Profile/
 
 # Build output
 ParsecWebTurn.exe
 *.exe
+dist/
+**/target/
 
 # Editor/OS files
 .vscode/
@@ -16,22 +14,16 @@ ParsecWebTurn.exe
 .DS_Store
 Thumbs.db
 
-# Generated Windows resources
-src/rsrc.syso
-assets/parsec.svg
-
-# Launcher state, credentials and temporary writes
+# Previous-client local data: keep private when reusing an older checkout.
+# These are not part of the native dev source tree.
+Profile/
+SettingsProfile/
+WebView2Profile/
+extension/
 .launcher.lock
 .turn-cache.json
 .parsecwebturn-*.tmp
-dist/
 settings-cloudflare.png
 settings-custom.png
-
-# Rust / WebView2 output
-src-tauri/target/
-src-tauri/gen/
-SettingsProfile/
-WebView2Profile/
 tauri-settings.png
 tauri-stats.png

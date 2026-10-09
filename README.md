@@ -15,6 +15,9 @@ On Windows, you launch a single **ParsecWebTurn.exe**.
 > and current stable release use the earlier Tauri/WebView2 client.
 > ParsecWebTurn is not the official Parsec app and is not affiliated with Parsec or Unity.
 
+This branch contains only the native client. The earlier WebView2 source remains
+available on `main` and in the [v0.7.0 source](https://github.com/vampywiz17/ParsecWebTurn/tree/v0.7.0).
+
 ## Why this project?
 
 - **A portable client:** one executable, with no browser runtime to install.
