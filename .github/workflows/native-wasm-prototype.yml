@@ -115,6 +115,10 @@ jobs:
           $audit = Get-Content "$artifact/guest-audit.json" -Raw | ConvertFrom-Json
           if ($audit.guest_instances_verified -ne 2 -or $audit.intents_verified -ne 2 -or !$audit.shared_audit_verified -or !$audit.offline_failure_outputs_verified -or !$audit.request_redaction_verified -or !$audit.stdout_redaction_verified -or $audit.external_requests_enabled -or $audit.authentication_integrated) { throw 'Incorrect guest audit proof' }
           Copy-Item -LiteralPath prototypes/native-wasm/Cargo.lock -Destination "$artifact/Cargo.lock"
+          & $exe guest-platform-probe "$artifact/guest-platform.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Guest local desktop imports failed' }
+          $platform = Get-Content "$artifact/guest-platform.json" -Raw | ConvertFrom-Json
+          if (!$platform.unicode_clipboard_imports_verified -or !$platform.guest_owned_clipboard_buffers_verified -or !$platform.https_link_import_verified -or !$platform.unsafe_link_rejected_verified -or !$platform.alert_import_verified -or !$platform.forward_key_alias_verified -or !$platform.disabled_clipboard_verified -or $platform.real_clipboard_accessed -or $platform.browser_launched -or $platform.external_requests_enabled -or $platform.real_account_used) { throw 'Incorrect desktop import proof' }
       - uses: actions/upload-artifact@v4
         with:
           name: Native-WASM-prototype-win64

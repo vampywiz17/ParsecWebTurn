@@ -8,6 +8,7 @@ use windows_sys::Win32::{
     Foundation::*,
     Graphics::{Gdi::*, OpenGL::*},
     System::LibraryLoader::*,
+    UI::Input::KeyboardAndMouse::*,
     UI::WindowsAndMessaging::*,
 };
 
@@ -18,6 +19,8 @@ pub enum Event {
     Motion(i32, i32),
     Button(bool, i32, i32, i32),
     Text(u32),
+    Key(bool, &'static str, i32),
+    Scroll(i32, i32),
 }
 
 pub struct Window {
@@ -34,6 +37,8 @@ pub struct Window {
     pub live: bool,
     pub online: bool,
     pub stop: Arc<crate::lifecycle::StopSignal>,
+    pressed_keys: Mutex<std::collections::BTreeSet<&'static str>>,
+    text_decoder: Mutex<crate::input::TextDecoder>,
 }
 
 impl Window {
@@ -52,6 +57,8 @@ impl Window {
             live,
             online,
             stop: Default::default(),
+            pressed_keys: Default::default(),
+            text_decoder: Default::default(),
         });
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         let ui = state.clone();
@@ -205,7 +212,14 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
                 s.push(Event::Size(w, h));
             }
             WM_SETFOCUS => s.push(Event::Focus(true)),
-            WM_KILLFOCUS => s.push(Event::Focus(false)),
+            WM_KILLFOCUS => {
+                let mut pressed = s.pressed_keys.lock().unwrap_or_else(|e| e.into_inner());
+                for code in std::mem::take(&mut *pressed) {
+                    s.push(Event::Key(false, code, 0));
+                }
+                s.push(Event::Focus(false));
+                *s.text_decoder.lock().unwrap_or_else(|e| e.into_inner()) = Default::default();
+            }
             WM_MOUSEMOVE => s.push(Event::Motion(x, y)),
             WM_LBUTTONDOWN | WM_LBUTTONUP => {
                 s.push(Event::Button(message == WM_LBUTTONDOWN, 0, x, y))
@@ -213,7 +227,43 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
             WM_RBUTTONDOWN | WM_RBUTTONUP => {
                 s.push(Event::Button(message == WM_RBUTTONDOWN, 2, x, y))
             }
-            WM_CHAR => s.push(Event::Text(wp as u32)),
+            WM_KEYDOWN | WM_KEYUP | WM_SYSKEYDOWN | WM_SYSKEYUP => {
+                if let Some(code) =
+                    crate::input::code(wp as u32, ((lp >> 16) & 0xFF) as u8, lp & (1 << 24) != 0)
+                {
+                    let down = matches!(message, WM_KEYDOWN | WM_SYSKEYDOWN);
+                    let mut pressed = s.pressed_keys.lock().unwrap_or_else(|e| e.into_inner());
+                    if down {
+                        pressed.insert(code);
+                    } else {
+                        pressed.remove(code);
+                    }
+                    s.push(Event::Key(down, code, modifiers()));
+                }
+                // Keep system handling (notably Alt+F4) in DefWindowProc.
+                if matches!(message, WM_KEYDOWN | WM_KEYUP) {
+                    return 0;
+                }
+            }
+            WM_CHAR => {
+                if let Some(ch) = s
+                    .text_decoder
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push(wp as u16)
+                {
+                    s.push(Event::Text(ch as u32));
+                }
+                return 0;
+            }
+            WM_MOUSEWHEEL => {
+                s.push(Event::Scroll(0, -((wp >> 16) as i16 as i32)));
+                return 0;
+            }
+            WM_MOUSEHWHEEL => {
+                s.push(Event::Scroll((wp >> 16) as i16 as i32, 0));
+                return 0;
+            }
             WM_DESTROY => {
                 PostQuitMessage(0);
                 return 0;
@@ -222,4 +272,23 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
         }
     }
     DefWindowProcW(hwnd, message, wp, lp)
+}
+
+unsafe fn modifiers() -> i32 {
+    let mut mods = 0;
+    for (vk, bit) in [(VK_SHIFT, 1), (VK_CONTROL, 2), (VK_MENU, 4)] {
+        if GetKeyState(vk as i32) < 0 {
+            mods |= bit;
+        }
+    }
+    if GetKeyState(VK_LWIN as i32) < 0 || GetKeyState(VK_RWIN as i32) < 0 {
+        mods |= 8;
+    }
+    if GetKeyState(VK_CAPITAL as i32) & 1 != 0 {
+        mods |= 16;
+    }
+    if GetKeyState(VK_NUMLOCK as i32) & 1 != 0 {
+        mods |= 32;
+    }
+    mods
 }

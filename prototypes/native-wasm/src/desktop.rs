@@ -235,7 +235,6 @@ fn run_loop(store: &mut Store<HostState>, instance: &Instance, input: bool) -> R
                         *window.dimensions.lock().unwrap_or_else(|e| e.into_inner());
                     let x = width / 2;
                     let email_y = height / 2 - 34;
-                    let password_y = height / 2 + 52;
                     let login_y = height / 2 + 138;
                     let mut events = window.events.lock().unwrap_or_else(|e| e.into_inner());
                     match step {
@@ -250,11 +249,8 @@ fn run_loop(store: &mut Store<HostState>, instance: &Instance, input: bool) -> R
                                 .chars()
                                 .map(|c| Event::Text(c as u32)),
                         ),
-                        3 => {
-                            events.push_back(Event::Motion(x, password_y));
-                            events.push_back(Event::Button(true, 0, x, password_y));
-                        }
-                        4 => events.push_back(Event::Button(false, 0, x, password_y)),
+                        3 => events.push_back(Event::Key(true, "Tab", 0)),
+                        4 => events.push_back(Event::Key(false, "Tab", 0)),
                         5 => {
                             events.extend("fixture-password".chars().map(|c| Event::Text(c as u32)))
                         }
@@ -304,10 +300,20 @@ fn run_loop(store: &mut Store<HostState>, instance: &Instance, input: bool) -> R
                     Event::Button(down, button, x, y) => {
                         ("mty_window_button", vec![app, down as i32, button, x, y])
                     }
+                    Event::Scroll(x, y) => ("mty_window_scroll", vec![app, x, y]),
+                    Event::Key(down, code, mods) => {
+                        let Some(key) = store.data().key_codes.get(code).copied() else {
+                            continue;
+                        };
+                        ("mty_window_keyboard", vec![app, down as i32, key, 0, mods])
+                    }
                     Event::Text(code) => {
                         let Some(ch) = char::from_u32(code) else {
                             continue;
                         };
+                        if ch.is_control() {
+                            continue;
+                        }
                         let mut bytes = [0; 4];
                         ch.encode_utf8(&mut bytes);
                         (

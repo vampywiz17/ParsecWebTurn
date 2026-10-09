@@ -35,3 +35,31 @@ shaders, no rejected workers, and normal window release. The fixture's
 133-byte authentication POST was blocked by offline policy. No real account
 was used, and the report contains neither fixture email nor password.
 This regression verifies the login UI, not the authenticated post-login view.
+
+## User retest feedback — 2026-10-09
+
+The user reports that 0.13.2 logged in and remained open without crashing;
+other menu sections were not functional. This is user-confirmed progress,
+not evidence of host connection, decoded video or complete menu support.
+
+The supplied account-report snapshot records no main/worker errors, no
+unsupported-import boundary, no proc_exit code and no rejected thread spawns.
+It records six UI presentations and normal native-window release. Its network
+audit is empty and it contains no CryptoHash call, so this particular snapshot
+does not independently capture the reported authentication/post-login phase.
+Keep that distinction: the user confirms the visible result; the attached
+snapshot only confirms an error-free captured window lifecycle. The original
+report and any account data are not copied into the repository.
+
+The user then repeated login and supplied the report before restarting. This
+new snapshot captures two authentication POST intents followed by authorized
+API GETs and public-asset requests (11 allowed HTTPS intents in total). It
+also records two CryptoHash calls with no missing-import boundary, 233 GPU UI
+presentations, 1,615 draw calls, a peak of ten active workers, 13 completed
+workers, and zero rejected spawns. Main/worker error and exit-code fields are
+empty, and the native window was released on shutdown. Three waiting workers
+remain unfinished in the shutdown snapshot; this is not an all-workers-joined
+claim. The request audit records policy decisions, not HTTP response success.
+Together with the user's observed successful login, this verifies the reported
+post-login crash fixes for this run. Complete menus, host connection and remote
+video remain unverified. No account report or credential values are retained.

@@ -24,6 +24,8 @@ pub struct HostState {
     #[serde(skip)]
     pub websocket: std::sync::Arc<crate::websocket::Network>,
     #[serde(skip)]
+    pub platform: std::sync::Arc<crate::platform::Services>,
+    #[serde(skip)]
     pub started: Instant,
     pub calls: BTreeMap<String, u64>,
     pub boundary: Option<String>,
@@ -34,6 +36,8 @@ pub struct HostState {
     pub filesystem_requests: Vec<(String, String, i32)>,
     #[serde(skip)]
     pub keys: BTreeMap<i32, String>,
+    #[serde(skip)]
+    pub key_codes: BTreeMap<String, i32>,
     #[cfg(windows)]
     #[serde(skip)]
     pub window: Option<std::sync::Arc<crate::window::Window>>,
@@ -53,6 +57,7 @@ impl HostState {
             http: Default::default(),
             http_failure: None,
             websocket: Default::default(),
+            platform: Default::default(),
             started: Instant::now(),
             calls: BTreeMap::new(),
             boundary: None,
@@ -62,6 +67,7 @@ impl HostState {
             app_pointer: None,
             filesystem_requests: Vec::new(),
             keys: BTreeMap::new(),
+            key_codes: BTreeMap::new(),
             #[cfg(windows)]
             window: None,
             #[cfg(windows)]
@@ -92,6 +98,10 @@ pub fn implemented(module: &str, name: &str) -> bool {
                 | "web_set_title"
                 | "web_set_app"
                 | "MTY_GetRandomBytes"
+                | "MTY_HandleProtocol"
+                | "web_get_clipboard"
+                | "web_set_clipboard"
+                | "web_alert"
                 | "parsec_web_init"
                 | "parsec_web_new_attempt"
                 | "parsec_web_begin_p2p"
@@ -227,6 +237,35 @@ pub fn dispatch(
             return backend_call(&caller, name, args, results);
         }
         match name {
+            "MTY_HandleProtocol" => {
+                let url = m.string(ptr(args, 0)?, 16 * 1024 + 1)?;
+                caller.data().platform.open_url(&url);
+            }
+            "web_alert" => {
+                let title = m.string(ptr(args, 0)?, 1025)?;
+                let message = m.string(ptr(args, 1)?, 16 * 1024 + 1)?;
+                caller.data().platform.alert(&title, &message);
+            }
+            "web_set_clipboard" => {
+                let text = m.string(ptr(args, 0)?, crate::platform::MAX_TEXT + 1)?;
+                caller.data().platform.write_text(&text);
+            }
+            "web_get_clipboard" => {
+                let text = caller.data().platform.read_text();
+                let alloc = caller
+                    .get_export("mty_system_alloc")
+                    .and_then(|e| e.into_func())
+                    .context("guest allocator missing")?
+                    .typed::<(i32, i32), i32>(&caller)?;
+                let capacity = text.len() + 1;
+                let p = alloc.call(&mut caller, (capacity as i32, 1))? as u32;
+                if p == 0 {
+                    result(results, 0);
+                } else {
+                    m.c_string(p, capacity, &text)?;
+                    result(results, p as i32);
+                }
+            }
             "flock" => result(results, 0),
             "web_get_hostname" => {
                 // Reuse the guest allocator rather than inventing an address.
@@ -243,8 +282,12 @@ pub fn dispatch(
             }
             "web_platform" => m.c_string(ptr(args, 0)?, ptr(args, 1)? as usize, "Win32")?,
             "web_set_key" => {
+                let code = m.string(ptr(args, 1)?, 128)?;
+                caller
+                    .data_mut()
+                    .key_codes
+                    .insert(code.clone(), int(args, 2)?);
                 if int(args, 0)? != 0 {
-                    let code = m.string(ptr(args, 1)?, 128)?;
                     caller.data_mut().keys.insert(int(args, 2)?, code);
                 }
             }

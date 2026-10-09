@@ -5,6 +5,23 @@ Parsec WASM binary and supplies host imports in Rust using Wasmtime. It does not
 link Tauri, WebView2, a JavaScript engine, or a browser. The production app is
 not changed and this directory is not part of its build or releases.
 
+## Local desktop stage M3k / 0.14.0
+
+The user confirmed login and the Computers host list in M3j. This stage adds
+local UI keyboard press/release (including Tab, Shift+Tab, Enter, Escape and
+Ctrl+C/V/X), modifier and focus-loss handling, and vertical/horizontal wheel
+events. Unicode text still comes from the active Windows keyboard layout.
+Only account mode enables the Windows text clipboard, default-browser HTTPS
+links and native informational dialogs. Other modes remain isolated from the
+real clipboard and browser. These services do not implement remote clipboard
+forwarding or decoded host video.
+
+`guest-platform-probe [report.json]` exercises the real WASM imports with a
+synthetic desktop: Unicode copy/paste ownership, secure link validation,
+informational dialogs, forward-only key aliases and disabled-service fallback.
+The offline `login-audit` now reaches the password field with Tab rather than
+a second mouse click. Read [M3k details](../../docs/NATIVE_M3K.md).
+
 ## Original UI network audit stage M3i
 
 `window-audit <parsecd.wasm> [report.json]` runs the original native UI offline

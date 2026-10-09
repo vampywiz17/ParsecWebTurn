@@ -12,10 +12,15 @@ mod graphics;
 mod host;
 mod http;
 mod http_probe;
+mod input;
 mod lifecycle;
 mod memory;
 mod network_audit;
 mod network_policy;
+mod platform;
+mod platform_probe;
+#[cfg(windows)]
+mod platform_windows;
 mod poll;
 mod session_probe;
 mod signaling;
@@ -98,6 +103,7 @@ struct Report {
     thread_runtime: Option<threads::ThreadSummary>,
     native_backend: Option<serde_json::Value>,
     network_audit: Option<network_audit::Snapshot>,
+    local_platform: Option<platform::Snapshot>,
     synthetic_login_steps: usize,
     #[cfg(windows)]
     graphics: Option<graphics::GraphicsReport>,
@@ -149,12 +155,15 @@ fn run() -> Result<()> {
             | "guest-tls-probe"
             | "guest-audit-probe"
             | "guest-thread-probe"
+            | "guest-platform-probe"
     ) {
         let path = args.next().map(PathBuf::from);
         if args.next().is_some() {
             bail!("too many arguments");
         }
-        let report = if mode == "guest-thread-probe" {
+        let report = if mode == "guest-platform-probe" {
+            platform_probe::probe()?
+        } else if mode == "guest-thread-probe" {
             thread_probe::probe()?
         } else if mode == "guest-audit-probe" {
             audit_probe::probe()?
@@ -212,6 +221,7 @@ fn run() -> Result<()> {
                   parsec-native-wasm guest-tls-probe [report.json]\n\
                   parsec-native-wasm guest-audit-probe [report.json]\n\
                   parsec-native-wasm guest-thread-probe [report.json]\n\
+                  parsec-native-wasm guest-platform-probe [report.json]\n\
                   parsec-native-wasm window-audit <parsecd.wasm> [report.json]\n\
                   parsec-native-wasm login-audit <parsecd.wasm> [report.json]\n\
                   parsec-native-wasm account <parsecd.wasm> [report.json]\n\
@@ -302,6 +312,7 @@ fn run() -> Result<()> {
         thread_runtime: None,
         native_backend: None,
         network_audit: None,
+        local_platform: None,
         synthetic_login_steps: 0,
         #[cfg(windows)]
         graphics: None,
@@ -419,6 +430,7 @@ fn run() -> Result<()> {
             report.threads = runtime.snapshot();
             report.thread_runtime = Some(runtime.summary());
             report.network_audit = Some(runtime.audit.snapshot());
+            report.local_platform = Some(runtime.platform.snapshot());
         }
         report.native_backend = Some(serde_json::to_value(
             &*store
@@ -508,6 +520,10 @@ fn instantiate_base_with_window(
     let runtime = {
         let mut runtime = threads::ThreadRuntime { window, ..runtime };
         if runtime.window.as_ref().is_some_and(|w| w.online) {
+            let owner = runtime.window.as_ref().unwrap().handle() as usize;
+            runtime.platform = Arc::new(platform::Services::new(Box::new(
+                platform_windows::NativeDesktop(owner),
+            )));
             runtime.http = Arc::new(http::Network::account(runtime.audit.clone()));
             runtime.websocket = Arc::new(websocket::Network::account(runtime.audit.clone()));
         }
@@ -528,6 +544,7 @@ fn instantiate_with_runtime(
     host.backend = runtime.backend.clone();
     host.http = runtime.http.clone();
     host.websocket = runtime.websocket.clone();
+    host.platform = runtime.platform.clone();
     host.started = runtime.started;
     #[cfg(windows)]
     {
