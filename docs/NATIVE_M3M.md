@@ -67,3 +67,24 @@ References:
 - https://learn.microsoft.com/en-us/windows/win32/medfound/supporting-direct3d-11-video-decoding-in-media-foundation
 - https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11videocontext-videoprocessorblt
 - https://learn.microsoft.com/en-us/windows/win32/api/dxgi1_2/nf-dxgi1_2-idxgifactory2-createswapchainforhwnd
+
+Validation (2026-10-09): source aa5255bada5ebf7d1c0a5b5cfa6171c02aaa6ab6,
+Windows CI https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37974516265
+passed formatting, 117 tests, strict Clippy, release build and all original
+WASM / loopback transport / fingerprint-rejection / platform probes. The headless
+runner reported ID3D11VideoDevice unavailable (0x80004002), with bounded failure,
+finished worker and released window/resources; this is not GPU presentation proof.
+
+The downloaded release executable was tested locally on AMD Radeon 780M Graphics:
+eight 1920x1080 H.264 High-profile pictures (one IDR, seven delta) submitted,
+decoded and presented; NV12 GPU-surface output and synthetic backbuffer pixel
+variation verified, no dropped frames/failure, low-latency request accepted,
+window and GPU resources released. The original offline login UI also completed
+all nine synthetic steps with native accelerated UI frames, no network requests,
+no guest failure, report privacy checks and wake-lock cleanup preserved. Local
+proofs are included in the test package, not committed as user/network captures.
+
+Real-host presentation, sustained frame pacing, resize/fullscreen during live
+video, reconnect and Intel driver behavior still require the user's next test.
+This milestone implements the first video path; it does not claim a fully
+functional replacement client or measured low CPU/GPU utilization.
