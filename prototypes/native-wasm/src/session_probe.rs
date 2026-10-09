@@ -162,6 +162,11 @@ fn probe_mode(mode: Mode, legacy_rsa_1024: bool) -> Result<serde_json::Value> {
     let mut settings = SettingEngine::default();
     settings.set_network_types(vec![NetworkType::Udp4]);
     settings.set_data_channel_only(true);
+    settings.set_sctp_max_message_size_can_send(
+        webrtc::api::setting_engine::SctpMaxMessageSize::Bounded(
+            crate::attempt::MAX_CHANNEL_MESSAGE as u32,
+        ),
+    );
     if !control {
         // Synthetic peer only. Exercise the reported padded-ufrag shape with
         // real STUN authentication, DTLS and SCTP, without editing SDP tokens.
@@ -699,6 +704,46 @@ fn control_exchange(
         drop(backend);
         std::thread::sleep(Duration::from_millis(10));
     }
+    // Real encrypted SCTP messages at and above the old callback boundary.
+    // They are synthetic payloads, not claimed decodable Parsec video.
+    let mut expected_bytes = b"synthetic-media-not-a-real-frame".len() as u64;
+    for (index, size) in [
+        65_535,
+        65_536,
+        128 * 1024,
+        512 * 1024,
+        crate::attempt::MAX_CHANNEL_MESSAGE,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let payload = Bytes::from(vec![0x5a; size]);
+        runtime.block_on(async {
+            tokio::time::timeout(Duration::from_secs(10), channels[1].send(&payload)).await
+        })??;
+        expected_bytes += size as u64;
+        let until = Instant::now() + Duration::from_secs(10);
+        loop {
+            metrics.call(&mut *store, ())?;
+            let backend = store
+                .data()
+                .backend
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            if backend.media_ingress.video_packets_received == index as u64 + 2 {
+                anyhow::ensure!(
+                    backend.media_ingress.video_bytes_received == expected_bytes
+                        && backend.status == Some(0),
+                    "large media message truncated or disconnected"
+                );
+                break;
+            }
+            anyhow::ensure!(Instant::now() < until, "large media message not received");
+            drop(backend);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     instance
         .get_typed_func::<(), ()>(&mut *store, "metrics")?
         .call(&mut *store, ())?;
@@ -750,7 +795,7 @@ fn control_exchange(
         "unavailable mouse disrupted connection"
     );
     Ok(
-        serde_json::json!({"established_session_over_30_seconds_verified":true,"unavailable_media_ingress_verified":true,"media_metrics_import_continues_verified":true,"startup_configuration_verified":true,"wasm_input_packet_verified":true,"unsupported_absolute_mouse_rejected":true,"absolute_mouse_unavailable_nonfatal_verified":true,"status_events_verified":true,"rumble_event_verified":true,"clipboard_request_event_verified":true,"guest_self_metadata_verified":true,"host_mode_verified":true,"encode_latency_verified":true,"host_frames_verified":6,"synthetic_host":true,"real_parsec_host_compatible":false}),
+        serde_json::json!({"large_video_channel_messages_verified":true,"largest_video_message_verified":crate::attempt::MAX_CHANNEL_MESSAGE,"established_session_over_30_seconds_verified":true,"unavailable_media_ingress_verified":true,"media_metrics_import_continues_verified":true,"startup_configuration_verified":true,"wasm_input_packet_verified":true,"unsupported_absolute_mouse_rejected":true,"absolute_mouse_unavailable_nonfatal_verified":true,"status_events_verified":true,"rumble_event_verified":true,"clipboard_request_event_verified":true,"guest_self_metadata_verified":true,"host_mode_verified":true,"encode_latency_verified":true,"host_frames_verified":6,"synthetic_host":true,"real_parsec_host_compatible":false}),
     )
 }
 

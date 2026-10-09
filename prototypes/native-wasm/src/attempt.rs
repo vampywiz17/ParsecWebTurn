@@ -15,6 +15,7 @@ use std::{
     },
     time::Duration,
 };
+pub(crate) const MAX_CHANNEL_MESSAGE: usize = 1024 * 1024;
 static ACTIVE_WORKERS: AtomicUsize = AtomicUsize::new(0);
 struct Permit;
 impl Drop for Permit {
@@ -50,6 +51,12 @@ pub struct Output {
 pub enum FailureStage {
     Worker,
     InboundChannel,
+    DataChannelDetach,
+    DataChannelRead,
+    DataChannelClosed,
+    InboundQueueFull,
+    ControlStartup,
+    ChannelSend,
     InboundControl,
     IceTransport,
     DtlsTransport,
@@ -155,6 +162,13 @@ struct Progress {
     local_srflx_candidates: usize,
     remote_candidates: usize,
     messages_received: usize,
+    channel_messages_received: [u64; 3],
+    channel_bytes_received: [u64; 3],
+    channel_max_message_bytes: [usize; 3],
+    failure_channel: Option<u16>,
+    failure_elapsed_ms: Option<u64>,
+    last_send_elapsed_ms: Option<u64>,
+    last_sent_control_kind: Option<u8>,
     control_ready: bool,
     local_description_set: bool,
     remote_description_set: bool,
@@ -167,12 +181,91 @@ struct Progress {
 }
 
 struct Completion {
+    started_at: std::time::Instant,
+    closing: bool,
     output: Option<Output>,
     progress: Progress,
     cancelled: bool,
     events: VecDeque<serde_json::Value>,
     messages: VecDeque<(u16, bool, Bytes)>,
     message_bytes: usize,
+}
+
+impl Completion {
+    fn elapsed_ms(&self) -> u64 {
+        u64::try_from(self.started_at.elapsed().as_millis()).unwrap_or(u64::MAX)
+    }
+
+    fn fail_channel(&mut self, stage: FailureStage, channel: u16) {
+        if self.cancelled || self.closing {
+            return;
+        }
+        self.progress.failed = true;
+        if self.progress.failure_stage.is_none() {
+            self.progress.failure_stage = Some(stage);
+            self.progress.failure_channel = Some(channel);
+            self.progress.failure_elapsed_ms = Some(self.elapsed_ms());
+        }
+        if channel < 3 {
+            self.progress.open_mask &= !(1 << channel);
+        }
+    }
+
+    fn receive(&mut self, channel: u16, text: bool, bytes: &[u8]) -> bool {
+        if self.cancelled || self.closing || self.progress.failed {
+            return false;
+        }
+        if channel > 2 || text || bytes.len() > MAX_CHANNEL_MESSAGE {
+            self.fail_channel(FailureStage::InboundChannel, channel);
+            return false;
+        }
+        let i = usize::from(channel);
+        self.progress.messages_received = self.progress.messages_received.saturating_add(1);
+        self.progress.channel_messages_received[i] =
+            self.progress.channel_messages_received[i].saturating_add(1);
+        self.progress.channel_bytes_received[i] =
+            self.progress.channel_bytes_received[i].saturating_add(bytes.len() as u64);
+        self.progress.channel_max_message_bytes[i] =
+            self.progress.channel_max_message_bytes[i].max(bytes.len());
+        if self.messages.len() >= 16 || self.message_bytes + bytes.len() > 4 * MAX_CHANNEL_MESSAGE {
+            self.fail_channel(FailureStage::InboundQueueFull, channel);
+            return false;
+        }
+        self.message_bytes += bytes.len();
+        self.messages
+            .push_back((channel, text, Bytes::copy_from_slice(bytes)));
+        true
+    }
+}
+
+// Public detached API preserves complete SCTP messages beyond the library's
+// fixed 65,535-byte callback buffer. All three channels use the same API.
+async fn read_channel(
+    shared: Arc<Mutex<Completion>>,
+    wake: Arc<Condvar>,
+    id: u16,
+    channel: Arc<webrtc::data::data_channel::DataChannel>,
+) {
+    let mut buffer = vec![0; MAX_CHANNEL_MESSAGE];
+    loop {
+        let read = channel.read_data_channel(&mut buffer).await;
+        let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
+        let keep_reading = match read {
+            Ok((0, _)) => {
+                state.fail_channel(FailureStage::DataChannelClosed, id);
+                false
+            }
+            Ok((len, text)) => state.receive(id, text, &buffer[..len]),
+            Err(_) => {
+                state.fail_channel(FailureStage::DataChannelRead, id);
+                false
+            }
+        };
+        wake.notify_all();
+        if !keep_reading {
+            break;
+        }
+    }
 }
 
 enum Command {
@@ -227,6 +320,8 @@ impl Attempt {
         let permit = Permit;
         let (tx, rx) = mpsc::sync_channel(64);
         let completion = Arc::new(Mutex::new(Completion {
+            started_at: std::time::Instant::now(),
+            closing: false,
             output: Some(output),
             progress: Progress {
                 cloudflare_stun,
@@ -260,14 +355,16 @@ impl Attempt {
                 let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
                 if result.is_err() {
                     state.progress.failed = true;
-                    state.progress.failure_stage = Some(
-                        result
-                            .as_ref()
-                            .err()
-                            .and_then(|e| e.downcast_ref::<FailureStage>())
-                            .copied()
-                            .unwrap_or(FailureStage::Worker),
-                    );
+                    if state.progress.failure_elapsed_ms.is_none() {
+                        state.progress.failure_elapsed_ms = Some(state.elapsed_ms());
+                    }
+                    let stage = result
+                        .as_ref()
+                        .err()
+                        .and_then(|e| e.downcast_ref::<FailureStage>())
+                        .copied()
+                        .unwrap_or(FailureStage::Worker);
+                    state.progress.failure_stage.get_or_insert(stage);
                     if let Some(output) = state.output.take() {
                         let _ = output.finish(None);
                     }
@@ -332,7 +429,13 @@ impl Attempt {
         serde_json::json!({ "offer_ready": state.progress.ready, "mid":state.progress.mid, "peer_closed": state.progress.closed, "failed": state.progress.failed, "failure_stage": state.progress.failure_stage, "negotiated_channels": state.progress.channels, "channels_open": state.progress.open_mask.count_ones(), "transport_connected":state.progress.transport_connected, "local_candidates":state.progress.local_candidates, "remote_candidates":state.progress.remote_candidates, "messages_received":state.progress.messages_received, "worker_finished": *self.finished.0.lock().unwrap_or_else(|e| e.into_inner()), "host_connected": false,
         "local_description_set":state.progress.local_description_set,"remote_description_set":state.progress.remote_description_set,"sync_received":state.progress.sync_received,"transport_states":state.progress.transport_states,"transport_states_before_close":state.progress.transport_states_before_close,"transport_states_at_failure":state.progress.transport_states_at_failure,
         "local_host_candidates":state.progress.local_host_candidates,"local_srflx_candidates":state.progress.local_srflx_candidates,
-        "data_channel_only":true,"legacy_rsa_1024_enabled":state.progress.legacy_rsa_1024,"ice_servers_configured":state.progress.cloudflare_stun,"stun_provider":if state.progress.cloudflare_stun {Some("cloudflare")} else {None},"network_types":["udp4"],"connection_deadline_seconds":30,"connection_deadline_scope":"establishment-only","connection_established":state.progress.connection_established })
+        "data_channel_only":true,"legacy_rsa_1024_enabled":state.progress.legacy_rsa_1024,"ice_servers_configured":state.progress.cloudflare_stun,"stun_provider":if state.progress.cloudflare_stun {Some("cloudflare")} else {None},"network_types":["udp4"],"connection_deadline_seconds":30,"connection_deadline_scope":"establishment-only","connection_established":state.progress.connection_established,
+        "channel_receive_api":"detached","channel_message_limit_bytes":MAX_CHANNEL_MESSAGE,
+        "channel_messages_received":state.progress.channel_messages_received,
+        "channel_bytes_received":state.progress.channel_bytes_received,
+        "channel_max_message_bytes":state.progress.channel_max_message_bytes,
+        "failure_channel":state.progress.failure_channel,"failure_elapsed_ms":state.progress.failure_elapsed_ms,
+        "last_send_elapsed_ms":state.progress.last_send_elapsed_ms,"last_sent_control_kind":state.progress.last_sent_control_kind })
     }
 
     fn command(&self, id: &str, command: Command) -> Result<()> {
@@ -361,7 +464,7 @@ impl Attempt {
         self.command(id, Command::Sync)
     }
     pub fn send_binary(&self, channel: u16, payload: Bytes) -> Result<()> {
-        if channel > 2 || payload.len() > 1024 * 1024 {
+        if channel > 2 || payload.len() > MAX_CHANNEL_MESSAGE {
             bail!("invalid native channel/message size");
         }
         self.command(&self.id, Command::Send(channel, payload))
@@ -454,6 +557,10 @@ fn worker(
     let mut settings = SettingEngine::default();
     settings.set_network_types(vec![NetworkType::Udp4]);
     settings.set_data_channel_only(true);
+    settings.detach_data_channels();
+    settings.set_sctp_max_message_size_can_send(
+        webrtc::api::setting_engine::SctpMaxMessageSize::Bounded(MAX_CHANNEL_MESSAGE as u32),
+    );
     // Explicit legacy key-size compatibility only. Signature and SDP fingerprint
     // verification remain enabled; insecure hashes are not enabled.
     settings.allow_insecure_verification_algorithm(legacy_rsa_1024);
@@ -539,56 +646,43 @@ fn worker(
                     .await?;
                 let callback_state = shared.clone();
                 let callback_wake = wake.clone();
-                let startup_config = if id == 0 {config.clone()} else {None};
-                let weak_channel=Arc::downgrade(&channel);
-                let attempt_id=control_attempt_id.clone();
+                let startup_config = if id == 0 { config.clone() } else { None };
+                let weak_channel = Arc::downgrade(&channel);
+                let attempt_id = control_attempt_id.clone();
                 channel.on_open(Box::new(move || {
                     let shared = callback_state.clone();
                     let wake = callback_wake.clone();
                     Box::pin(async move {
-                        if shared.lock().unwrap_or_else(|e|e.into_inner()).cancelled {return;}
-                        if let Some(config)=startup_config {
-                            let sent=async {
-                                let channel=weak_channel.upgrade().context("control channel released")?;
-                                tokio::time::timeout(Duration::from_secs(5),channel.send(&config.startup()?)).await??;
-                                Ok::<(),anyhow::Error>(())
+                        if shared.lock().unwrap_or_else(|e| e.into_inner()).cancelled { return; }
+                        let Some(channel) = weak_channel.upgrade() else { return; };
+                        let detached = match channel.detach().await {
+                            Ok(detached) => detached,
+                            Err(_) => {
+                                shared.lock().unwrap_or_else(|e| e.into_inner()).fail_channel(FailureStage::DataChannelDetach, id);
+                                wake.notify_all();
+                                return;
+                            }
+                        };
+                        tokio::spawn(read_channel(shared.clone(), wake.clone(), id, detached));
+                        if let Some(config) = startup_config {
+                            let sent = async {
+                                tokio::time::timeout(Duration::from_secs(5), channel.send(&config.startup()?)).await??;
+                                Ok::<(), anyhow::Error>(())
                             }.await;
-                            let mut state=shared.lock().unwrap_or_else(|e|e.into_inner());
-                            if state.cancelled {return;}
-                            if sent.is_err() || state.events.len()>=64 {state.progress.failed=true;}
-                            else {
-                                state.progress.control_ready=true;
+                            let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
+                            if state.cancelled || state.closing { return; }
+                            if sent.is_err() || state.events.len() >= 64 {
+                                state.fail_channel(FailureStage::ControlStartup, id);
+                            } else {
+                                state.progress.control_ready = true;
+                                state.progress.last_send_elapsed_ms = Some(state.elapsed_ms());
+                                state.progress.last_sent_control_kind = Some(11);
                                 state.events.push_back(serde_json::json!({"type":7,"status":0,"state":4,"attemptID":attempt_id,"duration":0}));
                             }
                         }
                         let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
-                        if !state.cancelled {
+                        if !state.cancelled && !state.closing && !state.progress.failed {
                             state.progress.open_mask |= 1 << id;
-                        }
-                        wake.notify_all();
-                    })
-                }));
-                let callback_state = shared.clone();
-                let callback_wake = wake.clone();
-                channel.on_message(Box::new(move |message| {
-                    let shared = callback_state.clone();
-                    let wake = callback_wake.clone();
-                    Box::pin(async move {
-                        let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
-                        if state.cancelled {
-                            return;
-                        }
-                        if message.data.len() > 1024 * 1024
-                            || state.messages.len() >= 16
-                            || state.message_bytes + message.data.len() > 4 * 1024 * 1024
-                        {
-                            state.progress.failed = true;
-                        } else {
-                            state.progress.messages_received += 1;
-                            state.message_bytes += message.data.len();
-                            state
-                                .messages
-                                .push_back((id, message.is_string, message.data));
                         }
                         wake.notify_all();
                     })
@@ -674,10 +768,13 @@ fn worker(
                                 });
                             }
                         }
-                        Command::Send(channel,payload)=>{
-                            let channel=&channels[usize::from(channel)];
-                            if channel.ready_state()!=RTCDataChannelState::Open { bail!("native data channel is not open"); }
-                            channel.send(&payload).await?;
+                        Command::Send(id,payload)=>{
+                            let channel=&channels[usize::from(id)];
+                            if channel.ready_state()!=RTCDataChannelState::Open { return Err(FailureStage::ChannelSend.into()); }
+                            channel.send(&payload).await.context(FailureStage::ChannelSend)?;
+                            let mut state=shared.lock().unwrap_or_else(|e|e.into_inner());
+                            state.progress.last_send_elapsed_ms=Some(state.elapsed_ms());
+                            state.progress.last_sent_control_kind=if id==0 { payload.get(12).copied() } else { None };
                         }
                     }
                     while let Some(candidate)=gate.pop_ready() { peer.add_ice_candidate(candidate).await.context(FailureStage::AddIceCandidate)?; shared.lock().unwrap_or_else(|e|e.into_inner()).progress.remote_candidates+=1; }
@@ -692,7 +789,18 @@ fn worker(
         let states = transport_states(&peer);
         let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
         state.progress.transport_states = states.clone();
+        if let Err(error) = &outcome {
+            let stage = error
+                .downcast_ref::<FailureStage>()
+                .copied()
+                .unwrap_or(FailureStage::Worker);
+            state.progress.failure_stage.get_or_insert(stage);
+            if state.progress.failure_elapsed_ms.is_none() {
+                state.progress.failure_elapsed_ms = Some(state.elapsed_ms());
+            }
+        }
         state.progress.transport_states_before_close = states;
+        state.closing = true;
     }
     let closed = runtime
         .block_on(async { tokio::time::timeout(Duration::from_secs(2), peer.close()).await });
@@ -866,6 +974,85 @@ mod tests {
     use super::*;
     use crate::signaling::Credentials;
     use wasmtime::{Config, Engine, MemoryType, SharedMemory};
+    fn empty_completion() -> Completion {
+        Completion {
+            started_at: std::time::Instant::now(),
+            closing: false,
+            output: None,
+            progress: Progress::default(),
+            cancelled: false,
+            events: VecDeque::new(),
+            messages: VecDeque::new(),
+            message_bytes: 0,
+        }
+    }
+
+    #[test]
+    fn complete_large_messages_are_bounded_and_counted_before_queue_overflow() {
+        let mut state = empty_completion();
+        let payload = vec![0x5a; MAX_CHANNEL_MESSAGE];
+        for _ in 0..4 {
+            assert!(state.receive(1, false, &payload));
+        }
+        assert_eq!(state.message_bytes, 4 * MAX_CHANNEL_MESSAGE);
+        assert_eq!(state.messages[0].2.as_ref(), payload.as_slice());
+        assert!(!state.receive(1, false, &payload));
+        assert_eq!(state.messages.len(), 4);
+        assert_eq!(state.progress.channel_messages_received, [0, 5, 0]);
+        assert_eq!(
+            state.progress.channel_max_message_bytes[1],
+            MAX_CHANNEL_MESSAGE
+        );
+        assert!(matches!(
+            state.progress.failure_stage,
+            Some(FailureStage::InboundQueueFull)
+        ));
+        assert_eq!(state.progress.failure_channel, Some(1));
+        assert!(state.progress.failure_elapsed_ms.is_some());
+    }
+
+    #[test]
+    fn invalid_or_oversized_channel_messages_never_enter_queue() {
+        for (channel, text, size) in [
+            (1, false, MAX_CHANNEL_MESSAGE + 1),
+            (1, true, 16),
+            (99, false, 1),
+        ] {
+            let mut state = empty_completion();
+            assert!(!state.receive(channel, text, &vec![0; size]));
+            assert!(state.messages.is_empty());
+            assert_eq!(state.message_bytes, 0);
+            assert!(matches!(
+                state.progress.failure_stage,
+                Some(FailureStage::InboundChannel)
+            ));
+            assert_eq!(state.progress.failure_channel, Some(channel));
+        }
+    }
+
+    #[test]
+    fn first_channel_failure_survives_later_errors_and_local_shutdown_is_not_failure() {
+        let mut state = empty_completion();
+        state.fail_channel(FailureStage::DataChannelRead, 1);
+        let first = state.progress.failure_elapsed_ms;
+        state.fail_channel(FailureStage::DataChannelClosed, 0);
+        assert!(matches!(
+            state.progress.failure_stage,
+            Some(FailureStage::DataChannelRead)
+        ));
+        assert_eq!(state.progress.failure_channel, Some(1));
+        assert_eq!(state.progress.failure_elapsed_ms, first);
+        for cancelled in [true, false] {
+            let mut state = empty_completion();
+            state.cancelled = cancelled;
+            state.closing = !cancelled;
+            state.fail_channel(FailureStage::DataChannelRead, 1);
+            assert!(!state.progress.failed);
+            assert!(!state.receive(1, false, b"private-video-payload"));
+            assert!(state.messages.is_empty());
+        }
+    }
+
     fn memory() -> GuestMemory {
         let mut config = Config::new();
         config.wasm_threads(true);

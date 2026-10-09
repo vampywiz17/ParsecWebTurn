@@ -1,3 +1,13 @@
+## M3k-fix21 / 0.14.21
+
+All native channels now use the documented detached receive API with a bounded
+1 MiB message buffer, replacing the library callback's 65,535-byte buffer.
+Encrypted fixture video-channel messages up to 1 MiB exercise the guest metrics
+path. Reports retain per-channel receive counts/sizes and fixed channel failure
+stages with attempt-relative failure/last-send times. See
+[fix21 notes](../../docs/NATIVE_M3K_FIX21.md). Real-host video reception still
+requires user validation; media decoding and presentation remain unavailable.
+
 ## M3k-fix19
 
 Valid absolute mouse input without presented video is now reported as unavailable without terminating the WASM loop or sending guessed coordinates. Reports include the prototype version. See [fix19 notes](../../docs/NATIVE_M3K_FIX19.md). Video/audio decoding remains unavailable.
