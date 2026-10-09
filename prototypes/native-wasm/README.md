@@ -1,5 +1,10 @@
 # Native Rust / Parsec WASM prototype
 
+M3k-fix5 / 0.14.5 adds the exact `wss://kessel-ws-v2.parsec.app` signaling
+origin observed in the user's opt-in diagnostic. This fixes that specific local
+policy rejection; a real host connection remains to be verified. See
+[M3k-fix5](../../docs/NATIVE_M3K_FIX5.md).
+
 For a rejected signaling destination, `account-network-audit <parsecd.wasm>
 [report.json]` explicitly adds destination origins (scheme, hostname and port)
 to the account network report. It omits URL credentials, paths and query tokens;

@@ -618,6 +618,7 @@ mod tests {
         server.join().unwrap();
         let account = Network::account(Default::default());
         assert!(account.allowed(&reqwest::Url::parse("wss://kessel-ws.parsec.app").unwrap()));
+        assert!(account.allowed(&reqwest::Url::parse("wss://kessel-ws-v2.parsec.app").unwrap()));
         account.shutdown();
         assert!(account
             .connect(

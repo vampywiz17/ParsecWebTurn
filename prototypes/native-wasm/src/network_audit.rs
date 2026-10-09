@@ -116,7 +116,7 @@ impl Audit {
     ) {
         let service = match url.host_str() {
             Some("kessel-api.parsec.app") => Service::Api,
-            Some("kessel-ws.parsec.app") => Service::Signaling,
+            Some("kessel-ws.parsec.app" | "kessel-ws-v2.parsec.app") => Service::Signaling,
             Some("public.parsec.app" | "web.parsec.app") => Service::PublicAssets,
             Some("parsecusercontent.com") => Service::ImageAssets,
             Some("127.0.0.1") => Service::Loopback,

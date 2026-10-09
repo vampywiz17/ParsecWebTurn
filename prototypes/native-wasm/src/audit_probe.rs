@@ -50,7 +50,7 @@ pub fn probe() -> Result<serde_json::Value> {
     memory.c_string(
         16,
         1000,
-        "wss://kessel-ws.parsec.app/secret-sentinel?token=secret-sentinel",
+        "wss://kessel-ws-v2.parsec.app/secret-sentinel?token=secret-sentinel",
     )?;
     if ws.call(&mut second, ())? != 0 || memory.read(408, 2)? != vec![0; 2] {
         bail!("Offline WebSocket contract failed");

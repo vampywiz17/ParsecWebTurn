@@ -6,13 +6,14 @@ use reqwest::Url;
 pub struct Policy(Vec<(String, String, u16)>);
 impl Policy {
     /// Exact origins from the pinned core audit, never a wildcard Parsec domain.
-    /// Signaling must still be confirmed against a real account by the user.
+    /// The v2 signaling origin was confirmed by the opt-in account diagnostic.
     pub fn account() -> Self {
         Self::secure(&[
             "https://kessel-api.parsec.app",
             "https://public.parsec.app",
             "https://parsecusercontent.com",
             "wss://kessel-ws.parsec.app",
+            "wss://kessel-ws-v2.parsec.app",
         ])
         .expect("fixed secure origins")
     }
@@ -64,6 +65,30 @@ impl Policy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn account_accepts_verified_v2_signaling_origin_only_over_default_tls_port() {
+        let policy = Policy::account();
+        for text in [
+            "wss://kessel-ws-v2.parsec.app/?fixture=1",
+            "wss://kessel-ws-v2.parsec.app:443/",
+            "wss://kessel-ws.parsec.app/",
+        ] {
+            let url = Url::parse(text).unwrap();
+            assert!(policy.allows(&url));
+            assert!(!Policy::default().allows(&url));
+        }
+        for text in [
+            "ws://kessel-ws-v2.parsec.app/",
+            "https://kessel-ws-v2.parsec.app/",
+            "wss://kessel-ws-v2.parsec.app:444/",
+            "wss://kessel-ws-v2.parsec.app.evil.invalid/",
+            "wss://another.parsec.app/",
+            "wss://user:password@kessel-ws-v2.parsec.app/",
+            "wss://kessel-ws-v2.parsec.app/#fragment",
+        ] {
+            assert!(!policy.allows(&Url::parse(text).unwrap()));
+        }
+    }
     #[test]
     fn secure_origins_are_exact_and_never_downgrade() {
         let policy = Policy::secure(&[
