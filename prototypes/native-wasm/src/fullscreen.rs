@@ -211,6 +211,40 @@ fn guest_probe() -> Result<()> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn inactive_optional_capabilities_can_be_released_but_not_acquired() {
+        let mut config = wasmtime::Config::new();
+        config
+            .wasm_threads(true)
+            .consume_fuel(true)
+            .epoch_interruption(true);
+        let engine = wasmtime::Engine::new(&config).unwrap();
+        for name in ["web_set_pointer_lock", "web_set_kb_grab", "web_wake_lock"] {
+            let module = wasmtime::Module::new(
+                &engine,
+                format!(
+                    r#"(module
+                (import "env" "memory" (memory 1 1 shared))
+                (import "env" "{name}" (func $set (param i32)))
+                (func (export "set") (param i32) local.get 0 call $set))"#
+                ),
+            )
+            .unwrap();
+            let (mut store, instance) = crate::instantiate(&engine, &module).unwrap();
+            let set = instance
+                .get_typed_func::<i32, ()>(&mut store, "set")
+                .unwrap();
+            for _ in 0..3 {
+                set.call(&mut store, 0).unwrap();
+            }
+            assert!(store.data().boundary.is_none());
+            assert!(set.call(&mut store, 1).is_err());
+            assert_eq!(
+                store.data().boundary.as_deref(),
+                Some(format!("env::{name}").as_str())
+            );
+        }
+    }
+    #[test]
     fn native_fullscreen_restores_geometry_and_guest_import_does_not_trap() {
         let report = super::probe().unwrap();
         assert_eq!(report["native_geometry_restored"], true);

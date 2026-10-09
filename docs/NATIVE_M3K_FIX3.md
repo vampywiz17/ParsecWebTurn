@@ -27,3 +27,10 @@ monitor bounds, border removal, exact style/geometry restoration and repeated
 requests. A controlled WASM guest exercises the real boolean import. This probe
 does not prove original-guest event feedback or real-host connectivity, and uses
 no account, network or clipboard. Remote video/audio playback remains incomplete.
+
+The adjacent teardown calls to disable pointer lock, keyboard grab and wake lock
+are also accepted idempotently. These capabilities cannot currently be acquired
+by the prototype, so there are no owned resources to release. Requests to enable
+them remain explicitly unsupported; inspection labels them `inactive-release-only`
+rather than claiming full support. A guest test covers repeated release and
+rejected acquisition for all three imports.

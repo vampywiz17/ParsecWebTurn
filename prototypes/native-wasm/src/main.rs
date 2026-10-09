@@ -303,6 +303,13 @@ fn run() -> Result<()> {
                     "native-window"
                 } else if host::disabled_web_stub(i.module(), i.name()) {
                     "unavailable-as-in-web-client"
+                } else if i.module() == "env"
+                    && matches!(
+                        i.name(),
+                        "web_set_pointer_lock" | "web_set_kb_grab" | "web_wake_lock"
+                    )
+                {
+                    "inactive-release-only"
                 } else if host::implemented(i.module(), i.name()) {
                     "implemented"
                 } else {
