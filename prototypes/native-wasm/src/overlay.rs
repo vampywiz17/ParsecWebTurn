@@ -50,6 +50,12 @@ pub struct Capture {
     attributes: BTreeMap<u32, Attribute>,
     semantics: BTreeMap<u32, BTreeMap<String, u32>>,
     uniforms: BTreeMap<u32, u32>,
+    sampler_uniforms: BTreeMap<u32, u32>,
+    samplers: BTreeMap<u32, u32>,
+    bindings: BTreeMap<u32, u32>,
+    internal_formats: BTreeMap<u32, u32>,
+    unpack_row_length: usize,
+    unpack_alignment: usize,
     projections: BTreeMap<u32, [f32; 16]>,
     array: u32,
     elements: u32,
@@ -146,26 +152,47 @@ impl Capture {
                     }
                 }
             }
-            "glActiveTexture" => self.active_texture = u(0)?.saturating_sub(glow::TEXTURE0),
-            "glBindTexture" if self.active_texture == 0 && u(0)? == glow::TEXTURE_2D => {
-                self.texture = u(1)?
+            "glActiveTexture" => {
+                self.active_texture = u(0)?
+                    .checked_sub(glow::TEXTURE0)
+                    .context("invalid UI texture unit")?;
+                if self.active_texture > 31 {
+                    bail!("UI texture unit limit");
+                }
+                self.texture = self
+                    .bindings
+                    .get(&self.active_texture)
+                    .copied()
+                    .unwrap_or(0);
             }
-            "glTexImage2D"
-                if self.active_texture == 0 && u(0)? == glow::TEXTURE_2D && i(1)? == 0 =>
-            {
-                if u(6)? != glow::RGBA || u(7)? != glow::UNSIGNED_BYTE {
-                    return Ok(());
+            "glBindTexture" if u(0)? == glow::TEXTURE_2D => {
+                self.texture = u(1)?;
+                self.bindings.insert(self.active_texture, self.texture);
+            }
+            "glPixelStorei" if u(0)? == glow::UNPACK_ROW_LENGTH => {
+                self.unpack_row_length = usize::try_from(i(1)?)?
+            }
+            "glPixelStorei" if u(0)? == glow::UNPACK_ALIGNMENT => {
+                self.unpack_alignment = usize::try_from(i(1)?)?
+            }
+            "glTexImage2D" if u(0)? == glow::TEXTURE_2D && i(1)? == 0 => {
+                if u(7)? != glow::UNSIGNED_BYTE {
+                    bail!("UI texture pixel type");
                 }
                 let (w, h) = (u(3)?, u(4)?);
-                if w == 0 || h == 0 || w > 4096 || h > 4096 {
-                    bail!("UI texture size");
+                if w == 0 || h == 0 {
+                    self.textures.remove(&self.texture);
+                    return Ok(());
                 }
-                let len = w as usize * h as usize * 4;
-                let rgba = if u(8)? == 0 {
-                    vec![0; len]
-                } else {
-                    m.read(u(8)?, len)?
-                };
+                let mut rgba = read_pixels(
+                    m,
+                    (w, h),
+                    u(6)?,
+                    u(8)?,
+                    (self.unpack_row_length, self.unpack_alignment),
+                )?;
+                apply_internal_format(&mut rgba, u(2)?)?;
+                self.internal_formats.insert(self.texture, u(2)?);
                 self.version += 1;
                 self.textures.insert(
                     self.texture,
@@ -180,20 +207,25 @@ impl Capture {
                     bail!("UI textures exceed limit");
                 }
             }
-            "glTexSubImage2D"
-                if self.active_texture == 0 && self.textures.contains_key(&self.texture) =>
-            {
-                if i(1)? != 0 || u(6)? != glow::RGBA || u(7)? != glow::UNSIGNED_BYTE {
-                    bail!("UI texture update format");
+            "glTexSubImage2D" if self.textures.contains_key(&self.texture) => {
+                if i(1)? != 0 || u(7)? != glow::UNSIGNED_BYTE {
+                    bail!("UI texture update type");
                 }
                 let (x, y, w, h) = (u(2)?, u(3)?, u(4)?, u(5)?);
+                let mut data = read_pixels(
+                    m,
+                    (w, h),
+                    u(6)?,
+                    u(8)?,
+                    (self.unpack_row_length, self.unpack_alignment),
+                )?;
+                apply_internal_format(&mut data, self.internal_formats[&self.texture])?;
                 let t = self.textures.get_mut(&self.texture).unwrap();
                 if x.checked_add(w).is_none_or(|r| r > t.width)
                     || y.checked_add(h).is_none_or(|b| b > t.height)
                 {
                     bail!("UI texture update bounds");
                 }
-                let data = m.read(u(8)?, w as usize * h as usize * 4)?;
                 self.version += 1;
                 let t = Arc::make_mut(t);
                 t.version = self.version;
@@ -209,9 +241,18 @@ impl Capture {
                     .or_default()
                     .insert(m.string(u(1)?, 256)?, result.unwrap() as u32);
             }
-            "glGetUniformLocation" if m.string(u(1)?, 256)? == "proj" => {
-                self.uniforms
-                    .insert(result.context("UI uniform handle")? as u32, u(0)?);
+            "glGetUniformLocation" => {
+                let uniform = m.string(u(1)?, 256)?;
+                let handle = result.context("UI uniform handle")? as u32;
+                if uniform == "proj" {
+                    self.uniforms.insert(handle, u(0)?);
+                }
+                if uniform == "tex" {
+                    self.sampler_uniforms.insert(handle, u(0)?);
+                }
+            }
+            "glUniform1i" if self.sampler_uniforms.contains_key(&u(0)?) => {
+                self.samplers.insert(self.sampler_uniforms[&u(0)?], u(1)?);
             }
             "glUseProgram" => self.program = u(0)?,
             "glUniformMatrix4fv" if self.uniforms.contains_key(&u(0)?) => {
@@ -326,9 +367,11 @@ impl Capture {
             .projections
             .get(&self.program)
             .context("UI projection missing")?;
+        let unit = self.samplers.get(&self.program).copied().unwrap_or(0);
+        let texture_id = self.bindings.get(&unit).copied().unwrap_or(0);
         let texture = self
             .textures
-            .get(&self.texture)
+            .get(&texture_id)
             .context("UI texture missing")?
             .clone();
         let mut vertices = Vec::with_capacity(count * 20);
@@ -431,6 +474,7 @@ mod tests {
                 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
             ],
         );
+        capture.bindings.insert(0, 3);
         capture.textures.insert(
             3,
             Arc::new(Texture {
@@ -486,4 +530,94 @@ mod tests {
         assert!(shared.frame.batches.is_empty());
         assert!(shared.report.failure.is_some());
     }
+}
+
+fn read_pixels(
+    m: &GuestMemory,
+    size: (u32, u32),
+    format: u32,
+    pointer: u32,
+    storage: (usize, usize),
+) -> Result<Vec<u8>> {
+    let (w, h) = (size.0 as usize, size.1 as usize);
+    if w > 4096 || h > 4096 {
+        bail!("UI texture size");
+    }
+    let channels = match format {
+        glow::RGBA => 4,
+        glow::RGB => 3,
+        glow::RG | glow::LUMINANCE_ALPHA => 2,
+        glow::RED | glow::ALPHA | glow::LUMINANCE => 1,
+        _ => bail!("UI texture pixel format"),
+    };
+    let row_width = if storage.0 == 0 { w } else { storage.0 };
+    let alignment = if storage.1 == 0 { 4 } else { storage.1 };
+    if row_width < w || row_width > 4096 || ![1, 2, 4, 8].contains(&alignment) {
+        bail!("UI texture pixel storage");
+    }
+    let stride = (row_width * channels).div_ceil(alignment) * alignment;
+    let count = if h == 0 {
+        0
+    } else {
+        stride * (h - 1) + w * channels
+    };
+    if count > 16 * 1024 * 1024 {
+        bail!("UI upload byte limit");
+    }
+    let data = if pointer == 0 {
+        vec![0; count]
+    } else {
+        m.read(pointer, count)?
+    };
+    let mut rgba = Vec::with_capacity(w * h * 4);
+    for row in 0..h {
+        for x in 0..w {
+            let pixel = &data[row * stride + x * channels..row * stride + (x + 1) * channels];
+            let color = match format {
+                glow::RGBA => [pixel[0], pixel[1], pixel[2], pixel[3]],
+                glow::RGB => [pixel[0], pixel[1], pixel[2], 255],
+                glow::RED => [pixel[0], 0, 0, 255],
+                glow::RG => [pixel[0], pixel[1], 0, 255],
+                glow::ALPHA => [255, 255, 255, pixel[0]],
+                glow::LUMINANCE => [pixel[0], pixel[0], pixel[0], 255],
+                glow::LUMINANCE_ALPHA => [pixel[0], pixel[0], pixel[0], pixel[1]],
+                _ => unreachable!(),
+            };
+            rgba.extend_from_slice(&color);
+        }
+    }
+    Ok(rgba)
+}
+fn apply_internal_format(pixels: &mut [u8], format: u32) -> Result<()> {
+    for p in pixels.as_chunks_mut::<4>().0 {
+        match format {
+            glow::RGBA | glow::RGBA8 => {}
+            glow::RGB | glow::RGB8 => p[3] = 255,
+            glow::ALPHA => {
+                p[0] = 255;
+                p[1] = 255;
+                p[2] = 255;
+            }
+            glow::LUMINANCE => {
+                p[1] = p[0];
+                p[2] = p[0];
+                p[3] = 255;
+            }
+            glow::LUMINANCE_ALPHA => {
+                p[1] = p[0];
+                p[2] = p[0];
+            }
+            glow::RED | glow::R8 => {
+                p[1] = 0;
+                p[2] = 0;
+                p[3] = 255;
+            }
+            glow::RG | glow::RG8 => {
+                p[2] = 0;
+                p[3] = 255;
+            }
+            _ => bail!("UI texture internal format"),
+        }
+    }
+    Ok(())
 }
