@@ -9,10 +9,12 @@ on:
       - '.github/workflows/native-wasm-prototype.yml'
       - 'scripts/*native.ps1'
       - 'VERSION'
+      - '.cargo/config.toml'
   pull_request:
     branches: [dev, main]
     paths:
       - 'src-native/**'
+      - '.cargo/config.toml'
       - 'scripts/*native.ps1'
       - '.github/workflows/native-wasm-prototype.yml'
 
@@ -42,7 +44,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: Native-client-debug-win64
-          path: src-native/target/debug/parsec-web-turn.exe
+          path: src-native/target/x86_64-pc-windows-msvc/debug/parsec-web-turn.exe
           if-no-files-found: error
       - name: Validate and build independent Rust host
         shell: pwsh
@@ -59,7 +61,7 @@ jobs:
           cargo build --locked --release --manifest-path src-native/Cargo.toml
           if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
           New-Item -ItemType Directory -Path src-native/artifacts -Force | Out-Null
-          Copy-Item src-native/target/release/parsec-web-turn.exe src-native/artifacts/ParsecWebTurn.exe
+          Copy-Item src-native/target/x86_64-pc-windows-msvc/release/parsec-web-turn.exe src-native/artifacts/ParsecWebTurn.exe
           ./scripts/package-native.ps1
           & ./src-native/artifacts/ParsecWebTurn.exe --version
           if ($LASTEXITCODE -ne 0) { throw "Normal executable failed" }
@@ -83,7 +85,7 @@ jobs:
           ./src-native/fetch-core.ps1
           $artifact = 'src-native/artifacts'
           New-Item -ItemType Directory -Path $artifact -Force | Out-Null
-          $exe = 'src-native/target/release/parsec-web-turn.exe'
+          $exe = 'src-native/target/x86_64-pc-windows-msvc/release/parsec-web-turn.exe'
           $core = 'src-native/vendor/parsecd.wasm'
           foreach ($mode in @('inspect', 'allocator', 'boot')) {
             & $exe $mode $core "$artifact/$mode.json" | Out-Null

@@ -1,4 +1,4 @@
-# ParsecWebTurn — native Rust client
+# ParsecWebTurn â€” native Rust client
 
 The `dev` branch now runs the pinned Parsec WebAssembly core in a native Rust
 application. It does not require Edge, WebView2, Tauri, a browser extension,
@@ -78,7 +78,9 @@ cargo build --locked --release --manifest-path src-native/Cargo.toml
 ```
 
 `VERSION` and `src-native/Cargo.toml` must match. The normal build embeds the pinned
-core and icon, uses a Windows GUI entry point, and strips symbols with thin LTO.
+core and icon, uses a Windows GUI entry point, and strips symbols with thin LTO. The Windows C runtime is statically linked
+using Rust's documented `crt-static` target feature; no separate Visual C++
+runtime installer is needed.
 `--version` prints the app/core versions. There is no update downloader or executable
 replacement logic in the native client.
 
