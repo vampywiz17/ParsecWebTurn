@@ -149,6 +149,7 @@ struct Progress {
     mid: String,
     open_mask: u8,
     transport_connected: bool,
+    connection_established: bool,
     local_candidates: usize,
     local_host_candidates: usize,
     local_srflx_candidates: usize,
@@ -331,7 +332,7 @@ impl Attempt {
         serde_json::json!({ "offer_ready": state.progress.ready, "mid":state.progress.mid, "peer_closed": state.progress.closed, "failed": state.progress.failed, "failure_stage": state.progress.failure_stage, "negotiated_channels": state.progress.channels, "channels_open": state.progress.open_mask.count_ones(), "transport_connected":state.progress.transport_connected, "local_candidates":state.progress.local_candidates, "remote_candidates":state.progress.remote_candidates, "messages_received":state.progress.messages_received, "worker_finished": *self.finished.0.lock().unwrap_or_else(|e| e.into_inner()), "host_connected": false,
         "local_description_set":state.progress.local_description_set,"remote_description_set":state.progress.remote_description_set,"sync_received":state.progress.sync_received,"transport_states":state.progress.transport_states,"transport_states_before_close":state.progress.transport_states_before_close,"transport_states_at_failure":state.progress.transport_states_at_failure,
         "local_host_candidates":state.progress.local_host_candidates,"local_srflx_candidates":state.progress.local_srflx_candidates,
-        "data_channel_only":true,"legacy_rsa_1024_enabled":state.progress.legacy_rsa_1024,"ice_servers_configured":state.progress.cloudflare_stun,"stun_provider":if state.progress.cloudflare_stun {Some("cloudflare")} else {None},"network_types":["udp4"],"connection_deadline_seconds":30 })
+        "data_channel_only":true,"legacy_rsa_1024_enabled":state.progress.legacy_rsa_1024,"ice_servers_configured":state.progress.cloudflare_stun,"stun_provider":if state.progress.cloudflare_stun {Some("cloudflare")} else {None},"network_types":["udp4"],"connection_deadline_seconds":30,"connection_deadline_scope":"establishment-only","connection_established":state.progress.connection_established })
     }
 
     fn command(&self, id: &str, command: Command) -> Result<()> {
@@ -621,22 +622,21 @@ fn worker(
         if !ready {
             bail!("native offer publication failed or was cancelled");
         }
-        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        let mut deadline = EstablishmentDeadline::new(std::time::Instant::now());
         loop {
             // Read only documented native state enums; never serialize SDP,
             // addresses, certificates or underlying error strings.
-            shared
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .progress
-                .transport_states = transport_states(&peer);
-            if std::time::Instant::now() >= deadline {
-                return Err(FailureStage::Deadline.into());
-            }
-            let command = match commands.recv_timeout(
-                Duration::from_millis(250)
-                    .min(deadline.saturating_duration_since(std::time::Instant::now())),
-            ) {
+            let wait = {
+                let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
+                state.progress.transport_states = transport_states(&peer);
+                state.progress.connection_established |=
+                    state.progress.transport_connected && state.progress.open_mask == 7;
+                deadline.poll_wait(
+                    std::time::Instant::now(),
+                    state.progress.connection_established,
+                )?
+            };
+            let command = match commands.recv_timeout(wait) {
                 Ok(command) => command,
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
                 Err(mpsc::RecvTimeoutError::Timeout) => continue,
@@ -724,6 +724,28 @@ fn worker(
     outcome
 }
 
+// This timer bounds initial ICE/DTLS/SCTP establishment, never session lifetime.
+// Once established, a transient disconnect must not resurrect the old timer.
+struct EstablishmentDeadline(Option<std::time::Instant>);
+
+impl EstablishmentDeadline {
+    fn new(now: std::time::Instant) -> Self {
+        Self(Some(now + Duration::from_secs(30)))
+    }
+
+    fn poll_wait(&mut self, now: std::time::Instant, established: bool) -> Result<Duration> {
+        if established {
+            self.0 = None;
+        }
+        let poll = Duration::from_millis(250);
+        match self.0 {
+            Some(deadline) if now >= deadline => Err(FailureStage::Deadline.into()),
+            Some(deadline) => Ok(poll.min(deadline.saturating_duration_since(now))),
+            None => Ok(poll),
+        }
+    }
+}
+
 fn transport_states(peer: &webrtc::peer_connection::RTCPeerConnection) -> serde_json::Value {
     serde_json::json!({
         "peer":peer.connection_state().to_string(),
@@ -767,6 +789,47 @@ fn ice_configuration(cloudflare_stun: bool) -> RTCConfiguration {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn establishment_timeout_still_bounds_an_unconnected_attempt() {
+        let start = std::time::Instant::now();
+        let mut deadline = super::EstablishmentDeadline::new(start);
+        assert_eq!(
+            deadline.poll_wait(start, false).unwrap(),
+            std::time::Duration::from_millis(250)
+        );
+        assert_eq!(
+            deadline
+                .poll_wait(start + std::time::Duration::from_millis(29999), false)
+                .unwrap(),
+            std::time::Duration::from_millis(1)
+        );
+        let error = deadline
+            .poll_wait(start + std::time::Duration::from_secs(30), false)
+            .unwrap_err();
+        assert!(matches!(
+            error.downcast_ref::<super::FailureStage>(),
+            Some(super::FailureStage::Deadline)
+        ));
+    }
+
+    #[test]
+    fn established_session_has_no_lifetime_timeout_or_busy_polling() {
+        let start = std::time::Instant::now();
+        let mut deadline = super::EstablishmentDeadline::new(start);
+        deadline
+            .poll_wait(start + std::time::Duration::from_secs(5), true)
+            .unwrap();
+        // A later transient disconnect must not re-arm the initial deadline.
+        for seconds in [30, 60, 3600, 86400] {
+            assert_eq!(
+                deadline
+                    .poll_wait(start + std::time::Duration::from_secs(seconds), false)
+                    .unwrap(),
+                std::time::Duration::from_millis(250)
+            );
+        }
+    }
+
     #[test]
     fn failure_stage_uses_current_transport_states() {
         use webrtc::dtls_transport::dtls_transport_state::RTCDtlsTransportState as D;

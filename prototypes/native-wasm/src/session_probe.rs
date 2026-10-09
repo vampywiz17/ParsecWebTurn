@@ -705,6 +705,14 @@ fn control_exchange(
     if f32::from_le_bytes(memory.read(14416, 4)?.try_into().unwrap()) != 12.5 {
         bail!("encode latency mismatch");
     }
+    // Cross the former worker lifetime bound before testing real encrypted
+    // delivery through the guest import. No external account is used.
+    std::thread::sleep(Duration::from_secs(31));
+    metrics.call(&mut *store, ())?;
+    anyhow::ensure!(
+        status.call(&mut *store, ())? == 0,
+        "established session expired after 30 seconds"
+    );
     let send = instance.get_typed_func::<(), ()>(&mut *store, "send")?;
     memory.c_string(8192, 1024, r#"{"type":1,"code":65,"mod":2,"pressed":true}"#)?;
     send.call(&mut *store, ())?;
@@ -742,7 +750,7 @@ fn control_exchange(
         "unavailable mouse disrupted connection"
     );
     Ok(
-        serde_json::json!({"unavailable_media_ingress_verified":true,"media_metrics_import_continues_verified":true,"startup_configuration_verified":true,"wasm_input_packet_verified":true,"unsupported_absolute_mouse_rejected":true,"absolute_mouse_unavailable_nonfatal_verified":true,"status_events_verified":true,"rumble_event_verified":true,"clipboard_request_event_verified":true,"guest_self_metadata_verified":true,"host_mode_verified":true,"encode_latency_verified":true,"host_frames_verified":6,"synthetic_host":true,"real_parsec_host_compatible":false}),
+        serde_json::json!({"established_session_over_30_seconds_verified":true,"unavailable_media_ingress_verified":true,"media_metrics_import_continues_verified":true,"startup_configuration_verified":true,"wasm_input_packet_verified":true,"unsupported_absolute_mouse_rejected":true,"absolute_mouse_unavailable_nonfatal_verified":true,"status_events_verified":true,"rumble_event_verified":true,"clipboard_request_event_verified":true,"guest_self_metadata_verified":true,"host_mode_verified":true,"encode_latency_verified":true,"host_frames_verified":6,"synthetic_host":true,"real_parsec_host_compatible":false}),
     )
 }
 
