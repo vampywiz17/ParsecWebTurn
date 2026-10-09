@@ -19,8 +19,9 @@ forwarding or decoded host video.
 `guest-platform-probe [report.json]` exercises the real WASM imports with a
 synthetic desktop: Unicode copy/paste ownership, secure link validation,
 informational dialogs, forward-only key aliases and disabled-service fallback.
-The offline `login-audit` now reaches the password field with Tab rather than
-a second mouse click. Read [M3k details](../../docs/NATIVE_M3K.md).
+The offline `login-audit` now reaches the password field with Tab and pastes
+the fixed fixture password with Ctrl+V from a synthetic clipboard in nine
+input stages. Read [M3k details](../../docs/NATIVE_M3K.md).
 
 ## Original UI network audit stage M3i
 

@@ -230,7 +230,7 @@ fn run_loop(store: &mut Store<HostState>, instance: &Instance, input: bool) -> R
                     .as_ref()
                     .map_or(0, |g| g.frames_presented);
                 let step = window.script_steps.load(Ordering::Acquire);
-                if frames >= 2 && frames > script_frame && step < 8 {
+                if frames >= 2 && frames > script_frame && step < 9 {
                     let (width, height) =
                         *window.dimensions.lock().unwrap_or_else(|e| e.into_inner());
                     let x = width / 2;
@@ -252,13 +252,18 @@ fn run_loop(store: &mut Store<HostState>, instance: &Instance, input: bool) -> R
                         3 => events.push_back(Event::Key(true, "Tab", 0)),
                         4 => events.push_back(Event::Key(false, "Tab", 0)),
                         5 => {
-                            events.extend("fixture-password".chars().map(|c| Event::Text(c as u32)))
+                            events.push_back(Event::Key(true, "ControlLeft", 2));
+                            events.push_back(Event::Key(true, "KeyV", 2));
                         }
                         6 => {
+                            events.push_back(Event::Key(false, "KeyV", 2));
+                            events.push_back(Event::Key(false, "ControlLeft", 0));
+                        }
+                        7 => {
                             events.push_back(Event::Motion(x, login_y));
                             events.push_back(Event::Button(true, 0, x, login_y));
                         }
-                        7 => events.push_back(Event::Button(false, 0, x, login_y)),
+                        8 => events.push_back(Event::Button(false, 0, x, login_y)),
                         _ => unreachable!(),
                     }
                     script_frame = frames;

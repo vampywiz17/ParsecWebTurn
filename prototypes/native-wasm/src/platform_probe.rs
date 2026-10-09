@@ -5,6 +5,9 @@ use std::sync::{Arc, Mutex};
 use wasmtime::{Config, Engine, Module};
 
 struct Fixture(Mutex<String>);
+pub fn offline_login_fixture() -> crate::platform::Services {
+    crate::platform::Services::new(Box::new(Fixture(Mutex::new("fixture-password".into()))))
+}
 impl crate::platform::Desktop for Fixture {
     fn read_text(&self) -> Option<String> {
         Some(self.0.lock().unwrap().clone())

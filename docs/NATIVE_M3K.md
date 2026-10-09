@@ -56,8 +56,10 @@ using an account. It checks Unicode reads/writes, separate guest allocations,
 rejection of unsafe link targets, dialogs, aliases, disabled empty fallback,
 and secret-sentinel redaction. Unit tests also cover keyboard layout/scan-code
 mapping, navigation and surrogate/control character handling. The original
-offline login-audit switches fields with Tab, then verifies the original
-authentication request remains blocked by offline policy.
+offline login-audit switches fields with Tab and pastes the fixture password
+with Ctrl+V through a synthetic clipboard. It then verifies the original
+authentication request remains blocked by offline policy. Its nine input
+stages never read or modify the OS clipboard.
 
 User acceptance should check Tab/Shift+Tab between login fields, local text
 paste/copy, wheel scrolling and an HTTPS help link. Then test Connect separately

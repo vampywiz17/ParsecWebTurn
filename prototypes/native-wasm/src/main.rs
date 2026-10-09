@@ -519,6 +519,9 @@ fn instantiate_base_with_window(
     #[cfg(windows)]
     let runtime = {
         let mut runtime = threads::ThreadRuntime { window, ..runtime };
+        if runtime.window.as_ref().is_some_and(|w| w.synthetic_login) {
+            runtime.platform = Arc::new(platform_probe::offline_login_fixture());
+        }
         if runtime.window.as_ref().is_some_and(|w| w.online) {
             let owner = runtime.window.as_ref().unwrap().handle() as usize;
             runtime.platform = Arc::new(platform::Services::new(Box::new(
