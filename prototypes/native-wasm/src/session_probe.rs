@@ -849,7 +849,7 @@ fn buffer_exchange(
 mod tests {
     #[test]
     fn native_dtls_failure_retains_callback_state_and_rejects_wrong_fingerprint() {
-        let report = super::probe_mode(super::Mode::DtlsFailure).unwrap();
+        let report = super::probe_mode(super::Mode::DtlsFailure, false).unwrap();
         assert_eq!(report["fingerprint_rejection_verified"], true);
         assert_eq!(report["dtls_failure_capture_verified"], true);
         assert_eq!(report["peers_closed"], true);
