@@ -813,7 +813,7 @@ fn worker(
         // a closed queue must still be able to retain the worker's cause.
         if let Err(error) = &outcome {
             state.progress.failed = true;
-            state.progress.failure_stage = Some(
+            state.progress.failure_stage.get_or_insert(
                 error
                     .downcast_ref::<FailureStage>()
                     .copied()
