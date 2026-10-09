@@ -1,5 +1,12 @@
 # Native Rust / Parsec WASM prototype
 
+M3k-fix12 / 0.14.12 expands opt-in diagnostic classification to all fixed DTLS
+errors, exact peer alert descriptions and the generic ring crypto error. It also
+reports only an exact known signature-verification algorithm name. A dedicated
+offline DTLS failure probe verifies real library logs, certificate rejection and
+redaction. No cryptographic acceptance or connection policy changes.
+See [M3k-fix12](../../docs/NATIVE_M3K_FIX12.md).
+
 M3k-fix11 / 0.14.11 captures fresh peer/ICE/DTLS failure states and fixed native
 failure stages. Optional `account-network-audit` adds bounded, redacted,
 experimental webrtc-rs diagnostic categories; default account mode omits them.

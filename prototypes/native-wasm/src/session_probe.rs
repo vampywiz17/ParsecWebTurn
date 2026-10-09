@@ -32,19 +32,32 @@ pub fn buffer_probe() -> Result<serde_json::Value> {
     probe_mode(Mode::Buffers)
 }
 
+pub fn dtls_failure_probe() -> Result<serde_json::Value> {
+    if !crate::transport_diagnostics::enable() {
+        bail!("controlled DTLS diagnostic logger unavailable");
+    }
+    let mut report = probe_mode(Mode::DtlsFailure)?;
+    if !crate::transport_diagnostics::contains_reason("certificate-fingerprint-mismatch")
+        || !crate::transport_diagnostics::contains_reason("verify-ecdsa-p256-sha256")
+    {
+        bail!("actual native DTLS diagnostic categories were not observed");
+    }
+    report["library_failure_classification_verified"] = serde_json::json!(true);
+    report["signature_algorithm_reporting_verified"] = serde_json::json!(true);
+    report["native_transport_diagnostics"] =
+        serde_json::to_value(crate::transport_diagnostics::snapshot(true))?;
+    Ok(report)
+}
+
 enum Mode {
     Transport,
     Control,
     Buffers,
-    #[cfg(test)]
     DtlsFailure,
 }
 
 fn probe_mode(mode: Mode) -> Result<serde_json::Value> {
-    #[cfg(test)]
     let dtls_failure = matches!(mode, Mode::DtlsFailure);
-    #[cfg(not(test))]
-    let dtls_failure = false;
     let control = !matches!(mode, Mode::Transport) && !dtls_failure;
     let buffers = matches!(mode, Mode::Buffers);
     let mut config = Config::new();
@@ -321,13 +334,28 @@ fn probe_mode(mode: Mode) -> Result<serde_json::Value> {
                     "DTLS failure callback lost fresh states or allowed unauthenticated channels"
                 );
             }
+            if crate::transport_diagnostics::enabled() {
+                // The upstream warning follows its awaited failure callback.
+                // In this controlled probe only, allow that task to publish
+                // before cancelling its runtime. Account behavior is unchanged.
+                let until = Instant::now() + Duration::from_millis(500);
+                while !crate::transport_diagnostics::contains_reason(
+                    "certificate-fingerprint-mismatch",
+                ) && Instant::now() < until
+                {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            }
             attempt.cancel();
             attempt.wait_finished(Duration::from_secs(10))?;
             if attempt.snapshot()["peer_closed"] != true {
                 bail!("negative native attempt did not close");
             }
             return Ok(serde_json::json!({"dtls_failure_capture_verified":true,
-                "fingerprint_rejection_verified":true,"native_failure":failure}));
+                "fingerprint_rejection_verified":true,"native_failure":failure,
+                "scope":"controlled-native-dtls-wrong-fingerprint",
+                "real_account_used":false,"external_requests_enabled":false,
+                "parsec_host_connected":false,"video_decoded":false}));
         }
         let control_report = if control {
             Some(control_exchange(

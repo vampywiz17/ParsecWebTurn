@@ -1666,7 +1666,7 @@ dependencies = [
 
 [[package]]
 name = "parsec-native-wasm"
-version = "0.14.11"
+version = "0.14.12"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1677,6 +1677,7 @@ dependencies = [
  "log",
  "rcgen",
  "reqwest",
+ "ring",
  "rustls",
  "serde",
  "serde_json",

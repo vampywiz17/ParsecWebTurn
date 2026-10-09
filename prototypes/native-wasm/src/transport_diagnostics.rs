@@ -1,9 +1,17 @@
 //! Optional, version-pinned library diagnostics. Never used to control a peer.
 //! Only fixed categories survive; raw messages are neither printed nor retained.
-use std::{fmt::Write, sync::Mutex};
+use std::{
+    fmt::Write,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
+};
 
 const TARGET: &str = "webrtc::peer_connection::peer_connection_internal";
+const CRYPTO_TARGET: &str = "dtls::crypto";
 const LIMIT: usize = 16;
+static ENABLED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, serde::Serialize)]
 pub struct Event {
@@ -30,9 +38,24 @@ pub struct Snapshot {
 pub fn enable() -> bool {
     let installed = log::set_logger(&COLLECTOR).is_ok();
     if installed {
-        log::set_max_level(log::LevelFilter::Warn);
+        log::set_max_level(log::LevelFilter::Trace);
+        ENABLED.store(true, Ordering::Release);
     }
     installed
+}
+
+pub fn enabled() -> bool {
+    ENABLED.load(Ordering::Acquire)
+}
+
+pub fn contains_reason(reason: &str) -> bool {
+    COLLECTOR
+        .events
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .0
+        .iter()
+        .any(|event| event.reason == reason)
 }
 
 pub fn snapshot(installed: bool) -> Snapshot {
@@ -68,6 +91,12 @@ impl Drop for Buffer {
 }
 
 fn classify(target: &str, message: &str) -> Option<Event> {
+    if target == CRYPTO_TARGET {
+        return crate::transport_diagnostic_errors::signature_reason(message).map(|reason| Event {
+            stage: "dtls-signature-verification",
+            reason,
+        });
+    }
     if target != TARGET {
         return None;
     }
@@ -132,19 +161,23 @@ fn classify(target: &str, message: &str) -> Option<Event> {
         ),
         (D::ErrDeadlineExceeded.to_string(), "deadline-exceeded"),
         (D::ErrConnClosed.to_string(), "connection-closed"),
+        (W::ErrSCTPTransportDTLS.to_string(), "dtls-not-established"),
     ];
     Some(Event {
         stage,
         reason: known
             .into_iter()
             .find(|(text, _)| text == error)
-            .map_or("unknown", |(_, reason)| reason),
+            .map(|(_, reason)| reason)
+            .or_else(|| crate::transport_diagnostic_errors::dtls_reason(error))
+            .unwrap_or("unknown"),
     })
 }
 
 impl log::Log for Collector {
     fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
-        metadata.target() == TARGET && metadata.level() <= log::Level::Warn
+        (metadata.target() == TARGET && metadata.level() <= log::Level::Warn)
+            || (metadata.target() == CRYPTO_TARGET && metadata.level() == log::Level::Trace)
     }
     fn log(&self, record: &log::Record<'_>) {
         if !self.enabled(record.metadata()) {

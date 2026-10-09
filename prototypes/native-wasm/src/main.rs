@@ -32,6 +32,7 @@ mod thread_probe;
 mod threads;
 mod tls_probe;
 mod transport;
+mod transport_diagnostic_errors;
 mod transport_diagnostics;
 mod wait;
 mod websocket;
@@ -172,6 +173,7 @@ fn run() -> Result<()> {
         mode.as_str(),
         "guest-offer-probe"
             | "guest-session-probe"
+            | "guest-dtls-failure-probe"
             | "guest-control-probe"
             | "guest-buffer-probe"
             | "guest-http-probe"
@@ -211,6 +213,8 @@ fn run() -> Result<()> {
             session_probe::buffer_probe()?
         } else if mode == "guest-control-probe" {
             session_probe::control_probe()?
+        } else if mode == "guest-dtls-failure-probe" {
+            session_probe::dtls_failure_probe()?
         } else if mode == "guest-session-probe" {
             session_probe::probe()?
         } else {
@@ -249,6 +253,7 @@ fn run() -> Result<()> {
                   parsec-native-wasm guest-offer-probe [report.json]\n\
                   parsec-native-wasm guest-window-probe [report.json]\n\
                   parsec-native-wasm guest-session-probe [report.json]\n\
+                  parsec-native-wasm guest-dtls-failure-probe [report.json]\n\
                   parsec-native-wasm guest-control-probe [report.json]\n\
                   parsec-native-wasm guest-buffer-probe [report.json]\n\
                   parsec-native-wasm guest-http-probe [report.json]\n\
