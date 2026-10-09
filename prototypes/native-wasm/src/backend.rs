@@ -129,8 +129,16 @@ impl Backend {
         Ok(value)
     }
 
+    #[cfg(test)]
     pub fn prepare_input(&mut self, message: &Value) -> Result<Option<bytes::Bytes>> {
-        match crate::control::input(message) {
+        self.prepare_input_with_viewport(message, None)
+    }
+    pub fn prepare_input_with_viewport(
+        &mut self,
+        message: &Value,
+        viewport: Option<crate::viewport::Viewport>,
+    ) -> Result<Option<bytes::Bytes>> {
+        match crate::control::input_with_viewport(message, viewport) {
             Ok(packet) => Ok(Some(packet)),
             Err(error)
                 if error

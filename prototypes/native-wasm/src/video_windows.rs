@@ -793,14 +793,17 @@ impl Renderer {
         )?;
         let output = output.ok_or_else(|| unavailable("video-processor-null-output"))?;
         // Preserve aspect ratio and letterbox on the GPU, without CPU pixels.
-        let scale = (size.0 as f64 / width as f64).min(size.1 as f64 / height as f64);
-        let w = (width as f64 * scale).round() as i32;
-        let h = (height as f64 * scale).round() as i32;
+        let [left, top, right, bottom] = crate::viewport::Viewport {
+            source: (width, height),
+            client: size,
+        }
+        .rect()
+        .ok_or_else(|| unavailable("video-viewport"))?;
         let target = RECT {
-            left: (size.0 as i32 - w) / 2,
-            top: (size.1 as i32 - h) / 2,
-            right: (size.0 as i32 + w) / 2,
-            bottom: (size.1 as i32 + h) / 2,
+            left,
+            top,
+            right,
+            bottom,
         };
         let full = RECT {
             left: 0,

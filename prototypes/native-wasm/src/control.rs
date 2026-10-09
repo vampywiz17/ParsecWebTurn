@@ -132,9 +132,15 @@ impl std::fmt::Display for AbsoluteMouseUnavailable {
 }
 impl std::error::Error for AbsoluteMouseUnavailable {}
 
-/// Relative mouse coordinates only until decoded dimensions/presentation exist.
-/// Absolute positioning is rejected instead of guessing a viewport transform.
+#[cfg(test)]
 pub fn input(value: &Value) -> Result<Bytes> {
+    input_with_viewport(value, None)
+}
+
+pub fn input_with_viewport(
+    value: &Value,
+    viewport: Option<crate::viewport::Viewport>,
+) -> Result<Bytes> {
     fn int(value: &Value, name: &str) -> Result<i32> {
         i32::try_from(
             value[name]
@@ -163,7 +169,10 @@ pub fn input(value: &Value) -> Result<Bytes> {
         4 => {
             let (x, y) = (int(value, "x")?, int(value, "y")?);
             if !boolean(value, "relative")? {
-                return Err(AbsoluteMouseUnavailable.into());
+                let (x, y) = viewport
+                    .and_then(|v| v.map(x, y))
+                    .ok_or(AbsoluteMouseUnavailable)?;
+                return Ok(header(3, 0, x, y));
             }
             header(3, 1, x, y)
         }

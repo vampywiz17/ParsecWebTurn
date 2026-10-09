@@ -746,7 +746,15 @@ fn backend_call(
                         serde_json::from_str(&m.string(ptr(args, 0)?, 65536)?)?;
                     b.pump_native_events()?;
                     if b.status == Some(0) {
-                        if let Some(frame) = b.prepare_input(&message)? {
+                        #[cfg(windows)]
+                        let viewport = caller
+                            .data()
+                            .window
+                            .as_ref()
+                            .and_then(|w| w.presented_viewport());
+                        #[cfg(not(windows))]
+                        let viewport = None;
+                        if let Some(frame) = b.prepare_input_with_viewport(&message, viewport)? {
                             b.native_attempt
                                 .as_ref()
                                 .context("native control attempt missing")?
@@ -832,6 +840,17 @@ fn backend_call(
                         m.write(ptr(args, i)?, &[0])?;
                     }
                     m.write(ptr(args, 5)?, &b.encode_latency.to_le_bytes())?;
+                    if let Some(v) = b
+                        .media_ingress
+                        .video_output
+                        .as_ref()
+                        .filter(|v| v.frames_presented > 0)
+                    {
+                        m.set_u32(ptr(args, 0)?, v.width.unwrap_or(0))?;
+                        m.set_u32(ptr(args, 1)?, v.height.unwrap_or(0))?;
+                        // The active decoded format is NV12 (4:2:0). MF range metadata is optional.
+                        m.write(ptr(args, 3)?, &[u8::from(v.nominal_range == Some(1))])?;
+                    }
                 }
                 "parsec_web_get_host_mode" => {
                     b.pump_native_events()?;
@@ -850,7 +869,18 @@ fn backend_call(
                     b.pump_native_events()?;
                     result(results, b.buffers.size(ptr(args, 0)?) as i32);
                 }
-                "parsec_web_get_network_failure" | "parsec_web_poll_audio" => result(results, 0),
+                "parsec_web_poll_audio" => {
+                    let capacity = usize::try_from(int(args, 1)?)?;
+                    if capacity > 5760 * 2 {
+                        bail!("audio poll capacity exceeds limit");
+                    }
+                    let frames = match &b.native_attempt {
+                        Some(attempt) => attempt.poll_audio(m, ptr(args, 0)?, capacity)?,
+                        None => 0,
+                    };
+                    result(results, frames as i32);
+                }
+                "parsec_web_get_network_failure" => result(results, 0),
                 _ => unreachable!(),
             }
         }

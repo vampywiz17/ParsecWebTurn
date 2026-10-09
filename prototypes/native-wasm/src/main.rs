@@ -1,6 +1,9 @@
 mod attempt;
 mod attempt_probe;
 mod audio;
+mod audio_stream;
+#[cfg(windows)]
+mod audio_windows;
 mod audit_probe;
 mod backend;
 mod buffers;
@@ -45,6 +48,7 @@ mod video_output;
 mod video_stream;
 #[cfg(windows)]
 mod video_windows;
+mod viewport;
 mod wait;
 #[cfg(windows)]
 mod wake_lock;

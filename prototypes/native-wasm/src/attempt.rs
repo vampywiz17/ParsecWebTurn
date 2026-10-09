@@ -193,6 +193,7 @@ struct Completion {
     discard_unavailable_media: bool,
     media_ingress: crate::media_ingress::Ingress,
     video_stream: crate::video_stream::Inspector,
+    audio_stream: Option<crate::audio_stream::Pipeline>,
     #[cfg(windows)]
     video_output: Option<crate::video_windows::Pipeline>,
 }
@@ -243,6 +244,11 @@ impl Completion {
                 }
                 #[cfg(not(windows))]
                 let _ = info;
+            }
+            if channel == 2 {
+                if let Some(pipeline) = &self.audio_stream {
+                    discarded = !pipeline.submit(bytes);
+                }
             }
             self.media_ingress.record(channel, bytes.len(), discarded);
             return true;
@@ -361,6 +367,7 @@ impl Attempt {
             video_stream,
             #[cfg(windows)]
             video_output: None,
+            audio_stream: None,
         }));
         let finished = Arc::new((Mutex::new(false), Condvar::new()));
         let shared = completion.clone();
@@ -421,6 +428,9 @@ impl Attempt {
         if let Some(pipeline) = &state.video_output {
             pipeline.stop();
         }
+        if let Some(mut audio) = state.audio_stream.take() {
+            audio.stop();
+        }
         state.events.clear();
         state.messages.clear();
         state.message_bytes = 0;
@@ -454,6 +464,11 @@ impl Attempt {
         let state = self.completion.lock().unwrap_or_else(|e| e.into_inner());
         let mut ingress = state.media_ingress.clone();
         ingress.video_stream = state.video_stream.snapshot();
+        if let Some(audio) = &state.audio_stream {
+            let report = audio.snapshot();
+            ingress.audio_decoder_available = report.packets_decoded > 0;
+            ingress.audio_output = Some(report);
+        }
         #[cfg(windows)]
         if let Some(pipeline) = &state.video_output {
             let output = pipeline.snapshot();
@@ -468,7 +483,19 @@ impl Attempt {
         self.completion
             .lock()
             .unwrap_or_else(|e| e.into_inner())
+            .audio_stream = Some(crate::audio_stream::Pipeline::start());
+        self.completion
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
             .video_output = Some(crate::video_windows::Pipeline::start(window));
+    }
+
+    pub fn poll_audio(&self, memory: &GuestMemory, pointer: u32, capacity: usize) -> Result<usize> {
+        let state = self.completion.lock().unwrap_or_else(|e| e.into_inner());
+        match &state.audio_stream {
+            Some(audio) => audio.poll(memory, pointer, capacity),
+            None => Ok(0),
+        }
     }
 
     pub fn configure_video_protocol(&self, protocol: crate::backend::VideoProtocol) {
@@ -1051,6 +1078,7 @@ mod tests {
             video_stream: Default::default(),
             #[cfg(windows)]
             video_output: None,
+            audio_stream: None,
         }
     }
 

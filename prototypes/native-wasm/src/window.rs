@@ -31,6 +31,7 @@ pub struct Window {
     pub events: Mutex<std::collections::VecDeque<Event>>,
     pub dimensions: Mutex<(i32, i32)>,
     pub graphics: Mutex<Option<crate::graphics::GraphicsReport>>,
+    pub audio_registry: Mutex<crate::audio_windows::Registry>,
     pub video_report: Mutex<Option<crate::video_output::Snapshot>>,
     video_hwnd: AtomicUsize,
     video_create_failed: AtomicBool,
@@ -86,6 +87,7 @@ impl Window {
             dimensions: Mutex::new((1024, 720)),
             graphics: Default::default(),
             video_report: Default::default(),
+            audio_registry: Default::default(),
             video_hwnd: AtomicUsize::new(0),
             video_create_failed: AtomicBool::new(false),
             video_ready: AtomicBool::new(false),
@@ -175,6 +177,24 @@ impl Window {
                 && !self.closing.load(Ordering::Acquire);
             ShowWindow(hwnd, if show { SW_SHOWNA } else { SW_HIDE });
         }
+    }
+
+    pub fn presented_viewport(&self) -> Option<crate::viewport::Viewport> {
+        if !self.video_ready.load(Ordering::Acquire) || !self.video_visible.load(Ordering::Acquire)
+        {
+            return None;
+        }
+        let report = self.video_report.lock().unwrap_or_else(|e| e.into_inner());
+        let v = report
+            .as_ref()
+            .filter(|v| v.frames_presented > 0 && v.failure_stage.is_none())?;
+        let size = *self.dimensions.lock().unwrap_or_else(|e| e.into_inner());
+        let viewport = crate::viewport::Viewport {
+            source: (v.width?, v.height?),
+            client: (u32::try_from(size.0).ok()?, u32::try_from(size.1).ok()?),
+        };
+        viewport.rect()?;
+        Some(viewport)
     }
 
     pub fn initial_geometry(&self) -> (i32, i32, i32, i32, bool) {
