@@ -28,6 +28,7 @@ mod thread_probe;
 mod threads;
 mod tls_probe;
 mod transport;
+mod wait;
 mod websocket;
 mod websocket_probe;
 #[cfg(windows)]

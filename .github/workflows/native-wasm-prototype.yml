@@ -76,7 +76,7 @@ jobs:
           & $exe guest-offer-probe "$artifact/guest-offer.json"
           if ($LASTEXITCODE -ne 0) { throw 'Actual native guest offer import failed' }
           $offer = Get-Content "$artifact/guest-offer.json" -Raw | ConvertFrom-Json
-          if (!$offer.guest_completion_verified -or !$offer.credentials_validated -or !$offer.native_attempt.peer_closed -or !$offer.native_attempt.worker_finished -or $offer.parsec_host_connected) { throw 'Incorrect guest/native offer proof' }
+          if (!$offer.host_wait_import_verified -or !$offer.guest_completion_verified -or !$offer.credentials_validated -or !$offer.native_attempt.peer_closed -or !$offer.native_attempt.worker_finished -or $offer.parsec_host_connected) { throw 'Incorrect guest/native offer proof' }
           & $exe guest-session-probe "$artifact/guest-session.json"
           if ($LASTEXITCODE -ne 0) { throw 'Guest/native ICE/DTLS/SCTP exchange failed' }
           $session = Get-Content "$artifact/guest-session.json" -Raw | ConvertFrom-Json

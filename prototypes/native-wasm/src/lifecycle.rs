@@ -10,6 +10,9 @@ impl std::fmt::Display for SessionStopped {
     }
 }
 impl std::error::Error for SessionStopped {}
+pub fn cancellation_error() -> anyhow::Error {
+    anyhow::Error::new(SessionStopped)
+}
 pub fn is_cancellation(error: &anyhow::Error) -> bool {
     error.downcast_ref::<SessionStopped>().is_some()
 }

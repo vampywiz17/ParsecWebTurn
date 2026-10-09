@@ -18,18 +18,13 @@ pub fn probe() -> Result<serde_json::Value> {
         (import "env" "memory" (memory 1 1 shared))
         (import "env" "parsec_web_init" (func $init))
         (import "env" "parsec_web_new_attempt" (func $offer (param i32 i32 i32 i32 i32 i32 i32)))
+        (import "env" "MTY_WaitPtr" (func $wait (param i32)))
         (import "env" "parsec_web_destroy" (func $destroy))
         (data (i32.const 16) "local-offer-test\00")
         (func (export "offer") (result i32)
             call $init
             i32.const 16 i32.const 100 i32.const 400 i32.const 700 i32.const 256 i32.const 64 i32.const 80 call $offer
-            i32.const 64 i32.const 0 i32.const 1 i32.atomic.rmw.cmpxchg
-            i32.eqz
-            if
-                i32.const 64 i32.const 1 i64.const 4000000000 memory.atomic.wait32
-                i32.const 2 i32.eq if unreachable end
-            end
-            i32.const 64 i32.const 0 i32.atomic.store
+            i32.const 64 call $wait
             i32.const 80 i32.load)
         (func (export "destroy") call $destroy))"#,
     )?;
@@ -48,6 +43,14 @@ pub fn probe() -> Result<serde_json::Value> {
     let checked = (|| -> Result<()> {
         if error != 0 {
             bail!("native offer completion reported failure");
+        }
+        if store.data().calls.get("env::MTY_WaitPtr") != Some(&1)
+            || memory
+                .sync_word(64)?
+                .load(std::sync::atomic::Ordering::SeqCst)
+                != 0
+        {
+            bail!("host wait import did not consume native completion");
         }
         Credentials {
             ufrag: memory.string(100, 256)?,
@@ -75,7 +78,7 @@ pub fn probe() -> Result<serde_json::Value> {
         .get_typed_func::<(), ()>(&mut store, "destroy")?
         .call(&mut store, ())?;
     Ok(
-        serde_json::json!({ "schema":1, "scope":"controlled-wasm-guest-native-offer-import", "original_parsec_guest_attempt_exercised":false, "guest_completion_verified":true, "credentials_validated":true, "native_attempt":state, "parsec_host_connected":false, "video_decoded":false }),
+        serde_json::json!({ "schema":1, "scope":"controlled-wasm-guest-native-offer-import", "original_parsec_guest_attempt_exercised":false, "guest_completion_verified":true, "host_wait_import_verified":true, "credentials_validated":true, "native_attempt":state, "parsec_host_connected":false, "video_decoded":false }),
     )
 }
 
@@ -85,6 +88,7 @@ mod tests {
     fn guest_import_returns_real_credentials_wakes_guest_and_closes_peer() {
         let report = super::probe().unwrap();
         assert_eq!(report["guest_completion_verified"], true);
+        assert_eq!(report["host_wait_import_verified"], true);
         assert_eq!(report["native_attempt"]["worker_finished"], true);
         assert_eq!(report["native_attempt"]["peer_closed"], true);
         assert_eq!(report["parsec_host_connected"], false);

@@ -98,6 +98,7 @@ pub fn implemented(module: &str, name: &str) -> bool {
                 | "web_set_title"
                 | "web_set_app"
                 | "MTY_GetRandomBytes"
+                | "MTY_WaitPtr"
                 | "MTY_HandleProtocol"
                 | "web_get_clipboard"
                 | "web_set_clipboard"
@@ -237,6 +238,24 @@ pub fn dispatch(
             return backend_call(&caller, name, args, results);
         }
         match name {
+            "MTY_WaitPtr" => {
+                #[cfg(windows)]
+                let window = caller.data().window.clone();
+                #[cfg(windows)]
+                let stop = window.as_ref().map(|w| w.stop.as_ref());
+                #[cfg(not(windows))]
+                let stop = None;
+                #[cfg(windows)]
+                let live = window.as_ref().is_some_and(|w| w.live);
+                #[cfg(not(windows))]
+                let live = false;
+                crate::wait::wait(
+                    &m,
+                    ptr(args, 0)?,
+                    stop,
+                    (!live).then_some(std::time::Duration::from_secs(5)),
+                )?;
+            }
             "MTY_HandleProtocol" => {
                 let url = m.string(ptr(args, 0)?, 16 * 1024 + 1)?;
                 caller.data().platform.open_url(&url);
