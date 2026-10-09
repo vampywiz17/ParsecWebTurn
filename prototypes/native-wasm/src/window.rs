@@ -31,6 +31,11 @@ pub struct Window {
     pub events: Mutex<std::collections::VecDeque<Event>>,
     pub dimensions: Mutex<(i32, i32)>,
     pub graphics: Mutex<Option<crate::graphics::GraphicsReport>>,
+    pub video_report: Mutex<Option<crate::video_output::Snapshot>>,
+    video_hwnd: AtomicUsize,
+    video_create_failed: AtomicBool,
+    video_ready: AtomicBool,
+    video_visible: AtomicBool,
     pub capture: Mutex<Option<std::path::PathBuf>>,
     pub synthetic_login: bool,
     pub script_steps: AtomicUsize,
@@ -65,6 +70,11 @@ impl Window {
             events: Default::default(),
             dimensions: Mutex::new((1024, 720)),
             graphics: Default::default(),
+            video_report: Default::default(),
+            video_hwnd: AtomicUsize::new(0),
+            video_create_failed: AtomicBool::new(false),
+            video_ready: AtomicBool::new(false),
+            video_visible: AtomicBool::new(true),
             capture: Default::default(),
             synthetic_login,
             script_steps: AtomicUsize::new(0),
@@ -116,6 +126,42 @@ impl Window {
     pub fn handle(&self) -> HWND {
         self.hwnd.load(Ordering::Acquire) as HWND
     }
+    // HWND creation and visibility remain on the existing UI thread.
+    pub fn ensure_video_surface(&self) -> Result<usize> {
+        unsafe {
+            PostMessageW(self.handle(), WM_APP + 5, 0, 0);
+        }
+        for _ in 0..150 {
+            let hwnd = self.video_hwnd.load(Ordering::Acquire);
+            if hwnd != 0 {
+                return Ok(hwnd);
+            }
+            if self.closing.load(Ordering::Acquire)
+                || self.video_create_failed.load(Ordering::Acquire)
+            {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        bail!("native video surface unavailable")
+    }
+    pub fn set_video_ready(&self, ready: bool) {
+        if self.video_ready.swap(ready, Ordering::AcqRel) != ready {
+            unsafe {
+                PostMessageW(self.handle(), WM_APP + 6, 0, 0);
+            }
+        }
+    }
+    unsafe fn show_video_surface(&self) {
+        let hwnd = self.video_hwnd.load(Ordering::Acquire) as HWND;
+        if !hwnd.is_null() {
+            let show = self.video_ready.load(Ordering::Acquire)
+                && self.video_visible.load(Ordering::Acquire)
+                && !self.closing.load(Ordering::Acquire);
+            ShowWindow(hwnd, if show { SW_SHOWNA } else { SW_HIDE });
+        }
+    }
+
     pub fn initial_geometry(&self) -> (i32, i32, i32, i32, bool) {
         unsafe {
             let mut origin = POINT { x: 0, y: 0 };
@@ -230,7 +276,7 @@ unsafe fn create_window(state: &Arc<Window>) -> Result<HWND> {
         0,
         name.as_ptr(),
         title.as_ptr(),
-        WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+        WS_OVERLAPPEDWINDOW | WS_VISIBLE | WS_CLIPCHILDREN,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
         1040,
@@ -344,6 +390,55 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
                 }
                 return 0;
             }
+            m if m == WM_APP + 5 => {
+                if s.video_hwnd.load(Ordering::Acquire) == 0 && !s.closing.load(Ordering::Acquire) {
+                    let class: Vec<u16> = "ParsecNativeVideoSurface\0".encode_utf16().collect();
+                    let (width, height) = *s.dimensions.lock().unwrap_or_else(|e| e.into_inner());
+                    // Disabled child receives no input: parent retains its
+                    // documented keyboard/mouse handling and window shortcuts.
+                    let video_class = WNDCLASSW {
+                        lpfnWndProc: Some(video_surface_proc),
+                        hInstance: GetModuleHandleW(std::ptr::null()),
+                        lpszClassName: class.as_ptr(),
+                        ..std::mem::zeroed()
+                    };
+                    RegisterClassW(&video_class);
+                    let child = CreateWindowExW(
+                        0,
+                        class.as_ptr(),
+                        std::ptr::null(),
+                        WS_CHILD | WS_DISABLED,
+                        0,
+                        0,
+                        width.max(1),
+                        height.max(1),
+                        hwnd,
+                        std::ptr::null_mut(),
+                        GetModuleHandleW(std::ptr::null()),
+                        std::ptr::null(),
+                    );
+                    s.video_create_failed
+                        .store(child.is_null(), Ordering::Release);
+                    s.video_hwnd.store(child as usize, Ordering::Release);
+                }
+                return 0;
+            }
+            m if m == WM_APP + 6 => {
+                s.show_video_surface();
+                return 0;
+            }
+            WM_KEYDOWN
+                if wp as u32 == VK_F8 as u32 && s.video_hwnd.load(Ordering::Acquire) != 0 =>
+            {
+                if lp & (1 << 30) == 0 {
+                    s.video_visible.fetch_xor(true, Ordering::AcqRel);
+                    s.show_video_surface();
+                }
+                return 0;
+            }
+            WM_KEYUP if wp as u32 == VK_F8 as u32 && s.video_hwnd.load(Ordering::Acquire) != 0 => {
+                return 0
+            }
             WM_KEYDOWN if wp as u32 == VK_F11 as u32 => {
                 if lp & (1 << 30) == 0 {
                     s.set_fullscreen(!s.fullscreen_active.load(Ordering::Acquire));
@@ -358,6 +453,18 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
                 let w = (lp as u32 & 0xffff) as i32;
                 let h = ((lp as u32 >> 16) & 0xffff) as i32;
                 *s.dimensions.lock().unwrap_or_else(|e| e.into_inner()) = (w, h);
+                let child = s.video_hwnd.load(Ordering::Acquire) as HWND;
+                if !child.is_null() {
+                    SetWindowPos(
+                        child,
+                        std::ptr::null_mut(),
+                        0,
+                        0,
+                        w.max(1),
+                        h.max(1),
+                        SWP_NOACTIVATE | SWP_NOZORDER,
+                    );
+                }
                 s.push(Event::Size(w, h));
             }
             WM_SETFOCUS => s.push(Event::Focus(true)),
@@ -445,4 +552,23 @@ unsafe fn modifiers() -> i32 {
         mods |= 32;
     }
     mods
+}
+
+// DXGI owns video pixels; do not repaint the child with GDI/static-control text.
+unsafe extern "system" fn video_surface_proc(
+    hwnd: HWND,
+    message: u32,
+    wp: WPARAM,
+    lp: LPARAM,
+) -> LRESULT {
+    match message {
+        WM_ERASEBKGND => 1,
+        WM_PAINT => {
+            let mut paint: PAINTSTRUCT = std::mem::zeroed();
+            BeginPaint(hwnd, &mut paint);
+            EndPaint(hwnd, &paint);
+            0
+        }
+        _ => DefWindowProcW(hwnd, message, wp, lp),
+    }
 }

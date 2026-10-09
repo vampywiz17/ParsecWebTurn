@@ -3,6 +3,7 @@ use serde::Serialize;
 #[derive(Clone, Default, Serialize)]
 pub struct Ingress {
     pub video_stream: crate::video_stream::Snapshot,
+    pub video_output: Option<crate::video_output::Snapshot>,
     pub video_packets_received: u64,
     pub video_bytes_received: u64,
     pub audio_packets_received: u64,
@@ -13,6 +14,9 @@ pub struct Ingress {
 }
 impl Ingress {
     pub fn unavailable(&mut self, channel: u16, size: usize) {
+        self.record(channel, size, true);
+    }
+    pub fn record(&mut self, channel: u16, size: usize, discarded: bool) {
         let (packets, bytes) = match channel {
             1 => (
                 &mut self.video_packets_received,
@@ -26,8 +30,10 @@ impl Ingress {
         };
         *packets = packets.saturating_add(1);
         *bytes = bytes.saturating_add(size as u64);
-        self.packets_discarded_decoder_unavailable =
-            self.packets_discarded_decoder_unavailable.saturating_add(1);
+        if discarded {
+            self.packets_discarded_decoder_unavailable =
+                self.packets_discarded_decoder_unavailable.saturating_add(1);
+        }
     }
 }
 #[cfg(test)]

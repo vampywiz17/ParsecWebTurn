@@ -660,6 +660,12 @@ fn backend_call(
                             b.legacy_rsa_1024_enabled,
                         ) {
                             Ok(attempt) => {
+                                #[cfg(windows)]
+                                if let Some(window) =
+                                    caller.data().window.clone().filter(|w| w.online)
+                                {
+                                    attempt.start_video(window);
+                                }
                                 b.status = Some(20);
                                 b.native_attempt = Some(attempt);
                                 b.attempt_id = id;

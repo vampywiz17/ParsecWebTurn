@@ -41,7 +41,10 @@ mod tls_probe;
 mod transport;
 mod transport_diagnostic_errors;
 mod transport_diagnostics;
+mod video_output;
 mod video_stream;
+#[cfg(windows)]
+mod video_windows;
 mod wait;
 #[cfg(windows)]
 mod wake_lock;
@@ -117,6 +120,8 @@ struct Report {
     native_window_released: bool,
     #[cfg(windows)]
     native_wake_lock: Option<wake_lock::State>,
+    #[cfg(windows)]
+    native_video_output: Option<video_output::Snapshot>,
     video_rendered: bool,
     host: Option<HostState>,
     threads: Vec<threads::ThreadRecord>,
@@ -197,6 +202,16 @@ fn account_options_require_explicit_unique_selection() {
 fn run() -> Result<()> {
     let mut args = env::args().skip(1);
     let mode = args.next().unwrap_or_else(|| "help".into());
+    #[cfg(windows)]
+    if mode == "video-hardware-probe" {
+        let report = video_windows::probe()?;
+        let json = serde_json::to_string_pretty(&report)?;
+        if let Some(path) = args.next() {
+            fs::write(path, &json)?;
+        }
+        println!("{json}");
+        return Ok(());
+    }
     let account_mode = matches!(mode.as_str(), "account" | "account-network-audit");
     let live_mode = account_mode || mode == "session-audit";
     let window_mode =
@@ -419,6 +434,8 @@ fn run() -> Result<()> {
         native_window_released: false,
         #[cfg(windows)]
         native_wake_lock: None,
+        #[cfg(windows)]
+        native_video_output: None,
         video_rendered: false,
         host: None,
         threads: Vec::new(),
@@ -556,6 +573,15 @@ fn run() -> Result<()> {
                 .unwrap_or_else(|e| e.into_inner())
                 .clone();
             report.synthetic_login_steps = window.script_steps.load(Ordering::Acquire);
+            report.native_video_output = window
+                .video_report
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            report.video_rendered = report
+                .native_video_output
+                .as_ref()
+                .is_some_and(|v| v.frames_presented > 0);
             if window.active_contexts.load(Ordering::Acquire) == 0 {
                 window.close();
                 let until = std::time::Instant::now() + Duration::from_secs(1);

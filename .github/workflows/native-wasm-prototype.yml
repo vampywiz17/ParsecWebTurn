@@ -65,6 +65,12 @@ jobs:
           if (!$boot.native_backend.initialized -or $boot.host.boundary -eq 'env::parsec_web_init') { throw 'The pinned core did not initialize the native client backend' }
           $boundaries = @($boot.host.boundary) + @($boot.threads | ForEach-Object { $_.boundary })
           if (!$boot.start_error -or !($boundaries -contains 'env::web_run_and_yield' -or $boundaries -contains 'env::web_set_gfx')) { throw 'The pinned core did not reach its native event-loop/graphics boundary' }
+          & $exe video-hardware-probe "$artifact/video-hardware.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Native video probe did not complete' }
+          $video = Get-Content "$artifact/video-hardware.json" -Raw | ConvertFrom-Json
+          if ($video.external_requests_enabled -or !$video.native_window_released -or !$video.gpu_resources_released -or !$video.video.worker_finished) { throw 'Native video probe cleanup failed' }
+          if ($video.video.frames_presented -gt 0 -and (!$video.video.gpu_surface_output -or !$video.video.synthetic_pixel_variation_verified)) { throw 'GPU presentation proof incomplete' }
+          if ($video.video.frames_presented -eq 0 -and !$video.video.failure_stage) { throw 'Missing video output without a diagnostic' }
           & $exe transport-probe "$artifact/transport.json"
           if ($LASTEXITCODE -ne 0) { throw 'Native WebRTC transport failed' }
           $transport = Get-Content "$artifact/transport.json" -Raw | ConvertFrom-Json

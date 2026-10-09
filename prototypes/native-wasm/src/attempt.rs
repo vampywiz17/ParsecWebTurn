@@ -193,6 +193,8 @@ struct Completion {
     discard_unavailable_media: bool,
     media_ingress: crate::media_ingress::Ingress,
     video_stream: crate::video_stream::Inspector,
+    #[cfg(windows)]
+    video_output: Option<crate::video_windows::Pipeline>,
 }
 
 impl Completion {
@@ -232,10 +234,17 @@ impl Completion {
         self.progress.channel_max_message_bytes[i] =
             self.progress.channel_max_message_bytes[i].max(bytes.len());
         if channel != 0 && self.discard_unavailable_media {
+            let mut discarded = true;
             if channel == 1 {
-                self.video_stream.receive(bytes);
+                let info = self.video_stream.receive(bytes);
+                #[cfg(windows)]
+                if let (Some(pipeline), Some(info)) = (&self.video_output, info) {
+                    discarded = !pipeline.submit(bytes, info);
+                }
+                #[cfg(not(windows))]
+                let _ = info;
             }
-            self.media_ingress.unavailable(channel, bytes.len());
+            self.media_ingress.record(channel, bytes.len(), discarded);
             return true;
         }
         if self.messages.len() >= 16 || self.message_bytes + bytes.len() > 4 * MAX_CHANNEL_MESSAGE {
@@ -350,6 +359,8 @@ impl Attempt {
             discard_unavailable_media: config.is_some(),
             media_ingress: Default::default(),
             video_stream,
+            #[cfg(windows)]
+            video_output: None,
         }));
         let finished = Arc::new((Mutex::new(false), Condvar::new()));
         let shared = completion.clone();
@@ -406,6 +417,10 @@ impl Attempt {
         // prevents the old worker from writing into reused guest buffers.
         let mut state = self.completion.lock().unwrap_or_else(|e| e.into_inner());
         state.cancelled = true;
+        #[cfg(windows)]
+        if let Some(pipeline) = &state.video_output {
+            pipeline.stop();
+        }
         state.events.clear();
         state.messages.clear();
         state.message_bytes = 0;
@@ -439,7 +454,21 @@ impl Attempt {
         let state = self.completion.lock().unwrap_or_else(|e| e.into_inner());
         let mut ingress = state.media_ingress.clone();
         ingress.video_stream = state.video_stream.snapshot();
+        #[cfg(windows)]
+        if let Some(pipeline) = &state.video_output {
+            let output = pipeline.snapshot();
+            ingress.video_decoder_available = output.frames_decoded > 0;
+            ingress.video_output = Some(output);
+        }
         ingress
+    }
+
+    #[cfg(windows)]
+    pub fn start_video(&self, window: Arc<crate::window::Window>) {
+        self.completion
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .video_output = Some(crate::video_windows::Pipeline::start(window));
     }
 
     pub fn configure_video_protocol(&self, protocol: crate::backend::VideoProtocol) {
@@ -1020,6 +1049,8 @@ mod tests {
             discard_unavailable_media: false,
             media_ingress: Default::default(),
             video_stream: Default::default(),
+            #[cfg(windows)]
+            video_output: None,
         }
     }
 

@@ -52,7 +52,7 @@ impl Inspector {
         self.snapshot.clone()
     }
 
-    pub fn receive(&mut self, bytes: &[u8]) {
+    pub fn receive(&mut self, bytes: &[u8]) -> Option<PacketInfo> {
         if let Some(protocol) = &self.protocol {
             let word = |offset: u32| -> Option<u32> {
                 let start = usize::try_from(offset).ok()?;
@@ -68,7 +68,7 @@ impl Inspector {
                     self.next_key = flags & 2 != 0;
                     self.snapshot.metadata_messages =
                         self.snapshot.metadata_messages.saturating_add(1);
-                    return;
+                    return None;
                 }
             }
         }
@@ -85,7 +85,7 @@ impl Inspector {
         let Some(summary) = annex_b(bytes) else {
             self.snapshot.unrecognized_messages =
                 self.snapshot.unrecognized_messages.saturating_add(1);
-            return;
+            return None;
         };
         self.snapshot.annex_b_messages = self.snapshot.annex_b_messages.saturating_add(1);
         if let Some([profile, constraints, level]) = summary.sps {
@@ -101,7 +101,17 @@ impl Inspector {
         self.snapshot.parameter_sets_and_idr_observed = self.snapshot.sps_observed
             && self.snapshot.pps_observed
             && self.snapshot.idr_messages != 0;
+        Some(PacketInfo {
+            idr: summary.idr,
+            parameters: summary.sps.is_some() || summary.pps,
+        })
     }
+}
+
+#[derive(Clone, Copy)]
+pub struct PacketInfo {
+    pub idr: bool,
+    pub parameters: bool,
 }
 
 #[derive(Default)]
@@ -193,9 +203,9 @@ mod tests {
     fn pinned_headers_do_not_enter_encoded_stream_and_key_flag_is_consumed() {
         let mut inspector = Inspector::default();
         inspector.configure(protocol());
-        inspector.receive(&metadata(true));
-        inspector.receive(KEY);
-        inspector.receive(&[0, 0, 1, 0x41, 0x80]);
+        let _ = inspector.receive(&metadata(true));
+        let _ = inspector.receive(KEY);
+        let _ = inspector.receive(&[0, 0, 1, 0x41, 0x80]);
         let s = inspector.snapshot();
         assert_eq!(
             (
@@ -216,8 +226,8 @@ mod tests {
     fn headerless_key_fallback_matches_pinned_client_without_claiming_idr() {
         let mut inspector = Inspector::default();
         inspector.configure(protocol());
-        inspector.receive(&[0, 0, 1, 0x41, 0x80]);
-        inspector.receive(&[0, 0, 1, 0x41, 0x80]);
+        let _ = inspector.receive(&[0, 0, 1, 0x41, 0x80]);
+        let _ = inspector.receive(&[0, 0, 1, 0x41, 0x80]);
         let s = inspector.snapshot();
         assert_eq!(s.key_chunks_announced, 2);
         assert_eq!(s.idr_messages, 0);
@@ -235,7 +245,7 @@ mod tests {
             [0, 0, 1, 0x41, 0x80].repeat(257),
         ] {
             let mut inspector = Inspector::default();
-            inspector.receive(&data);
+            let _ = inspector.receive(&data);
             let s = inspector.snapshot();
             assert_eq!(s.unrecognized_messages, 1);
             assert_eq!(s.annex_b_messages, 0);
@@ -246,7 +256,7 @@ mod tests {
     fn repeated_configuration_preserves_state_and_changed_protocol_resets_it() {
         let mut inspector = Inspector::default();
         inspector.configure(protocol());
-        inspector.receive(KEY);
+        let _ = inspector.receive(KEY);
         inspector.configure(protocol());
         assert_eq!(inspector.snapshot().idr_messages, 1);
         let mut p = protocol();
@@ -261,12 +271,12 @@ mod tests {
         let mut p = protocol();
         p.flag_offset = u32::MAX;
         inspector.configure(p);
-        inspector.receive(&metadata(true));
+        let _ = inspector.receive(&metadata(true));
         assert_eq!(inspector.snapshot().metadata_messages, 0);
         inspector.configure(protocol());
         let mut v = metadata(true);
         v[0] = 3;
-        inspector.receive(&v);
+        let _ = inspector.receive(&v);
         assert_eq!(inspector.snapshot().metadata_messages, 0);
     }
 }
