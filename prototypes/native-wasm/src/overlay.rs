@@ -371,7 +371,7 @@ impl Capture {
         let texture_id = self.bindings.get(&unit).copied().unwrap_or(0);
         let texture = if texture_id == 0 {
             // GLES/WebGL incomplete default texture samples opaque black.
-            // Matoya uses this for untextured black GUI backgrounds.
+            // Match that result rather than treating a zero binding as missing data.
             Arc::new(Texture {
                 version: 0,
                 width: 1,
@@ -434,6 +434,96 @@ impl Capture {
         });
         Ok(())
     }
+}
+
+fn read_pixels(
+    m: &GuestMemory,
+    size: (u32, u32),
+    format: u32,
+    pointer: u32,
+    storage: (usize, usize),
+) -> Result<Vec<u8>> {
+    let (w, h) = (size.0 as usize, size.1 as usize);
+    if w > 4096 || h > 4096 {
+        bail!("UI texture size");
+    }
+    let channels = match format {
+        glow::RGBA => 4,
+        glow::RGB => 3,
+        glow::RG | glow::LUMINANCE_ALPHA => 2,
+        glow::RED | glow::ALPHA | glow::LUMINANCE => 1,
+        _ => bail!("UI texture pixel format"),
+    };
+    let row_width = if storage.0 == 0 { w } else { storage.0 };
+    let alignment = if storage.1 == 0 { 4 } else { storage.1 };
+    if row_width < w || row_width > 4096 || ![1, 2, 4, 8].contains(&alignment) {
+        bail!("UI texture pixel storage");
+    }
+    let stride = (row_width * channels).div_ceil(alignment) * alignment;
+    let count = if h == 0 {
+        0
+    } else {
+        stride * (h - 1) + w * channels
+    };
+    if count > 16 * 1024 * 1024 {
+        bail!("UI upload byte limit");
+    }
+    let data = if pointer == 0 {
+        vec![0; count]
+    } else {
+        m.read(pointer, count)?
+    };
+    let mut rgba = Vec::with_capacity(w * h * 4);
+    for row in 0..h {
+        for x in 0..w {
+            let pixel = &data[row * stride + x * channels..row * stride + (x + 1) * channels];
+            let color = match format {
+                glow::RGBA => [pixel[0], pixel[1], pixel[2], pixel[3]],
+                glow::RGB => [pixel[0], pixel[1], pixel[2], 255],
+                glow::RED => [pixel[0], 0, 0, 255],
+                glow::RG => [pixel[0], pixel[1], 0, 255],
+                glow::ALPHA => [255, 255, 255, pixel[0]],
+                glow::LUMINANCE => [pixel[0], pixel[0], pixel[0], 255],
+                glow::LUMINANCE_ALPHA => [pixel[0], pixel[0], pixel[0], pixel[1]],
+                _ => unreachable!(),
+            };
+            rgba.extend_from_slice(&color);
+        }
+    }
+    Ok(rgba)
+}
+fn apply_internal_format(pixels: &mut [u8], format: u32) -> Result<()> {
+    for p in pixels.as_chunks_mut::<4>().0 {
+        match format {
+            glow::RGBA | glow::RGBA8 => {}
+            glow::RGB | glow::RGB8 => p[3] = 255,
+            glow::ALPHA => {
+                p[0] = 255;
+                p[1] = 255;
+                p[2] = 255;
+            }
+            glow::LUMINANCE => {
+                p[1] = p[0];
+                p[2] = p[0];
+                p[3] = 255;
+            }
+            glow::LUMINANCE_ALPHA => {
+                p[1] = p[0];
+                p[2] = p[0];
+            }
+            glow::RED | glow::R8 => {
+                p[1] = 0;
+                p[2] = 0;
+                p[3] = 255;
+            }
+            glow::RG | glow::RG8 => {
+                p[2] = 0;
+                p[3] = 255;
+            }
+            _ => bail!("UI texture internal format"),
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -560,94 +650,4 @@ mod tests {
         assert!(shared.frame.batches.is_empty());
         assert!(shared.report.failure.is_some());
     }
-}
-
-fn read_pixels(
-    m: &GuestMemory,
-    size: (u32, u32),
-    format: u32,
-    pointer: u32,
-    storage: (usize, usize),
-) -> Result<Vec<u8>> {
-    let (w, h) = (size.0 as usize, size.1 as usize);
-    if w > 4096 || h > 4096 {
-        bail!("UI texture size");
-    }
-    let channels = match format {
-        glow::RGBA => 4,
-        glow::RGB => 3,
-        glow::RG | glow::LUMINANCE_ALPHA => 2,
-        glow::RED | glow::ALPHA | glow::LUMINANCE => 1,
-        _ => bail!("UI texture pixel format"),
-    };
-    let row_width = if storage.0 == 0 { w } else { storage.0 };
-    let alignment = if storage.1 == 0 { 4 } else { storage.1 };
-    if row_width < w || row_width > 4096 || ![1, 2, 4, 8].contains(&alignment) {
-        bail!("UI texture pixel storage");
-    }
-    let stride = (row_width * channels).div_ceil(alignment) * alignment;
-    let count = if h == 0 {
-        0
-    } else {
-        stride * (h - 1) + w * channels
-    };
-    if count > 16 * 1024 * 1024 {
-        bail!("UI upload byte limit");
-    }
-    let data = if pointer == 0 {
-        vec![0; count]
-    } else {
-        m.read(pointer, count)?
-    };
-    let mut rgba = Vec::with_capacity(w * h * 4);
-    for row in 0..h {
-        for x in 0..w {
-            let pixel = &data[row * stride + x * channels..row * stride + (x + 1) * channels];
-            let color = match format {
-                glow::RGBA => [pixel[0], pixel[1], pixel[2], pixel[3]],
-                glow::RGB => [pixel[0], pixel[1], pixel[2], 255],
-                glow::RED => [pixel[0], 0, 0, 255],
-                glow::RG => [pixel[0], pixel[1], 0, 255],
-                glow::ALPHA => [255, 255, 255, pixel[0]],
-                glow::LUMINANCE => [pixel[0], pixel[0], pixel[0], 255],
-                glow::LUMINANCE_ALPHA => [pixel[0], pixel[0], pixel[0], pixel[1]],
-                _ => unreachable!(),
-            };
-            rgba.extend_from_slice(&color);
-        }
-    }
-    Ok(rgba)
-}
-fn apply_internal_format(pixels: &mut [u8], format: u32) -> Result<()> {
-    for p in pixels.as_chunks_mut::<4>().0 {
-        match format {
-            glow::RGBA | glow::RGBA8 => {}
-            glow::RGB | glow::RGB8 => p[3] = 255,
-            glow::ALPHA => {
-                p[0] = 255;
-                p[1] = 255;
-                p[2] = 255;
-            }
-            glow::LUMINANCE => {
-                p[1] = p[0];
-                p[2] = p[0];
-                p[3] = 255;
-            }
-            glow::LUMINANCE_ALPHA => {
-                p[1] = p[0];
-                p[2] = p[0];
-            }
-            glow::RED | glow::R8 => {
-                p[1] = 0;
-                p[2] = 0;
-                p[3] = 255;
-            }
-            glow::RG | glow::RG8 => {
-                p[2] = 0;
-                p[3] = 255;
-            }
-            _ => bail!("UI texture internal format"),
-        }
-    }
-    Ok(())
 }
