@@ -316,6 +316,7 @@ fn run() -> Result<()> {
         println!(
             "parsec-native-wasm <inspect|allocator|boot> <parsecd.wasm> [report.json]\n\
                   parsec-native-wasm window <parsecd.wasm> [report.json]\n\
+                  parsec-native-wasm video-hardware-probe [report.json]\n\
                   parsec-native-wasm transport-probe [report.json]\n\
                   parsec-native-wasm signaling-probe [report.json]\n\
                   parsec-native-wasm guest-offer-probe [report.json]\n\
@@ -335,7 +336,7 @@ fn run() -> Result<()> {
                   parsec-native-wasm account <parsecd.wasm> [report.json] [--cloudflare-stun] [--legacy-rsa-1024]\n\
                   parsec-native-wasm account-network-audit <parsecd.wasm> [report.json] [--cloudflare-stun] [--legacy-rsa-1024]\n\
                   parsec-native-wasm session-audit <parsecd.wasm> [report.json]\n\
-                  Account modes enable exact HTTPS/WSS origins and run until close. No decoded remote video.\n\
+                  Account modes enable exact HTTPS/WSS origins and run until close. Native H.264 GPU video output; audio and absolute remote mouse are unavailable. F8 toggles video.\n\
                   account-network-audit also reports destination origins (no URL tokens).\n\
                   Account modes accept --cloudflare-stun after the report path (STUN only).\n\
                   boot reports the first unimplemented bridge; it is not a connected client."

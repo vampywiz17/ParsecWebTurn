@@ -1,3 +1,12 @@
+## M3m / 0.16.0
+
+Native H.264 decoding uses Media Foundation with D3D11 NV12 texture output and
+GPU video processing / DXGI presentation. No live decoded pixels are read back
+to CPU memory. F8 toggles the video layer to expose account controls. Reports
+distinguish decoder input, GPU output and presentation, with isolated failures.
+Audio and absolute remote mouse mapping are not implemented yet. See
+[M3m notes](../../docs/NATIVE_M3M.md).
+
 ## M3l / 0.15.0
 
 Pinned video metadata and H.264 Annex B NAL headers are inspected at the receive

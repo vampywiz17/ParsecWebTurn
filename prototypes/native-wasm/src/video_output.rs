@@ -3,7 +3,8 @@ use bytes::Bytes;
 use serde::Serialize;
 use std::collections::VecDeque;
 
-pub const MAX_FRAMES: usize = 8;
+// Allow bounded headroom while Media Foundation initializes its first device.
+pub const MAX_FRAMES: usize = 32;
 pub const MAX_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Clone, Default, Serialize)]
@@ -114,6 +115,10 @@ impl Queue {
     }
 
     pub fn clear(&mut self) {
+        self.report.frames_dropped = self
+            .report
+            .frames_dropped
+            .saturating_add(self.frames.len() as u64);
         self.frames.clear();
         self.report.queue_depth = 0;
         self.report.queue_bytes = 0;
@@ -133,6 +138,7 @@ mod tests {
         assert_eq!(q.report.failure_stage, Some("video-input-queue-full"));
         assert_eq!(q.report.queue_depth, 0);
         assert_eq!(q.report.queue_bytes, 0);
+        assert_eq!(q.report.frames_dropped, MAX_FRAMES as u64 + 1);
         q.fail("later", Some("0x80000000".into()));
         assert_eq!(q.report.failure_stage, Some("video-input-queue-full"));
     }
@@ -154,8 +160,10 @@ mod tests {
     }
     #[test]
     fn stopped_and_oversized_input_are_never_retained() {
-        let mut q = Queue::default();
-        q.stopped = true;
+        let mut q = Queue {
+            stopped: true,
+            ..Default::default()
+        };
         assert!(!q.submit(b"private-video", true, false, 0));
         assert_eq!(q.report.frames_queued, 0);
         let mut q = Queue::default();

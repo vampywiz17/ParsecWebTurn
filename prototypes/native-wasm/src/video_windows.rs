@@ -508,6 +508,12 @@ impl Drop for Session {
     }
 }
 
+struct ProcessorCache {
+    enumeration: ID3D11VideoProcessorEnumerator,
+    processor: ID3D11VideoProcessor,
+    key: (u32, u32, u32, u32),
+}
+
 struct Renderer {
     device: ID3D11Device,
     video_device: ID3D11VideoDevice,
@@ -518,11 +524,7 @@ struct Renderer {
     verify_synthetic_pixels: bool,
     synthetic_pixels_verified: bool,
     size: (u32, u32),
-    processor: Option<(
-        ID3D11VideoProcessorEnumerator,
-        ID3D11VideoProcessor,
-        (u32, u32, u32, u32),
-    )>,
+    processor: Option<ProcessorCache>,
 }
 impl Renderer {
     unsafe fn create(hwnd: HWND) -> Result<Self> {
@@ -545,7 +547,8 @@ impl Renderer {
         let device = device.ok_or_else(|| unavailable("video-d3d11-null-device"))?;
         let context = context.ok_or_else(|| unavailable("video-d3d11-null-context"))?;
         let multithread: ID3D10Multithread = api("video-d3d11-multithread", device.cast())?;
-        multithread.SetMultithreadProtected(true);
+        // Return value is the previous protection state, not success/failure.
+        let _ = multithread.SetMultithreadProtected(true);
         let video_device = api("video-d3d11-video-device", device.cast())?;
         let video_context = api("video-d3d11-video-context", context.cast())?;
         let dxgi: IDXGIDevice = api("video-dxgi-device", device.cast())?;
@@ -672,7 +675,7 @@ impl Renderer {
             self.processor = None;
         }
         let key = (td.Width, td.Height, size.0, size.1);
-        if self.processor.as_ref().is_none_or(|p| p.2 != key) {
+        if self.processor.as_ref().is_none_or(|p| p.key != key) {
             let desc = D3D11_VIDEO_PROCESSOR_CONTENT_DESC {
                 InputFrameFormat: D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE,
                 InputFrameRate: DXGI_RATIONAL {
@@ -697,9 +700,15 @@ impl Renderer {
                 "video-processor-create",
                 self.video_device.CreateVideoProcessor(&enumeration, 0),
             )?;
-            self.processor = Some((enumeration, processor, key));
+            self.processor = Some(ProcessorCache {
+                enumeration,
+                processor,
+                key,
+            });
         }
-        let (enumeration, processor, _) = self.processor.as_ref().unwrap();
+        let cached = self.processor.as_ref().unwrap();
+        let enumeration = &cached.enumeration;
+        let processor = &cached.processor;
         let input_desc = D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC {
             ViewDimension: D3D11_VPIV_DIMENSION_TEXTURE2D,
             Anonymous: D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC_0 {
@@ -802,7 +811,7 @@ pub fn probe() -> anyhow::Result<serde_json::Value> {
     use std::sync::atomic::Ordering;
     let window = crate::window::Window::create(false, true, false, false)?;
     let pipeline = Pipeline::start_mode(window.clone(), true);
-    let fixture = include_bytes!("../fixtures/synthetic-64x64.h264");
+    let fixture = include_bytes!("../fixtures/synthetic-1920x1080.h264");
     let mut starts = Vec::new();
     for i in 0..fixture.len().saturating_sub(4) {
         if fixture[i..].starts_with(&[0, 0, 0, 1]) && fixture[i + 4] & 31 == 9 {
@@ -820,11 +829,16 @@ pub fn probe() -> anyhow::Result<serde_json::Value> {
         pipeline.submit(bytes, info);
         std::thread::sleep(Duration::from_millis(40));
     }
+    let framing = inspector.snapshot();
+    anyhow::ensure!(
+        framing.idr_messages == 1 && framing.sps_profile_idc == Some(100),
+        "synthetic high-profile reference-picture fixture"
+    );
     let until = Instant::now() + Duration::from_secs(12);
     while Instant::now() < until {
         let report = pipeline.snapshot();
         if report.failure_stage.is_some()
-            || (report.frames_presented > 0 && report.synthetic_pixel_variation_verified)
+            || (report.frames_presented == 8 && report.synthetic_pixel_variation_verified)
         {
             break;
         }
@@ -846,7 +860,7 @@ pub fn probe() -> anyhow::Result<serde_json::Value> {
     }
     Ok(
         serde_json::json!({"scope":"synthetic-native-h264-d3d11", "external_requests_enabled":false,"real_account_used":false,
-        "cpu_readback_live_enabled":false,"synthetic_fixture_frames":8,"video":report,
+        "cpu_readback_live_enabled":false,"synthetic_fixture_frames":8,"synthetic_fixture_idr_frames":framing.idr_messages,"video":report,
         "native_window_released":window.handle().is_null(),"gpu_resources_released":released}),
     )
 }

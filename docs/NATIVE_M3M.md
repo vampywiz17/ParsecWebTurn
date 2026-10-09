@@ -20,7 +20,7 @@ F8 toggles the video layer to expose the underlying controls. F11 remains the
 parent fullscreen shortcut. The child cannot take keyboard/mouse focus. This
 first video step does not implement absolute remote-pointer mapping or audio.
 
-Compressed input is bounded to eight messages / 8 MiB, each at most 1 MiB.
+Compressed input is bounded to 32 messages / 8 MiB (headroom for initial device creation), each at most 1 MiB.
 Initial delta pictures wait for an observed IDR; parameter sets may precede it.
 If queue overflow would break the reference chain, this video attempt stops
 with a fixed diagnostic rather than submitting corrupt deltas. Reconnect to
@@ -43,7 +43,7 @@ Hardware-decode utilization is unknown (null): D3D11-backed output alone is not
 presented as a measured GPU decode-engine utilization or independent proof.
 
 The standalone video-hardware-probe uses eight locally generated synthetic
-64x64 H.264 pictures and no network/account. It tests actual decode, NV12 texture
+1920x1080 High-profile H.264 pictures (one IDR, seven delta pictures) and no network/account. It tests actual decode, NV12 texture
 output, color conversion and presentation. Only this offline probe may read a
 small set of synthetic backbuffer pixels once to verify variation; live sessions
 have that switch disabled. Headless CI may report GPU unavailability, but must
