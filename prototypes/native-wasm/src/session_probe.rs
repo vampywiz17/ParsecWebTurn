@@ -312,6 +312,33 @@ fn probe_mode(mode: Mode) -> Result<serde_json::Value> {
         } else {
             None
         };
+        {
+            let b = backend.lock().unwrap_or_else(|e| e.into_inner());
+            b.native_attempt
+                .as_ref()
+                .context("active attempt absent")?
+                .wait_transport(Duration::from_secs(10))?;
+            let until = Instant::now() + Duration::from_secs(2);
+            loop {
+                let report = b.diagnostic()?;
+                let active = &report["active_attempt_diagnostic"];
+                if active["transport_states"]["dtls"] == "connected" {
+                    if active["local_description_set"] != true
+                        || active["remote_description_set"] != true
+                        || active["sync_received"] != true
+                        || active["transport_connected"] != true
+                        || b.native_attempt.is_none()
+                    {
+                        bail!("live diagnostic omitted native phases or consumed the attempt");
+                    }
+                    break;
+                }
+                if Instant::now() >= until {
+                    bail!("native state diagnostic did not reach connected DTLS");
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
         let mut attempt = backend
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -422,6 +449,7 @@ fn probe_mode(mode: Mode) -> Result<serde_json::Value> {
     let mut report = checked?;
     report["compact_credentials_normalization_verified"] = serde_json::json!(!control);
     report["parsec_padded_ufrag_native_negotiation_verified"] = serde_json::json!(!control);
+    report["live_attempt_reporting_verified"] = serde_json::json!(true);
     if peer.connection_state() != RTCPeerConnectionState::Closed {
         bail!("test server did not close");
     }
@@ -841,6 +869,7 @@ mod tests {
             true
         );
         assert_eq!(report["binary_messages_verified"], 6);
+        assert_eq!(report["live_attempt_reporting_verified"], true);
         assert_eq!(report["guest_buffer_retry_verified"], true);
         assert_eq!(report["peers_closed"], true);
         assert_eq!(report["parsec_host_connected"], false);

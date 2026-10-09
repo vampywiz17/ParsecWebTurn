@@ -142,6 +142,21 @@ fn main() {
     }
 }
 
+fn parse_cloudflare_stun_flag(flag: Option<&str>) -> Result<bool> {
+    match flag {
+        None => Ok(false),
+        Some("--cloudflare-stun") => Ok(true),
+        Some(_) => bail!("unsupported account option"),
+    }
+}
+
+#[test]
+fn cloudflare_stun_flag_requires_explicit_exact_selection() {
+    assert!(!parse_cloudflare_stun_flag(None).unwrap());
+    assert!(parse_cloudflare_stun_flag(Some("--cloudflare-stun")).unwrap());
+    assert!(parse_cloudflare_stun_flag(Some("--turn")).is_err());
+}
+
 fn run() -> Result<()> {
     let mut args = env::args().skip(1);
     let mode = args.next().unwrap_or_else(|| "help".into());
@@ -246,6 +261,7 @@ fn run() -> Result<()> {
                   parsec-native-wasm session-audit <parsecd.wasm> [report.json]\n\
                   Account modes enable exact HTTPS/WSS origins and run until close. No decoded remote video.\n\
                   account-network-audit also reports destination origins (no URL tokens).\n\
+                  Account modes accept --cloudflare-stun after the report path (STUN only).\n\
                   boot reports the first unimplemented bridge; it is not a connected client."
         );
         return Ok(());
@@ -270,6 +286,11 @@ fn run() -> Result<()> {
     }
     let path = PathBuf::from(args.next().context("WASM path required")?);
     let report_path = args.next().map(PathBuf::from);
+    let cloudflare_stun = if account_mode {
+        parse_cloudflare_stun_flag(args.next().as_deref())?
+    } else {
+        false
+    };
     #[cfg(windows)]
     let capture_path = if mode == "window" {
         args.next().map(PathBuf::from)
@@ -395,6 +416,14 @@ fn run() -> Result<()> {
         report.instantiated = true;
         allocator_roundtrip(&mut store, &instance)?;
         report.allocator_roundtrip = true;
+        if cloudflare_stun {
+            store
+                .data()
+                .backend
+                .lock()
+                .map_err(|_| anyhow::anyhow!("backend lock poisoned"))?
+                .cloudflare_stun_enabled = true;
+        }
         if mode == "boot" || window_mode {
             let start = instance.get_typed_func::<(), ()>(&mut store, "_start")?;
             let outcome = start.call(&mut store, ());
@@ -460,13 +489,14 @@ fn run() -> Result<()> {
             report.network_audit = Some(runtime.audit.snapshot());
             report.local_platform = Some(runtime.platform.snapshot());
         }
-        report.native_backend = Some(serde_json::to_value(
-            &*store
+        report.native_backend = Some(
+            store
                 .data()
                 .backend
                 .lock()
-                .map_err(|_| anyhow::anyhow!("backend lock poisoned"))?,
-        )?);
+                .map_err(|_| anyhow::anyhow!("backend lock poisoned"))?
+                .diagnostic()?,
+        );
         report.host = Some(store.into_data());
     }
     if audit_mode {

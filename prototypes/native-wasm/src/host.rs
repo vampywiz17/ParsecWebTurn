@@ -626,8 +626,12 @@ fn backend_call(
                         let config = b.video_protocol.as_ref().map(|p| crate::control::Config {
                             video_protocol: p.version,
                         });
-                        match crate::attempt::Attempt::spawn_configured(&id, output.clone(), config)
-                        {
+                        match crate::attempt::Attempt::spawn_configured(
+                            &id,
+                            output.clone(),
+                            config,
+                            b.cloudflare_stun_enabled,
+                        ) {
                             Ok(attempt) => {
                                 b.status = Some(20);
                                 b.native_attempt = Some(attempt);
@@ -732,11 +736,12 @@ fn backend_call(
                 }
                 "parsec_web_get_status" => {
                     b.pump_native_events()?;
-                    if b.native_attempt
+                    if let Some(stage) = b
+                        .native_attempt
                         .as_ref()
-                        .is_some_and(|attempt| attempt.failed())
+                        .and_then(|attempt| attempt.failure_stage())
                     {
-                        b.fail_native_attempt(crate::attempt::FailureStage::Worker)?;
+                        b.fail_native_attempt(stage)?;
                     }
                     result(results, b.status.context("backend status missing")?)
                 }

@@ -81,6 +81,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Guest/native ICE/DTLS/SCTP exchange failed' }
           $session = Get-Content "$artifact/guest-session.json" -Raw | ConvertFrom-Json
           if (!$session.parsec_padded_ufrag_native_negotiation_verified) { throw 'Padded Parsec ufrag authentication was not verified' }
+          if (!$session.live_attempt_reporting_verified) { throw 'Live native transport reporting was not verified' }
           if (!$session.guest_begin_and_candidate_verified -or !$session.guest_buffer_retry_verified -or !$session.guest_sync_ack_verified -or $session.guest_local_candidate_events -lt 1 -or $session.connected_peers -ne 2 -or $session.binary_messages_verified -ne 6 -or !$session.peers_closed -or $session.native_connected.channels_open -ne 3 -or $session.parsec_host_connected) { throw 'Incorrect guest/native session proof' }
           & $exe guest-control-probe "$artifact/guest-control.json"
           if ($LASTEXITCODE -ne 0) { throw 'Native Parsec control framing/imports failed' }

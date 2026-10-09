@@ -1,5 +1,11 @@
 # Native Rust / Parsec WASM prototype
 
+M3k-fix10 / 0.14.10 adds opt-in Cloudflare STUN to account modes via
+`--cloudflare-stun` after the report path. It fixes missing active-attempt reports
+and preserves four previous attempt diagnostics across retries, including native
+ICE/DTLS states and SDP/sync phases. Tests remain offline and no TURN is added.
+See [M3k-fix10](../../docs/NATIVE_M3K_FIX10.md).
+
 M3k-fix9 / 0.14.9 adds an isolated Parsec remote-ufrag compatibility case:
 six standard ICE characters followed by `==`, preserved byte-for-byte through
 SDP and STUN authentication. This is explicitly outside RFC 8839's ICE grammar;

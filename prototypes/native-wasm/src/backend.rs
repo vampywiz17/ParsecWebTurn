@@ -8,6 +8,7 @@ use std::collections::VecDeque;
 #[derive(Default, Serialize)]
 pub struct Backend {
     pub initialized: bool,
+    pub cloudflare_stun_enabled: bool,
     pub generation: u64,
     pub status: Option<i32>,
     pub video_protocol: Option<VideoProtocol>,
@@ -18,6 +19,8 @@ pub struct Backend {
     pub attempt_failure: Option<crate::attempt::FailureStage>,
     pub attempt_diagnostic: Option<Value>,
     pub remote_begin_diagnostic: Option<Value>,
+    pub previous_attempt_diagnostics: VecDeque<Value>,
+    pub previous_attempts_omitted: u64,
     #[serde(skip)]
     pub guests: Vec<Value>,
     #[serde(skip)]
@@ -76,6 +79,20 @@ impl Backend {
     }
 
     pub fn prepare_attempt(&mut self) {
+        if self.attempt_diagnostic.is_some()
+            || self.remote_begin_diagnostic.is_some()
+            || self.attempt_failure.is_some()
+        {
+            if self.previous_attempt_diagnostics.len() == 4 {
+                self.previous_attempt_diagnostics.pop_front();
+                self.previous_attempts_omitted = self.previous_attempts_omitted.saturating_add(1);
+            }
+            self.previous_attempt_diagnostics.push_back(json!({
+                "attempt":self.attempt_diagnostic,
+                "failure":self.attempt_failure,
+                "remote_begin":self.remote_begin_diagnostic
+            }));
+        }
         self.attempt_failure = None;
         self.attempt_diagnostic = None;
         self.remote_begin_diagnostic = None;
@@ -86,6 +103,17 @@ impl Backend {
         self.host_mode = 0;
         self.encode_latency = 0.0;
         self.control_frames_received = 0;
+    }
+
+    /// Include a live attempt without consuming, cancelling or pumping it.
+    pub fn diagnostic(&self) -> Result<Value> {
+        let mut value = serde_json::to_value(self)?;
+        value["active_attempt_diagnostic"] = self
+            .native_attempt
+            .as_ref()
+            .map(|a| a.snapshot())
+            .unwrap_or(Value::Null);
+        Ok(value)
     }
 
     pub fn discard_idle_message(&mut self) -> Result<()> {
@@ -252,6 +280,36 @@ impl Backend {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn retry_history_keeps_failure_and_is_bounded_without_ids() {
+        let mut b = Backend::default();
+        b.init();
+        b.attempt_id = "private-attempt-sentinel".into();
+        for index in 0..6 {
+            b.attempt_diagnostic = Some(json!({"remote_candidates":index}));
+            b.attempt_failure = Some(crate::attempt::FailureStage::Deadline);
+            b.prepare_attempt();
+        }
+        let value = b.diagnostic().unwrap();
+        assert_eq!(
+            value["previous_attempt_diagnostics"]
+                .as_array()
+                .unwrap()
+                .len(),
+            4
+        );
+        assert_eq!(value["previous_attempts_omitted"], 2);
+        assert_eq!(
+            value["previous_attempt_diagnostics"][0]["attempt"]["remote_candidates"],
+            2
+        );
+        assert_eq!(
+            value["previous_attempt_diagnostics"][3]["failure"],
+            "deadline"
+        );
+        assert!(value["active_attempt_diagnostic"].is_null());
+        assert!(!value.to_string().contains("private-attempt-sentinel"));
+    }
     #[test]
     fn transport_failure_replaces_pending_events_and_cleans_buffers() {
         for status in [20, 0] {

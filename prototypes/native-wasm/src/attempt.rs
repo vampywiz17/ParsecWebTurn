@@ -27,6 +27,7 @@ use webrtc::{
     data_channel::data_channel_init::RTCDataChannelInit,
     data_channel::data_channel_state::RTCDataChannelState,
     ice::network_type::NetworkType,
+    ice_transport::ice_server::RTCIceServer,
     ice_transport::{ice_candidate_type::RTCIceCandidateType, ice_protocol::RTCIceProtocol},
     peer_connection::{
         configuration::RTCConfiguration, peer_connection_state::RTCPeerConnectionState,
@@ -147,6 +148,12 @@ struct Progress {
     remote_candidates: usize,
     messages_received: usize,
     control_ready: bool,
+    local_description_set: bool,
+    remote_description_set: bool,
+    sync_received: bool,
+    transport_states: serde_json::Value,
+    transport_states_before_close: serde_json::Value,
+    cloudflare_stun: bool,
 }
 
 struct Completion {
@@ -181,13 +188,14 @@ impl Attempt {
 
     #[cfg(test)]
     pub fn spawn_named(id: &str, output: Output) -> Result<Self> {
-        Self::spawn_configured(id, output, None)
+        Self::spawn_configured(id, output, None, false)
     }
 
     pub fn spawn_configured(
         id: &str,
         output: Output,
         config: Option<crate::control::Config>,
+        cloudflare_stun: bool,
     ) -> Result<Self> {
         CandidateGate::new(id)?;
         let mut active = ACTIVE_WORKERS.load(Ordering::SeqCst);
@@ -209,7 +217,10 @@ impl Attempt {
         let (tx, rx) = mpsc::sync_channel(64);
         let completion = Arc::new(Mutex::new(Completion {
             output: Some(output),
-            progress: Default::default(),
+            progress: Progress {
+                cloudflare_stun,
+                ..Default::default()
+            },
             cancelled: false,
             events: Default::default(),
             messages: Default::default(),
@@ -225,7 +236,7 @@ impl Attempt {
             .name("parsec-native-offer".into())
             .spawn(move || {
                 let _permit = permit;
-                let result = worker(&shared, &notify, &attempt_id, rx, config);
+                let result = worker(&shared, &notify, &attempt_id, rx, config, cloudflare_stun);
                 let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
                 if result.is_err() {
                     state.progress.failed = true;
@@ -273,12 +284,12 @@ impl Attempt {
         self.wake.notify_all();
     }
 
-    pub fn failed(&self) -> bool {
-        self.completion
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
+    pub fn failure_stage(&self) -> Option<FailureStage> {
+        let state = self.completion.lock().unwrap_or_else(|e| e.into_inner());
+        state
             .progress
             .failed
+            .then_some(state.progress.failure_stage.unwrap_or(FailureStage::Worker))
     }
 
     pub fn control_ready(&self) -> bool {
@@ -298,7 +309,9 @@ impl Attempt {
 
     pub fn snapshot(&self) -> serde_json::Value {
         let state = self.completion.lock().unwrap_or_else(|e| e.into_inner());
-        serde_json::json!({ "offer_ready": state.progress.ready, "mid":state.progress.mid, "peer_closed": state.progress.closed, "failed": state.progress.failed, "failure_stage": state.progress.failure_stage, "negotiated_channels": state.progress.channels, "channels_open": state.progress.open_mask.count_ones(), "transport_connected":state.progress.transport_connected, "local_candidates":state.progress.local_candidates, "remote_candidates":state.progress.remote_candidates, "messages_received":state.progress.messages_received, "worker_finished": *self.finished.0.lock().unwrap_or_else(|e| e.into_inner()), "host_connected": false })
+        serde_json::json!({ "offer_ready": state.progress.ready, "mid":state.progress.mid, "peer_closed": state.progress.closed, "failed": state.progress.failed, "failure_stage": state.progress.failure_stage, "negotiated_channels": state.progress.channels, "channels_open": state.progress.open_mask.count_ones(), "transport_connected":state.progress.transport_connected, "local_candidates":state.progress.local_candidates, "remote_candidates":state.progress.remote_candidates, "messages_received":state.progress.messages_received, "worker_finished": *self.finished.0.lock().unwrap_or_else(|e| e.into_inner()), "host_connected": false,
+        "local_description_set":state.progress.local_description_set,"remote_description_set":state.progress.remote_description_set,"sync_received":state.progress.sync_received,"transport_states":state.progress.transport_states,"transport_states_before_close":state.progress.transport_states_before_close,
+        "ice_servers_configured":state.progress.cloudflare_stun,"stun_provider":if state.progress.cloudflare_stun {Some("cloudflare")} else {None},"network_types":["udp4"],"connection_deadline_seconds":30 })
     }
 
     fn command(&self, id: &str, command: Command) -> Result<()> {
@@ -410,6 +423,7 @@ fn worker(
     id: &str,
     commands: mpsc::Receiver<Command>,
     config: Option<crate::control::Config>,
+    cloudflare_stun: bool,
 ) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -421,7 +435,7 @@ fn worker(
     let peer = runtime.block_on(async {
         tokio::time::timeout(
             Duration::from_secs(5),
-            api.new_peer_connection(RTCConfiguration::default()),
+            api.new_peer_connection(ice_configuration(cloudflare_stun)),
         )
         .await
     })??;
@@ -562,15 +576,23 @@ fn worker(
         }
         let deadline = std::time::Instant::now() + Duration::from_secs(30);
         loop {
+            // Read only documented native state enums; never serialize SDP,
+            // addresses, certificates or underlying error strings.
+            shared
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .progress
+                .transport_states = transport_states(&peer);
             if std::time::Instant::now() >= deadline {
                 return Err(FailureStage::Deadline.into());
             }
-            let command = match commands
-                .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
-            {
+            let command = match commands.recv_timeout(
+                Duration::from_millis(250)
+                    .min(deadline.saturating_duration_since(std::time::Instant::now())),
+            ) {
                 Ok(command) => command,
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
-                Err(mpsc::RecvTimeoutError::Timeout) => return Err(FailureStage::Deadline.into()),
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
             };
             if shared.lock().unwrap_or_else(|e| e.into_inner()).cancelled {
                 break;
@@ -581,12 +603,15 @@ fn worker(
                         Command::Begin(remote)=>{
                             let local=offer.take().context("remote begin already supplied")?;
                             peer.set_local_description(local).await.context(FailureStage::SetLocalDescription)?;
+                            shared.lock().unwrap_or_else(|e|e.into_inner()).progress.local_description_set=true;
                             peer.set_remote_description(RTCSessionDescription::answer(description.answer(&remote)?)?).await.context(FailureStage::SetRemoteDescription)?;
+                            shared.lock().unwrap_or_else(|e|e.into_inner()).progress.remote_description_set=true;
                             gate.remote_ready(id,&description.mid,&remote.ufrag).context(FailureStage::CandidateGate)?;
                         }
                         Command::Candidate(candidate)=>gate.push(id,candidate).context(FailureStage::CandidateGate)?,
                         Command::Sync=>{
                             gate.sync(id)?;
+                            shared.lock().unwrap_or_else(|e|e.into_inner()).progress.sync_received=true;
                             if !sync_ack_scheduled {
                                 sync_ack_scheduled=true;
                                 let shared=shared.clone(); let wake=wake.clone(); let id=id.to_owned();
@@ -616,6 +641,12 @@ fn worker(
         drop((offer, channels));
         Ok(())
     })();
+    {
+        let states = transport_states(&peer);
+        let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
+        state.progress.transport_states = states.clone();
+        state.progress.transport_states_before_close = states;
+    }
     let closed = runtime
         .block_on(async { tokio::time::timeout(Duration::from_secs(2), peer.close()).await });
     let is_closed =
@@ -646,8 +677,48 @@ fn worker(
     outcome
 }
 
+fn transport_states(peer: &webrtc::peer_connection::RTCPeerConnection) -> serde_json::Value {
+    serde_json::json!({
+        "peer":peer.connection_state().to_string(),
+        "ice":peer.ice_connection_state().to_string(),
+        "gathering":peer.ice_gathering_state().to_string(),
+        "signaling":peer.signaling_state().to_string(),
+        "dtls":peer.dtls_transport().state().to_string()
+    })
+}
+
+fn ice_configuration(cloudflare_stun: bool) -> RTCConfiguration {
+    RTCConfiguration {
+        ice_servers: if cloudflare_stun {
+            vec![RTCIceServer {
+                urls: vec!["stun:stun.cloudflare.com:3478".into()],
+                ..Default::default()
+            }]
+        } else {
+            vec![]
+        },
+        ..Default::default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cloudflare_stun_is_opt_in_without_turn_or_credentials() {
+        assert!(super::ice_configuration(false).ice_servers.is_empty());
+        let config = super::ice_configuration(true);
+        assert_eq!(config.ice_servers.len(), 1);
+        assert_eq!(
+            config.ice_servers[0].urls,
+            vec!["stun:stun.cloudflare.com:3478"]
+        );
+        assert!(config.ice_servers[0].username.is_empty());
+        assert!(config.ice_servers[0].credential.is_empty());
+        assert_eq!(
+            config.ice_transport_policy,
+            webrtc::peer_connection::policy::ice_transport_policy::RTCIceTransportPolicy::All
+        );
+    }
     use super::*;
     use crate::signaling::Credentials;
     use wasmtime::{Config, Engine, MemoryType, SharedMemory};
