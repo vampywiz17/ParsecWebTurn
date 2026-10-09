@@ -80,7 +80,7 @@ fn run() -> Result<()> {
         if store.data().event_loop.is_some() {
             desktop::run(&mut store, &instance)
         } else {
-            result.map_err(anyhow::Error::from)
+            result
         }
     })();
     // Persistence is also committed when guest files close. This final checkpoint

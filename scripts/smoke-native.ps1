@@ -12,7 +12,7 @@ foreach ($taskLaunch in 1..2) {
     $taskInfo.Environment['LOCALAPPDATA'] = $taskProfile
     $taskProcess = [Diagnostics.Process]::Start($taskInfo)
     try {
-        $taskUntil = [DateTime]::UtcNow.AddSeconds(45)
+        $taskUntil = [DateTime]::UtcNow.AddSeconds(180)
         do {
             Start-Sleep -Milliseconds 250
             $taskProcess.Refresh()

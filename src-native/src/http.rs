@@ -22,6 +22,7 @@ pub struct Network {
     closed: std::sync::atomic::AtomicBool,
     pub audit: std::sync::Arc<crate::network_audit::Audit>,
     policy: crate::network_policy::Policy,
+    #[cfg(any(test, feature = "diagnostics"))]
     fixture_root: Option<Vec<u8>>,
     client: OnceLock<Client>,
     active: Mutex<usize>,
@@ -60,6 +61,7 @@ impl Network {
             ..Default::default()
         }
     }
+    #[cfg(any(test, feature = "diagnostics"))]
     pub fn diagnostic(port: u16) -> Self {
         Self {
             policy: crate::network_policy::Policy::loopback(port),
@@ -73,6 +75,7 @@ impl Network {
             && matches!(url.scheme(), "http" | "https")
     }
 
+    #[cfg(any(test, feature = "diagnostics"))]
     pub fn diagnostic_tls(port: u16, root: Option<Vec<u8>>) -> Result<Self> {
         Ok(Self {
             policy: crate::network_policy::Policy::secure(&[&format!("https://127.0.0.1:{port}")])?,
@@ -112,6 +115,7 @@ impl Network {
                 .connect_timeout(MAX_TIMEOUT)
                 .timeout(MAX_TIMEOUT)
                 .pool_max_idle_per_host(2);
+            #[cfg(any(test, feature = "diagnostics"))]
             if let Some(root) = &self.fixture_root {
                 // Private trust is scoped to this loopback diagnostic client.
                 builder = builder

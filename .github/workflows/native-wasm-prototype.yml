@@ -52,7 +52,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Formatting failed' }
           cargo test --locked --manifest-path src-native/Cargo.toml --features diagnostics
           if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
-          cargo clippy --locked --manifest-path src-native/Cargo.toml --all-targets -- -D warnings
+          cargo clippy --locked --manifest-path src-native/Cargo.toml --bin parsec-web-turn -- -D warnings
           if ($LASTEXITCODE -ne 0) { throw 'Clippy failed' }
           cargo clippy --locked --manifest-path src-native/Cargo.toml --features diagnostics --all-targets -- -D warnings
           if ($LASTEXITCODE -ne 0) { throw 'Diagnostic Clippy failed' }

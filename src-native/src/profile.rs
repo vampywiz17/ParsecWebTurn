@@ -27,6 +27,7 @@ pub struct Profile {
     _lock: File,
 }
 impl Profile {
+    #[cfg(not(feature = "diagnostics"))]
     pub fn user() -> Result<Arc<Self>> {
         let root = std::env::var_os("LOCALAPPDATA")
             .context("Windows local application data unavailable")?;

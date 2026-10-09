@@ -74,6 +74,7 @@ impl Window {
     }
 
     // The standalone D3D11 test has no OpenGL UI and must not depend on WGL.
+    #[cfg(any(test, feature = "diagnostics"))]
     pub fn create_video_probe() -> Result<Arc<Self>> {
         Self::create_mode(false, true, false, false, false)
     }
@@ -387,7 +388,7 @@ unsafe fn create_window(state: &Arc<Window>, opengl_required: bool) -> Result<HW
         lpfnWndProc: Some(window_proc),
         hInstance: instance,
         hCursor: LoadCursorW(std::ptr::null_mut(), IDC_ARROW),
-        hIcon: LoadIconW(instance, 1usize as *const u16),
+        hIcon: LoadIconW(instance, std::ptr::without_provenance(1)),
         lpszClassName: name.as_ptr(),
         ..std::mem::zeroed()
     };

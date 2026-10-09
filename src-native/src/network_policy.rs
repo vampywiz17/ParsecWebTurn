@@ -17,6 +17,7 @@ impl Policy {
         ])
         .expect("fixed secure origins")
     }
+    #[cfg(any(test, feature = "diagnostics"))]
     pub fn loopback(port: u16) -> Self {
         Self(vec![
             ("http".into(), "127.0.0.1".into(), port),

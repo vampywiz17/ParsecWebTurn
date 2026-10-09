@@ -60,6 +60,7 @@ mod threads;
 mod tls_probe;
 mod transport;
 mod transport_diagnostic_errors;
+#[cfg(any(test, feature = "diagnostics"))]
 mod transport_diagnostics;
 mod video_output;
 mod video_stream;
@@ -94,7 +95,7 @@ const PINNED_SHA256: &str = "d663dd96df477c65479fb93eb88756c7fcafff581cc93be5636
 include!("diagnostic_entry.rs");
 #[cfg(all(windows, not(feature = "diagnostics")))]
 mod client;
-#[cfg(windows)]
+#[cfg(all(windows, any(test, not(feature = "diagnostics"))))]
 mod profile;
 fn main() {
     #[cfg(feature = "diagnostics")]
@@ -243,6 +244,7 @@ fn instantiate_with_runtime(
     Ok((store, instance))
 }
 
+#[cfg(feature = "diagnostics")]
 fn allocator_roundtrip(store: &mut Store<HostState>, instance: &Instance) -> Result<()> {
     let alloc = instance.get_typed_func::<(i32, i32), i32>(&mut *store, "mty_system_alloc")?;
     let free = instance.get_typed_func::<i32, ()>(&mut *store, "mty_system_free")?;

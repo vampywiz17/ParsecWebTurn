@@ -374,6 +374,7 @@ impl Network {
             }),
         }
     }
+    #[cfg(any(test, feature = "diagnostics"))]
     pub fn diagnostic(port: u16, heartbeat: Duration) -> Self {
         Self {
             closed: Default::default(),
@@ -392,6 +393,7 @@ impl Network {
             && self.policy.allows(url)
             && matches!(url.scheme(), "ws" | "wss")
     }
+    #[cfg(any(test, feature = "diagnostics"))]
     pub fn diagnostic_tls(port: u16, root: Option<Vec<u8>>) -> Result<Self> {
         let mut roots = rustls::RootCertStore::empty();
         if let Some(root) = root {
