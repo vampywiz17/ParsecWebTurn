@@ -35,3 +35,22 @@ Reference:
 https://learn.microsoft.com/en-us/windows/win32/direct3ddxgi/dxgi-present
 
 Live-host sustained playback with this fix still requires user validation.
+
+Validation (2026-10-09): source fb5be129a790ea6c01e6dac921956d9ed231153a,
+Windows CI https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37976936501
+completed successfully: formatting, 118 tests, strict Clippy, release build and
+all original WASM / loopback transport / security / platform probes. Both GPU
+probes retained bounded unavailability/cleanup diagnostics on the headless
+runner (ID3D11VideoDevice unavailable); they do not substitute for local GPU proof.
+
+The downloaded release executable passed the original offline login/privacy/
+wake-lock cleanup test (nine synthetic steps) and short 1080p GPU output test.
+On AMD Radeon 780M, the sustained probe submitted/decoded all 1,024 pictures,
+accepted 1,015 presentations and skipped nine busy submissions, with zero encoded
+picture drops, no failure, queue peak 14/32, verified synthetic pixel variation
+and released resources/window. Maximum Present time was 429 us; maximum decode
+feed time (including output/presentation) was 19,535 us. These are one synthetic
+local run, not real-host sustained-playback or decode-engine utilization claims.
+No new decoded-frame copy or live readback was introduced by this fix.
+The GPU-copy requirement, including permission for necessary implementation
+copies, is recorded in AGENTS.md for future work.
