@@ -34,3 +34,22 @@ by the prototype, so there are no owned resources to release. Requests to enable
 them remain explicitly unsupported; inspection labels them `inactive-release-only`
 rather than claiming full support. A guest test covers repeated release and
 rejected acquisition for all three imports.
+
+## Verification
+
+Source: `06f22f16116f27b29c915f117718aabb469651df`.
+Windows CI: https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37897757509
+passed 66 tests, formatting, strict Clippy, optimized build and all original-core
+integration probes, including the new hidden-window fullscreen probe.
+
+The downloaded release executable passed the local native-offer and hidden-window
+probes. The offline original UI completed all nine Tab/paste/login steps with 16
+GPU frames and no error. A separate local audit targeted only its own process's
+window, sent F11 through the native window procedure for three roundtrips and
+verified exact style/geometry restoration. The original UI continued for 18 GPU
+frames, closed normally and released its window without network access or a real
+account. The local test helper's initial title-based lookup found no window; it
+was corrected to enumerate only the owned process's prototype window before the
+successful F11 audit. No product-source change was needed for that helper fix.
+
+Real-account reconnect behavior after this fix still needs the user's test.
