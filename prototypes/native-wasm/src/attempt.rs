@@ -317,7 +317,7 @@ impl Attempt {
             })
     }
     pub fn begin(&self, id: &str, remote: Credentials) -> Result<()> {
-        remote.validate()?;
+        remote.validate_parsec_remote()?;
         self.command(id, Command::Begin(remote))
     }
     pub fn candidate(&self, id: &str, candidate: Candidate) -> Result<()> {

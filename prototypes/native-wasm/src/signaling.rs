@@ -44,6 +44,20 @@ fn token(value: &str, min: usize, max: usize) -> Result<()> {
     Ok(())
 }
 
+// Isolated pinned-Parsec peer compatibility, NOT RFC 8839 ice-char grammar.
+// Preserve identity exactly; stripping '=' would break STUN authentication.
+fn parsec_padded_ufrag(value: &str) -> bool {
+    value.len() == 8 && value.ends_with("==") && token(&value[..6], 6, 6).is_ok()
+}
+
+fn remote_ufrag(value: &str) -> Result<()> {
+    if parsec_padded_ufrag(value) {
+        Ok(())
+    } else {
+        token(value, 4, 256)
+    }
+}
+
 /// Aggregate categories only: no bytes, positions, prefixes, suffixes or hashes.
 /// In particular, '=' and URL-safe Base64 punctuation are not RFC 8839 ice-char.
 fn token_shape(value: &str, min: usize) -> serde_json::Value {
@@ -100,11 +114,22 @@ impl Credentials {
             "password_valid":token(&self.password,22,256).is_ok(),
             "ufrag_shape":token_shape(&self.ufrag,4),
             "password_shape":token_shape(&self.password,22),
+            "parsec_padded_ufrag_compatibility":parsec_padded_ufrag(&self.ufrag),
+            "remote_validation_error":self.validate_parsec_remote().err().and_then(|e|e.downcast_ref::<CredentialError>().copied()),
             "validation_error":self.validate().err().and_then(|e|e.downcast_ref::<CredentialError>().copied())
         })
     }
     pub fn validate(&self) -> Result<()> {
         token(&self.ufrag, 4, 256).context(CredentialError::IceUfrag)?;
+        self.validate_password_fingerprint()
+    }
+    /// Accept the observed peer's padded shape only at the Parsec remote edge.
+    /// Local credential generation/SDP parsing retains strict RFC validation.
+    pub fn validate_parsec_remote(&self) -> Result<()> {
+        remote_ufrag(&self.ufrag).context(CredentialError::IceUfrag)?;
+        self.validate_password_fingerprint()
+    }
+    fn validate_password_fingerprint(&self) -> Result<()> {
         token(&self.password, 22, 256).context(CredentialError::IcePassword)?;
         let digest = self
             .fingerprint
@@ -138,6 +163,13 @@ impl Description {
     // Narrow, single data-channel media section only; not a general SDP parser.
     // The resulting answer is parsed again by webrtc-rs's public SDP API.
     pub fn from_sdp(sdp: &str) -> Result<Self> {
+        Self::parse(sdp, false)
+    }
+    /// Remote-only parsing for the isolated Parsec interoperability fixture.
+    pub fn from_parsec_remote_sdp(sdp: &str) -> Result<Self> {
+        Self::parse(sdp, true)
+    }
+    fn parse(sdp: &str, parsec_remote: bool) -> Result<Self> {
         if sdp.len() > 64 * 1024 {
             bail!("SDP exceeds the adapter limit");
         }
@@ -161,13 +193,17 @@ impl Description {
             },
             mid: one(sdp, "a=mid:")?,
         };
-        description.credentials.validate()?;
+        if parsec_remote {
+            description.credentials.validate_parsec_remote()?;
+        } else {
+            description.credentials.validate()?;
+        }
         mid_valid(&description.mid)?;
         Ok(description)
     }
 
     pub fn answer(&self, remote: &Credentials) -> Result<String> {
-        remote.validate()?;
+        remote.validate_parsec_remote()?;
         mid_valid(&self.mid)?;
         // Parsec's pinned ja() uses legacy DTLS/SCTP + sctpmap. RFC 8841's
         // UDP/DTLS/SCTP + sctp-port represents the same SCTP port with the
@@ -299,7 +335,7 @@ impl CandidateGate {
     pub fn remote_ready(&mut self, attempt: &str, mid: &str, ufrag: &str) -> Result<()> {
         self.check(attempt)?;
         mid_valid(mid)?;
-        token(ufrag, 4, 256)?;
+        remote_ufrag(ufrag)?;
         if self.remote.is_some() {
             bail!("remote description already registered");
         }
@@ -326,6 +362,64 @@ mod tests {
             password: "abcdefghijklmnopqrstuv".into(),
             fingerprint: format!("sha-256 {}", ["AB"; 32].join(":")),
         }
+    }
+    #[test]
+    fn padded_parsec_remote_identity_survives_sdp_and_candidate_gate() {
+        let mut c = creds();
+        c.ufrag = "dGVzdA==".into();
+        assert!(c.validate().is_err());
+        c.validate_parsec_remote().unwrap();
+        let diagnostic = c.diagnostic();
+        assert_eq!(diagnostic["parsec_padded_ufrag_compatibility"], true);
+        assert!(diagnostic["remote_validation_error"].is_null());
+        assert_eq!(diagnostic["validation_error"], "ice-ufrag");
+        assert!(!diagnostic.to_string().contains(&c.ufrag));
+        let local = Description {
+            credentials: creds(),
+            mid: "0".into(),
+        };
+        let sdp = local.answer(&c).unwrap();
+        assert!(Description::from_sdp(&sdp).is_err());
+        let parsed = Description::from_parsec_remote_sdp(&sdp).unwrap();
+        assert_eq!(parsed.credentials.ufrag, c.ufrag);
+        let mut gate = CandidateGate::new("padded-fixture").unwrap();
+        gate.push(
+            "padded-fixture",
+            Candidate::new("192.0.2.1", 1234, false).unwrap(),
+        )
+        .unwrap();
+        gate.sync("padded-fixture").unwrap();
+        gate.remote_ready("padded-fixture", "0", &c.ufrag).unwrap();
+        let candidate = gate.pop_ready().unwrap();
+        assert_eq!(
+            candidate.username_fragment.as_deref(),
+            Some(c.ufrag.as_str())
+        );
+        assert!(candidate.candidate.ends_with(&format!("ufrag {}", c.ufrag)));
+    }
+    #[test]
+    fn parsec_compatibility_rejects_other_grammar_and_preserves_authentication_checks() {
+        for value in [
+            "te==stAA",
+            "dGVzdA=",
+            "dGVzdA===",
+            "dGVzdA== ",
+            "dGVzdA==\n",
+            "dGVzdA==\r\na=setup:passive",
+            "test-_==",
+            "短短==",
+        ] {
+            let mut c = creds();
+            c.ufrag = value.into();
+            assert!(c.validate_parsec_remote().is_err());
+        }
+        let mut c = creds();
+        c.ufrag = "dGVzdA==".into();
+        c.password = "abcdefghijklmnopqrstuv==".into();
+        assert!(c.validate_parsec_remote().is_err());
+        c.password = creds().password;
+        c.fingerprint = "sha-256 AA:BB".into();
+        assert!(c.validate_parsec_remote().is_err());
     }
     #[test]
     fn token_shape_classifies_rejection_without_disclosing_credential() {

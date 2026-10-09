@@ -137,6 +137,11 @@ fn probe_mode(mode: Mode) -> Result<serde_json::Value> {
         .build()?;
     let mut settings = SettingEngine::default();
     settings.set_network_types(vec![NetworkType::Udp4]);
+    if !control {
+        // Synthetic peer only. Exercise the reported padded-ufrag shape with
+        // real STUN authentication, DTLS and SCTP, without editing SDP tokens.
+        settings.set_ice_credentials("dGVzdA==".into(), "abcdefghijklmnopqrstuv1234567890".into());
+    }
     let api = APIBuilder::new().with_setting_engine(settings).build();
     let peer = Arc::new(runtime.block_on(async {
         tokio::time::timeout(
@@ -186,7 +191,7 @@ fn probe_mode(mode: Mode) -> Result<serde_json::Value> {
         let answer = runtime
             .block_on(peer.local_description())
             .context("server answer absent")?;
-        let remote = Description::from_sdp(&answer.sdp)?;
+        let remote = Description::from_parsec_remote_sdp(&answer.sdp)?;
         for (ptr, value) in [
             (1000, &remote.credentials.ufrag),
             (1300, &remote.credentials.password),
@@ -231,7 +236,8 @@ fn probe_mode(mode: Mode) -> Result<serde_json::Value> {
                 .as_ref()
                 .context("compact credential diagnostic missing")?;
             if shape["raw"]["ufrag_terminal_cr"] != true
-                || !shape["normalized"]["validation_error"].is_null()
+                || !shape["normalized"]["remote_validation_error"].is_null()
+                || shape["normalized"]["parsec_padded_ufrag_compatibility"] != true
                 || shape["attempt_matches"] != true
             {
                 bail!("compact credential normalization was not exercised");
@@ -415,6 +421,7 @@ fn probe_mode(mode: Mode) -> Result<serde_json::Value> {
         .block_on(async { tokio::time::timeout(Duration::from_secs(5), peer.close()).await })??;
     let mut report = checked?;
     report["compact_credentials_normalization_verified"] = serde_json::json!(!control);
+    report["parsec_padded_ufrag_native_negotiation_verified"] = serde_json::json!(!control);
     if peer.connection_state() != RTCPeerConnectionState::Closed {
         bail!("test server did not close");
     }
@@ -752,7 +759,7 @@ mod tests {
         let (mut store, instance) = crate::instantiate(&engine, &module).unwrap();
         let memory = store.data().memory.clone();
         memory.c_string(16, 64, "ufrag-shape-test").unwrap();
-        memory.c_string(1024, 258, "testAA==").unwrap();
+        memory.c_string(1024, 258, "te==stAA").unwrap();
         memory
             .c_string(1280, 258, "abcdefghijklmnopqrstuv")
             .unwrap();
@@ -776,7 +783,7 @@ mod tests {
         assert_eq!(shape["normalized"]["ufrag_shape"]["equals_bytes"], 2);
         assert_eq!(shape["normalized"]["validation_error"], "ice-ufrag");
         let report = serde_json::to_string(&*backend).unwrap();
-        for secret in ["testAA==", "abcdefghijklmnopqrstuv", "ufrag-shape-test"] {
+        for secret in ["te==stAA", "abcdefghijklmnopqrstuv", "ufrag-shape-test"] {
             assert!(!report.contains(secret));
         }
         assert!(store.data().boundary.is_none());
@@ -829,6 +836,10 @@ mod tests {
     fn wasm_candidate_exchange_connects_native_channels_without_claiming_parsec_session() {
         let report = super::probe().unwrap();
         assert_eq!(report["compact_credentials_normalization_verified"], true);
+        assert_eq!(
+            report["parsec_padded_ufrag_native_negotiation_verified"],
+            true
+        );
         assert_eq!(report["binary_messages_verified"], 6);
         assert_eq!(report["guest_buffer_retry_verified"], true);
         assert_eq!(report["peers_closed"], true);

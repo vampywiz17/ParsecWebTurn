@@ -1,5 +1,12 @@
 # Native Rust / Parsec WASM prototype
 
+M3k-fix9 / 0.14.9 adds an isolated Parsec remote-ufrag compatibility case:
+six standard ICE characters followed by `==`, preserved byte-for-byte through
+SDP and STUN authentication. This is explicitly outside RFC 8839's ICE grammar;
+local credentials and password/fingerprint validation remain strict. A controlled
+peer exercises the same shape with real native ICE/DTLS/SCTP. Real host acceptance
+still needs a user retest. See [M3k-fix9](../../docs/NATIVE_M3K_FIX9.md).
+
 M3k-fix8 / 0.14.8 adds aggregate credential character categories. The user's fix7
 report narrows the rejection to an eight-byte remote ufrag with valid length,
 no terminal CR and a matching attempt ID. No acceptance rules are changed and
