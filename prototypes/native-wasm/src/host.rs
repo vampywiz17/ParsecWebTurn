@@ -622,6 +622,8 @@ fn backend_call(
     results: &mut [Val],
 ) -> Result<()> {
     let m = &caller.data().memory;
+    #[cfg(windows)]
+    let media_window = caller.data().window.clone();
     let mut b = caller
         .data()
         .backend
@@ -647,6 +649,10 @@ fn backend_call(
                         output.finish(None)?;
                     } else {
                         b.prepare_attempt();
+                        #[cfg(windows)]
+                        if let Some(window) = media_window.clone() {
+                            b.attach_media(window);
+                        }
                         // Spawn returns immediately. Native async work never
                         // needs this backend lock or a Wasmtime Store/Caller.
                         let config = b.video_protocol.as_ref().map(|p| crate::control::Config {

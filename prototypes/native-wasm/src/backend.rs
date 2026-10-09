@@ -18,6 +18,7 @@ pub struct Backend {
     pub encode_latency: f32,
     pub control_frames_received: u64,
     pub media_ingress: crate::media_ingress::Ingress,
+    pub media_pipeline: crate::native_media::Stats,
     pub input_availability: InputAvailability,
     pub attempt_failure: Option<crate::attempt::FailureStage>,
     pub attempt_diagnostic: Option<Value>,
@@ -34,6 +35,9 @@ pub struct Backend {
     pub attempt_started: Option<std::time::Instant>,
     #[serde(skip)]
     pub native_attempt: Option<crate::attempt::Attempt>,
+    #[cfg(windows)]
+    #[serde(skip)]
+    pub media_worker: Option<crate::native_media::Pipeline>,
     #[serde(skip)]
     pub buffers: crate::buffers::Buffers,
     #[serde(skip)]
@@ -75,6 +79,7 @@ impl Backend {
         self.encode_latency = 0.0;
         self.control_frames_received = 0;
         self.media_ingress = Default::default();
+        self.media_pipeline = Default::default();
         self.input_availability = Default::default();
         self.guests.clear();
         self.me = Value::Null;
@@ -115,7 +120,23 @@ impl Backend {
         self.encode_latency = 0.0;
         self.control_frames_received = 0;
         self.media_ingress = Default::default();
+        self.media_pipeline = Default::default();
         self.input_availability = Default::default();
+        #[cfg(windows)]
+        {
+            self.media_worker = None;
+        }
+    }
+
+    #[cfg(windows)]
+    pub fn attach_media(&mut self, window: std::sync::Arc<crate::window::Window>) {
+        match crate::native_media::Pipeline::new(window) {
+            Ok(worker) => {
+                self.media_pipeline = worker.stats();
+                self.media_worker = Some(worker);
+            }
+            Err(error) => self.media_pipeline.unavailable_reason = error.to_string(),
+        }
     }
 
     /// Include a live attempt without consuming, cancelling or pumping it.
@@ -163,7 +184,7 @@ impl Backend {
     pub fn set_video_protocol(&mut self, protocol: VideoProtocol) -> Result<()> {
         self.require_initialized()?;
         // These offsets are used for 32-bit little-endian header fields in
-        // parsec.js. Reject invalid metadata before a future decoder reads it.
+        // parsec.js. Reject invalid metadata before the native decoder reads it.
         if protocol.message_size > 1024 * 1024
             || protocol
                 .version_offset
@@ -199,6 +220,10 @@ impl Backend {
         self.events
             .retain(|event| !matches!(event["type"].as_i64(), Some(1 | 3)));
         self.buffers.clear();
+        #[cfg(windows)]
+        {
+            self.media_worker = None;
+        }
         self.status = Some(status);
         self.guests.clear();
         self.me = Value::Null;
@@ -217,6 +242,10 @@ impl Backend {
     }
 
     fn retain_attempt_diagnostic(&mut self) {
+        #[cfg(windows)]
+        if let Some(worker) = self.media_worker.take() {
+            self.media_pipeline = worker.stats();
+        }
         if let Some(attempt) = self.native_attempt.take() {
             self.media_ingress = attempt.media_ingress();
             self.attempt_diagnostic = Some(attempt.snapshot());
@@ -284,10 +313,6 @@ impl Backend {
                 };
                 self.handle_message(channel, text, bytes)?;
             }
-            // Keep media independent from the lossless control queue. The
-            // bounded path is drained at the future decoder boundary; until a
-            // native decoder produces output, ingress remains explicitly
-            // reported as decoder-unavailable.
             for _ in 0..32 {
                 let Some(packet) = self
                     .native_attempt
@@ -296,8 +321,21 @@ impl Backend {
                 else {
                     break;
                 };
+                #[cfg(windows)]
+                if let Some(worker) = &mut self.media_worker {
+                    worker.submit(packet);
+                    continue;
+                }
                 drop(packet);
             }
+        }
+        #[cfg(windows)]
+        if let Some(worker) = &self.media_worker {
+            self.media_pipeline = worker.stats();
+            self.media_ingress.video_decoder_available =
+                self.media_pipeline.video_frames_decoded != 0;
+            self.media_ingress.audio_decoder_available =
+                self.media_pipeline.audio_pcm_frames_decoded != 0;
         }
         Ok(())
     }

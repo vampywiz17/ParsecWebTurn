@@ -239,6 +239,15 @@ impl Graphics {
     }
 
     pub fn present(&mut self) -> Result<()> {
+        if self
+            .window
+            .remote_video_active
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            // The D3D11 flip-model swapchain owns the HWND while remote video
+            // is active. A WGL swap here would overwrite the decoded frame.
+            return Ok(());
+        }
         // Explicit optional test artifact only: one readback, never the normal
         // presentation path. Capture the rendered backbuffer before swapping.
         if self.report.frames_presented == 10 {

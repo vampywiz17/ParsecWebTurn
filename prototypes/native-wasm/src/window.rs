@@ -27,6 +27,7 @@ pub enum Event {
 pub struct Window {
     pub hwnd: AtomicUsize,
     pub closing: AtomicBool,
+    pub remote_video_active: AtomicBool,
     pub active_contexts: AtomicUsize,
     pub events: Mutex<std::collections::VecDeque<Event>>,
     pub dimensions: Mutex<(i32, i32)>,
@@ -61,6 +62,7 @@ impl Window {
         let state = Arc::new(Self {
             hwnd: AtomicUsize::new(0),
             closing: AtomicBool::new(false),
+            remote_video_active: AtomicBool::new(false),
             active_contexts: AtomicUsize::new(0),
             events: Default::default(),
             dimensions: Mutex::new((1024, 720)),
