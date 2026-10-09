@@ -62,6 +62,28 @@ absence is reported and does not count as hardware validation.
 Live host audio, original overlay interaction and remote keyboard/mouse operation
 must still be confirmed with the new package. No real account report is committed.
 
+## Verified test package
+
+Source `a0947eb145c87b7e69ee29e5859319d9cce4dcd1`, version 0.17.0.
+[Windows CI run 37983504629](https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37983504629)
+passed formatting, all 127 tests, strict Clippy, release compilation and the
+isolated guest/transport/platform probes.
+
+The downloaded release executable also passed local checks on Windows:
+
+- Original pinned login audit: nine steps, 15 GUI frames captured, no adapter
+  failure, and clean window shutdown. This verifies original UI command capture,
+  separately from the synthetic D3D composition test.
+- Native GPU probe: decoded-image variation and a composited synthetic UI pixel
+  verified. The sustained test decoded all 1,024 1080p pictures with zero encoded
+  input drops and 1,024 GUI draw calls, without a decoder/compositor failure.
+- Silent WASAPI probe: 9,600 PCM frames queued/written, zero dropped frames,
+  zero underruns, no HRESULT failure, and released output resources.
+
+These synthetic results do not establish audible real-host playback, original
+in-session overlay interaction or real remote input delivery. Those remain the
+next user test. No live video pixel readback was enabled.
+
 ## Documented APIs and upstream references
 
 - [Opus reference decoder API](https://opus-codec.org/docs/opus_api-1.6.pdf)
