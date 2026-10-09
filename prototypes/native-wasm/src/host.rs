@@ -631,6 +631,7 @@ fn backend_call(
                             output.clone(),
                             config,
                             b.cloudflare_stun_enabled,
+                            b.legacy_rsa_1024_enabled,
                         ) {
                             Ok(attempt) => {
                                 b.status = Some(20);

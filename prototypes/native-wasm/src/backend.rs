@@ -9,6 +9,7 @@ use std::collections::VecDeque;
 pub struct Backend {
     pub initialized: bool,
     pub cloudflare_stun_enabled: bool,
+    pub legacy_rsa_1024_enabled: bool,
     pub generation: u64,
     pub status: Option<i32>,
     pub video_protocol: Option<VideoProtocol>,

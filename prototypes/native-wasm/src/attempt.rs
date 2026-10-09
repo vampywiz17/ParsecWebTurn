@@ -160,6 +160,7 @@ struct Progress {
     transport_states_before_close: serde_json::Value,
     transport_states_at_failure: serde_json::Value,
     cloudflare_stun: bool,
+    legacy_rsa_1024: bool,
 }
 
 struct Completion {
@@ -194,7 +195,7 @@ impl Attempt {
 
     #[cfg(test)]
     pub fn spawn_named(id: &str, output: Output) -> Result<Self> {
-        Self::spawn_configured(id, output, None, false)
+        Self::spawn_configured(id, output, None, false, false)
     }
 
     pub fn spawn_configured(
@@ -202,6 +203,7 @@ impl Attempt {
         output: Output,
         config: Option<crate::control::Config>,
         cloudflare_stun: bool,
+        legacy_rsa_1024: bool,
     ) -> Result<Self> {
         CandidateGate::new(id)?;
         let mut active = ACTIVE_WORKERS.load(Ordering::SeqCst);
@@ -225,6 +227,7 @@ impl Attempt {
             output: Some(output),
             progress: Progress {
                 cloudflare_stun,
+                legacy_rsa_1024,
                 ..Default::default()
             },
             cancelled: false,
@@ -242,7 +245,15 @@ impl Attempt {
             .name("parsec-native-offer".into())
             .spawn(move || {
                 let _permit = permit;
-                let result = worker(&shared, &notify, &attempt_id, rx, config, cloudflare_stun);
+                let result = worker(
+                    &shared,
+                    &notify,
+                    &attempt_id,
+                    rx,
+                    config,
+                    cloudflare_stun,
+                    legacy_rsa_1024,
+                );
                 let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
                 if result.is_err() {
                     state.progress.failed = true;
@@ -318,7 +329,7 @@ impl Attempt {
         serde_json::json!({ "offer_ready": state.progress.ready, "mid":state.progress.mid, "peer_closed": state.progress.closed, "failed": state.progress.failed, "failure_stage": state.progress.failure_stage, "negotiated_channels": state.progress.channels, "channels_open": state.progress.open_mask.count_ones(), "transport_connected":state.progress.transport_connected, "local_candidates":state.progress.local_candidates, "remote_candidates":state.progress.remote_candidates, "messages_received":state.progress.messages_received, "worker_finished": *self.finished.0.lock().unwrap_or_else(|e| e.into_inner()), "host_connected": false,
         "local_description_set":state.progress.local_description_set,"remote_description_set":state.progress.remote_description_set,"sync_received":state.progress.sync_received,"transport_states":state.progress.transport_states,"transport_states_before_close":state.progress.transport_states_before_close,"transport_states_at_failure":state.progress.transport_states_at_failure,
         "local_host_candidates":state.progress.local_host_candidates,"local_srflx_candidates":state.progress.local_srflx_candidates,
-        "ice_servers_configured":state.progress.cloudflare_stun,"stun_provider":if state.progress.cloudflare_stun {Some("cloudflare")} else {None},"network_types":["udp4"],"connection_deadline_seconds":30 })
+        "legacy_rsa_1024_enabled":state.progress.legacy_rsa_1024,"ice_servers_configured":state.progress.cloudflare_stun,"stun_provider":if state.progress.cloudflare_stun {Some("cloudflare")} else {None},"network_types":["udp4"],"connection_deadline_seconds":30 })
     }
 
     fn command(&self, id: &str, command: Command) -> Result<()> {
@@ -431,6 +442,7 @@ fn worker(
     commands: mpsc::Receiver<Command>,
     config: Option<crate::control::Config>,
     cloudflare_stun: bool,
+    legacy_rsa_1024: bool,
 ) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -438,6 +450,9 @@ fn worker(
         .build()?;
     let mut settings = SettingEngine::default();
     settings.set_network_types(vec![NetworkType::Udp4]);
+    // Explicit legacy key-size compatibility only. Signature and SDP fingerprint
+    // verification remain enabled; insecure hashes are not enabled.
+    settings.allow_insecure_verification_algorithm(legacy_rsa_1024);
     let api = APIBuilder::new().with_setting_engine(settings).build();
     let peer = Arc::new(runtime.block_on(async {
         tokio::time::timeout(

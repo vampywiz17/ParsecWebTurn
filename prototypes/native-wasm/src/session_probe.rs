@@ -21,27 +21,28 @@ use webrtc::{
 };
 
 pub fn probe() -> Result<serde_json::Value> {
-    probe_mode(Mode::Transport)
+    probe_mode(Mode::Transport, false)
 }
 
 pub fn control_probe() -> Result<serde_json::Value> {
-    probe_mode(Mode::Control)
+    probe_mode(Mode::Control, false)
 }
 
 pub fn buffer_probe() -> Result<serde_json::Value> {
-    probe_mode(Mode::Buffers)
+    probe_mode(Mode::Buffers, false)
 }
 
-pub fn dtls_failure_probe() -> Result<serde_json::Value> {
+pub fn dtls_failure_probe(legacy_rsa_1024: bool) -> Result<serde_json::Value> {
     if !crate::transport_diagnostics::enable() {
         bail!("controlled DTLS diagnostic logger unavailable");
     }
-    let mut report = probe_mode(Mode::DtlsFailure)?;
+    let mut report = probe_mode(Mode::DtlsFailure, legacy_rsa_1024)?;
     if !crate::transport_diagnostics::contains_reason("certificate-fingerprint-mismatch")
         || !crate::transport_diagnostics::contains_reason("verify-ecdsa-p256-sha256")
     {
         bail!("actual native DTLS diagnostic categories were not observed");
     }
+    report["legacy_rsa_1024_enabled"] = serde_json::json!(legacy_rsa_1024);
     report["library_failure_classification_verified"] = serde_json::json!(true);
     report["signature_algorithm_reporting_verified"] = serde_json::json!(true);
     report["native_transport_diagnostics"] =
@@ -56,7 +57,7 @@ enum Mode {
     DtlsFailure,
 }
 
-fn probe_mode(mode: Mode) -> Result<serde_json::Value> {
+fn probe_mode(mode: Mode, legacy_rsa_1024: bool) -> Result<serde_json::Value> {
     let dtls_failure = matches!(mode, Mode::DtlsFailure);
     let control = !matches!(mode, Mode::Transport) && !dtls_failure;
     let buffers = matches!(mode, Mode::Buffers);
@@ -124,6 +125,10 @@ fn probe_mode(mode: Mode) -> Result<serde_json::Value> {
     store.set_epoch_deadline(2);
     let memory = store.data().memory.clone();
     let backend = store.data().backend.clone();
+    backend
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .legacy_rsa_1024_enabled = legacy_rsa_1024;
     if instance
         .get_typed_func::<i32, i32>(&mut store, "offer")?
         .call(&mut store, i32::from(control))?
@@ -325,7 +330,8 @@ fn probe_mode(mode: Mode) -> Result<serde_json::Value> {
                 std::thread::sleep(Duration::from_millis(5));
             }
             let failure = attempt.snapshot();
-            if failure["failure_stage"] != "dtls-transport"
+            if failure["legacy_rsa_1024_enabled"] != legacy_rsa_1024
+                || failure["failure_stage"] != "dtls-transport"
                 || failure["transport_states_at_failure"]["dtls"] != "failed"
                 || failure["transport_states_at_failure"]["peer"] != "failed"
                 || failure["channels_open"] != 0

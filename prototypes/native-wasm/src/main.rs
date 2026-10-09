@@ -4,6 +4,8 @@ mod audit_probe;
 mod backend;
 mod buffers;
 mod control;
+#[cfg(test)]
+mod crypto_policy_tests;
 #[cfg(windows)]
 mod cursor;
 #[cfg(windows)]
@@ -146,19 +148,39 @@ fn main() {
     }
 }
 
-fn parse_cloudflare_stun_flag(flag: Option<&str>) -> Result<bool> {
-    match flag {
-        None => Ok(false),
-        Some("--cloudflare-stun") => Ok(true),
-        Some(_) => bail!("unsupported account option"),
+#[derive(Default, Debug, PartialEq, Eq)]
+struct AccountOptions {
+    cloudflare_stun: bool,
+    legacy_rsa_1024: bool,
+}
+
+fn parse_account_options(flags: impl Iterator<Item = String>) -> Result<AccountOptions> {
+    let mut options = AccountOptions::default();
+    for flag in flags {
+        match flag.as_str() {
+            "--cloudflare-stun" if !options.cloudflare_stun => options.cloudflare_stun = true,
+            "--legacy-rsa-1024" if !options.legacy_rsa_1024 => options.legacy_rsa_1024 = true,
+            _ => bail!("unsupported or duplicate account option"),
+        }
     }
+    Ok(options)
 }
 
 #[test]
-fn cloudflare_stun_flag_requires_explicit_exact_selection() {
-    assert!(!parse_cloudflare_stun_flag(None).unwrap());
-    assert!(parse_cloudflare_stun_flag(Some("--cloudflare-stun")).unwrap());
-    assert!(parse_cloudflare_stun_flag(Some("--turn")).is_err());
+fn account_options_require_explicit_unique_selection() {
+    let parse = |flags: &[&str]| parse_account_options(flags.iter().map(|s| s.to_string()));
+    assert_eq!(parse(&[]).unwrap(), AccountOptions::default());
+    assert!(parse(&["--cloudflare-stun"]).unwrap().cloudflare_stun);
+    assert!(!parse(&["--cloudflare-stun"]).unwrap().legacy_rsa_1024);
+    assert!(parse(&["--legacy-rsa-1024"]).unwrap().legacy_rsa_1024);
+    assert!(!parse(&["--legacy-rsa-1024"]).unwrap().cloudflare_stun);
+    assert_eq!(
+        parse(&["--cloudflare-stun", "--legacy-rsa-1024"]).unwrap(),
+        parse(&["--legacy-rsa-1024", "--cloudflare-stun"]).unwrap()
+    );
+    assert!(parse(&["--turn"]).is_err());
+    assert!(parse(&["--legacy-rsa-1024", "--legacy-rsa-1024"]).is_err());
+    assert!(parse(&["--cloudflare-stun", "--cloudflare-stun"]).is_err());
 }
 
 fn run() -> Result<()> {
@@ -174,6 +196,7 @@ fn run() -> Result<()> {
         "guest-offer-probe"
             | "guest-session-probe"
             | "guest-dtls-failure-probe"
+            | "guest-legacy-dtls-failure-probe"
             | "guest-control-probe"
             | "guest-buffer-probe"
             | "guest-http-probe"
@@ -213,8 +236,11 @@ fn run() -> Result<()> {
             session_probe::buffer_probe()?
         } else if mode == "guest-control-probe" {
             session_probe::control_probe()?
-        } else if mode == "guest-dtls-failure-probe" {
-            session_probe::dtls_failure_probe()?
+        } else if matches!(
+            mode.as_str(),
+            "guest-dtls-failure-probe" | "guest-legacy-dtls-failure-probe"
+        ) {
+            session_probe::dtls_failure_probe(mode == "guest-legacy-dtls-failure-probe")?
         } else if mode == "guest-session-probe" {
             session_probe::probe()?
         } else {
@@ -264,8 +290,8 @@ fn run() -> Result<()> {
                   parsec-native-wasm guest-platform-probe [report.json]\n\
                   parsec-native-wasm window-audit <parsecd.wasm> [report.json]\n\
                   parsec-native-wasm login-audit <parsecd.wasm> [report.json]\n\
-                  parsec-native-wasm account <parsecd.wasm> [report.json]\n\
-                  parsec-native-wasm account-network-audit <parsecd.wasm> [report.json]\n\
+                  parsec-native-wasm account <parsecd.wasm> [report.json] [--cloudflare-stun] [--legacy-rsa-1024]\n\
+                  parsec-native-wasm account-network-audit <parsecd.wasm> [report.json] [--cloudflare-stun] [--legacy-rsa-1024]\n\
                   parsec-native-wasm session-audit <parsecd.wasm> [report.json]\n\
                   Account modes enable exact HTTPS/WSS origins and run until close. No decoded remote video.\n\
                   account-network-audit also reports destination origins (no URL tokens).\n\
@@ -294,10 +320,10 @@ fn run() -> Result<()> {
     }
     let path = PathBuf::from(args.next().context("WASM path required")?);
     let report_path = args.next().map(PathBuf::from);
-    let cloudflare_stun = if account_mode {
-        parse_cloudflare_stun_flag(args.next().as_deref())?
+    let account_options = if account_mode {
+        parse_account_options(args.by_ref())?
     } else {
-        false
+        AccountOptions::default()
     };
     #[cfg(windows)]
     let capture_path = if mode == "window" {
@@ -427,13 +453,14 @@ fn run() -> Result<()> {
         report.instantiated = true;
         allocator_roundtrip(&mut store, &instance)?;
         report.allocator_roundtrip = true;
-        if cloudflare_stun {
-            store
+        {
+            let mut backend = store
                 .data()
                 .backend
                 .lock()
-                .map_err(|_| anyhow::anyhow!("backend lock poisoned"))?
-                .cloudflare_stun_enabled = true;
+                .map_err(|_| anyhow::anyhow!("backend lock poisoned"))?;
+            backend.cloudflare_stun_enabled = account_options.cloudflare_stun;
+            backend.legacy_rsa_1024_enabled = account_options.legacy_rsa_1024;
         }
         if mode == "boot" || window_mode {
             let start = instance.get_typed_func::<(), ()>(&mut store, "_start")?;
