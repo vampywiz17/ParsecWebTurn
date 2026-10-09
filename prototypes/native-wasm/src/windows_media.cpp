@@ -555,6 +555,7 @@ HRESULT EnsureSwapchain(LiveSession *session, UINT source_width,
   desc.BufferCount = 2;
   desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
   desc.Scaling = DXGI_SCALING_STRETCH;
+  desc.Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
   if (FAILED(hr = factory->CreateSwapChainForHwnd(session->device.Get(),
                                                    session->hwnd, &desc, nullptr,
                                                    nullptr, &session->swapchain)))

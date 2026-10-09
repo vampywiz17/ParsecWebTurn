@@ -154,13 +154,15 @@ impl Pipeline {
                     if status != 0 {
                         native.last_hresult = status;
                     }
-                    let value: Stats = native.into();
+                    let mut value: Stats = native.into();
                     if value.video_frames_presented != 0 {
                         window
                             .remote_video_active
                             .store(true, std::sync::atomic::Ordering::Release);
                     }
-                    *shared.lock().unwrap_or_else(|e| e.into_inner()) = value;
+                    let mut current = shared.lock().unwrap_or_else(|e| e.into_inner());
+                    value.worker_packets_dropped = current.worker_packets_dropped;
+                    *current = value;
                 }
                 unsafe { parsec_native_media_session_destroy(handle) };
                 window
