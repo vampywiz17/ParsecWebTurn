@@ -26,7 +26,7 @@ pub struct Stats {
 
 #[cfg(windows)]
 #[repr(C)]
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 struct NativeStats {
     video_ready: i32,
     audio_ready: i32,
@@ -43,6 +43,15 @@ struct NativeStats {
     audio_underflows: u64,
     last_hresult: i32,
     unavailable_reason: [std::ffi::c_char; 256],
+}
+
+#[cfg(windows)]
+impl Default for NativeStats {
+    fn default() -> Self {
+        // SAFETY: this repr(C) structure consists only of integer fields and
+        // fixed integer arrays, for which an all-zero value is valid.
+        unsafe { std::mem::zeroed() }
+    }
 }
 
 #[cfg(windows)]
@@ -104,7 +113,8 @@ pub struct Pipeline {
 #[cfg(windows)]
 impl Pipeline {
     pub fn new(window: std::sync::Arc<crate::window::Window>) -> Result<Self> {
-        let (tx, rx) = std::sync::mpsc::sync_channel(8);
+        let (tx, rx) =
+            std::sync::mpsc::sync_channel::<crate::media_ingress::Packet>(8);
         let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
         let stats = std::sync::Arc::new(std::sync::Mutex::new(Stats::default()));
         let shared = stats.clone();
