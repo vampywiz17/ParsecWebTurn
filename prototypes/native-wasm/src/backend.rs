@@ -43,6 +43,7 @@ pub struct Backend {
 #[derive(Default, Serialize)]
 pub struct InputAvailability {
     pub absolute_mouse_events_not_sent: u64,
+    pub absolute_mouse_events_prepared: u64,
     pub unavailable_reason: Option<&'static str>,
 }
 
@@ -139,7 +140,18 @@ impl Backend {
         viewport: Option<crate::viewport::Viewport>,
     ) -> Result<Option<bytes::Bytes>> {
         match crate::control::input_with_viewport(message, viewport) {
-            Ok(packet) => Ok(Some(packet)),
+            Ok(packet) => {
+                if message["type"].as_i64() == Some(4)
+                    && message["relative"].as_bool() == Some(false)
+                {
+                    self.input_availability.absolute_mouse_events_prepared = self
+                        .input_availability
+                        .absolute_mouse_events_prepared
+                        .saturating_add(1);
+                    self.input_availability.unavailable_reason = None;
+                }
+                Ok(Some(packet))
+            }
             Err(error)
                 if error
                     .downcast_ref::<crate::control::AbsoluteMouseUnavailable>()

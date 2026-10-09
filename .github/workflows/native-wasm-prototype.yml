@@ -142,6 +142,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Audio-unavailable guest contract failed' }
           $audio = Get-Content "$artifact/guest-audio-unavailable.json" -Raw | ConvertFrom-Json
           if (!$audio.null_factory_result_verified -or !$audio.guest_continues_verified -or !$audio.fabricated_context_rejected -or $audio.audio_played -or $audio.device_opened) { throw 'Audio unavailability must not impersonate a renderer' }
+          & $exe native-audio-probe "$artifact/native-audio.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Native silent audio probe failed' }
+          $nativeAudio = Get-Content "$artifact/native-audio.json" -Raw | ConvertFrom-Json
+          if (!$nativeAudio.native_window_released -or $nativeAudio.real_account_used -or $nativeAudio.external_requests_enabled) { throw 'Audio probe isolation/cleanup failed' }
+          if ($nativeAudio.audio -and (!$nativeAudio.audio.device_opened -or !$nativeAudio.audio.resources_released -or $nativeAudio.audio.frames_written -eq 0 -or $nativeAudio.audio.failure_hresult)) { throw 'Available audio endpoint did not play/release silent PCM' }
           & $exe guest-platform-probe "$artifact/guest-platform.json"
           if ($LASTEXITCODE -ne 0) { throw 'Guest local desktop imports failed' }
           $platform = Get-Content "$artifact/guest-platform.json" -Raw | ConvertFrom-Json
