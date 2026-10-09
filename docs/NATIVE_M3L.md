@@ -51,3 +51,12 @@ References:
 - Pinned original adapter: audited parsec.js, video-channel callback (not a web standard).
 - W3C AVC registration: https://www.w3.org/TR/webcodecs-avc-codec-registration/
 - Microsoft H.264 decoder Annex B input: https://learn.microsoft.com/en-us/windows/win32/medfound/h-264-video-decoder
+
+Verified: Windows CI 37969231223, source 7ab82038605389d5fed4276489a84eaaf1221378,
+passed formatting, 114 tests, strict Clippy, release build and all native/guest
+probes. Both encrypted control and buffer fixtures verified video framing,
+large messages, unpolled media bursts, input after 31 seconds and peer cleanup.
+The local pinned original-WASM offline UI completed 9 synthetic steps,
+presented 15 accelerated UI frames, reported version 0.15.0 and released the
+window without error. No actual decoded video is claimed. A separate report
+with source-unmatched queue fields was excluded at the user's request.
