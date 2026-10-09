@@ -237,9 +237,25 @@ mod tests {
         let profile = Profile::open(directory.clone()).unwrap();
         let mut restored = profile.load().unwrap();
         assert_eq!(restored.files["/appdata.json"], b"synthetic-session-value");
+        let still_open = restored.open(b"appdata.json", 0, 2, 0).unwrap();
         restored.unlink(b"appdata.json").unwrap();
+        assert_eq!(
+            restored.read(still_open, 64).unwrap(),
+            b"synthetic-session-value"
+        );
         profile.save(&restored).unwrap();
         assert!(profile.load().unwrap().files.is_empty());
+        // Authenticated encrypted bytes are still schema/path validated before use.
+        for invalid in [
+            serde_json::json!({"version":2,"files":{},"directories":["/"]}),
+            serde_json::json!({"version":1,"files":{"/../../outside":[1]},"directories":["/"]}),
+            serde_json::json!({"version":1,"files":{},"directories":["/../outside"]}),
+        ] {
+            let encrypted = protect(&serde_json::to_vec(&invalid).unwrap(), true).unwrap();
+            std::fs::write(&profile.path, &encrypted).unwrap();
+            assert!(profile.load().is_err());
+            assert_eq!(std::fs::read(&profile.path).unwrap(), encrypted);
+        }
         std::fs::write(&profile.path, b"corrupted-test-profile").unwrap();
         assert!(profile.load().is_err());
         assert_eq!(

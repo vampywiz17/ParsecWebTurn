@@ -63,7 +63,18 @@ jobs:
           ./scripts/package-native.ps1
           & ./src-native/artifacts/ParsecWebTurn.exe --version
           if ($LASTEXITCODE -ne 0) { throw "Normal executable failed" }
-          cargo build --locked --manifest-path src-native/Cargo.toml --features diagnostics
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Native-client-release-candidate-win64
+          path: |
+            ParsecWebTurn.exe
+            dist/ParsecWebTurn-v*-win64.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+      - name: Build separate optimized diagnostics
+        shell: pwsh
+        run: |
+          cargo build --locked --release --manifest-path src-native/Cargo.toml --features diagnostics
           if ($LASTEXITCODE -ne 0) { throw 'Diagnostic build failed' }
       - name: Run original Parsec WASM without a browser
         shell: pwsh
@@ -72,7 +83,7 @@ jobs:
           ./src-native/fetch-core.ps1
           $artifact = 'src-native/artifacts'
           New-Item -ItemType Directory -Path $artifact -Force | Out-Null
-          $exe = 'src-native/target/debug/parsec-web-turn.exe'
+          $exe = 'src-native/target/release/parsec-web-turn.exe'
           $core = 'src-native/vendor/parsecd.wasm'
           foreach ($mode in @('inspect', 'allocator', 'boot')) {
             & $exe $mode $core "$artifact/$mode.json" | Out-Null

@@ -6,6 +6,17 @@ try {
     $taskVersion = (Get-Content VERSION -Raw).Trim()
     if ($taskVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid VERSION' }
     if ((Get-Content src-native/Cargo.toml -Raw) -notmatch "(?m)^version = `"$taskVersion`"$") { throw 'Native version mismatch' }
+    $taskBinary = [IO.File]::ReadAllBytes((Join-Path $taskRoot 'src-native/target/release/parsec-web-turn.exe'))
+    $taskPeOffset = [BitConverter]::ToInt32($taskBinary, 0x3c)
+    if ([BitConverter]::ToUInt16($taskBinary, $taskPeOffset + 24 + 68) -ne 2) { throw 'Only the normal Windows GUI executable may be packaged' }
+    $taskBinaryText = [Text.Encoding]::Latin1.GetString($taskBinary)
+    foreach ($taskMarker in @('video-hardware-probe', 'login-audit', 'synthetic-session-value', 'private-password-token-url')) {
+        if ($taskBinaryText.Contains($taskMarker)) { throw "Diagnostic marker in normal executable: $taskMarker" }
+    }
+    $taskFixture = [IO.File]::ReadAllBytes((Join-Path $taskRoot 'src-native/fixtures/synthetic-1920x1080.h264'))
+    if ($taskBinaryText.Contains([Text.Encoding]::Latin1.GetString($taskFixture))) { throw 'Synthetic video fixture in normal executable' }
+    $taskCore = [IO.File]::ReadAllBytes((Join-Path $taskRoot 'src-native/vendor/parsecd.wasm'))
+    if (!$taskBinaryText.Contains([Text.Encoding]::Latin1.GetString($taskCore))) { throw 'Pinned WASM is not embedded in the executable' }
     Copy-Item src-native/target/release/parsec-web-turn.exe ParsecWebTurn.exe -Force
     $taskStaging = Join-Path $taskRoot ('dist/native-package-' + [guid]::NewGuid().ToString('N'))
     $taskPackageName = "ParsecWebTurn-v$taskVersion-win64"
