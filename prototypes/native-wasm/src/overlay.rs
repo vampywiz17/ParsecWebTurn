@@ -369,11 +369,21 @@ impl Capture {
             .context("UI projection missing")?;
         let unit = self.samplers.get(&self.program).copied().unwrap_or(0);
         let texture_id = self.bindings.get(&unit).copied().unwrap_or(0);
-        let texture = self
-            .textures
-            .get(&texture_id)
-            .context("UI texture missing")?
-            .clone();
+        let texture = if texture_id == 0 {
+            // GLES/WebGL incomplete default texture samples opaque black.
+            // Matoya uses this for untextured black GUI backgrounds.
+            Arc::new(Texture {
+                version: 0,
+                width: 1,
+                height: 1,
+                rgba: vec![0, 0, 0, 255],
+            })
+        } else {
+            self.textures
+                .get(&texture_id)
+                .context("UI nondefault texture missing")?
+                .clone()
+        };
         let mut vertices = Vec::with_capacity(count * 20);
         for index in indices.chunks_exact(size) {
             let index = if size == 2 {
@@ -515,6 +525,11 @@ mod tests {
             .unwrap();
         assert_eq!(capture.frame.batches[0].texture.version, 1);
         capture.bindings.remove(&2);
+        capture
+            .draw(glow::TRIANGLES, 3, glow::UNSIGNED_SHORT, 0)
+            .unwrap();
+        assert_eq!(capture.frame.batches[1].texture.rgba, [0, 0, 0, 255]);
+        capture.bindings.insert(2, 999);
         assert!(capture
             .draw(glow::TRIANGLES, 3, glow::UNSIGNED_SHORT, 0)
             .is_err());

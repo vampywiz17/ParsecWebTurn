@@ -1,4 +1,4 @@
-//! Explicit unavailable-output contract, not an audio renderer or silent sink.
+//! Pinned Matoya audio ABI: real WASAPI output online, explicit null factory offline.
 //! The pinned web ABI takes a format pointer; current upstream native Matoya
 //! uses a different argument list. Only the documented null failure result
 //! and null destroy semantics are shared. Never fabricate a usable context.
