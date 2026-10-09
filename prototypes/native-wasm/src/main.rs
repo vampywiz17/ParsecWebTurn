@@ -24,6 +24,7 @@ mod http;
 mod http_probe;
 mod input;
 mod lifecycle;
+mod media_ingress;
 mod memory;
 mod network_audit;
 mod network_policy;

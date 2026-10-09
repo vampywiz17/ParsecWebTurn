@@ -1,3 +1,7 @@
+## M3k-fix18
+
+Binary media channels now have explicit unavailable-decoder ingress counters instead of trapping the main WASM callback. Invalid control/channel traffic becomes a connection failure with a retained diagnostic. This build does not decode/play media. See [fix18 notes](../../docs/NATIVE_M3K_FIX18.md).
+
 ## M3k-fix17
 
 The new main-thread failure is not yet diagnosed. Reports now retain a privacy-safe execution stage, runtime trap enum and bounded numeric WASM backtrace. See [diagnostic notes](../../docs/NATIVE_M3K_FIX17.md). This is a diagnostic build; native audio output is still unavailable.

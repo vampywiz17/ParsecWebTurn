@@ -1,0 +1,11 @@
+# M3k-fix18 — separate unavailable media ingress from control failures
+
+The fix17 user report identifies a host/API error in the main event-loop callback at `parsec_web_get_metrics` (WASM function 1345, offset 680528). The backend status has been reset to -3 and the active attempt removed. That exactly identifies the previous `pump_native_events` error cleanup path. The old pump rejects all channel 1/2 media and all text traffic as an unimplemented bridge and propagates the error into WASM. A malformed control packet can also reach that path; the old report cannot distinguish those two packet-level causes.
+
+Channel 0 remains strictly validated control. The pinned original `parsec.js` assigns channel 1 to video and channel 2 to audio. Binary media now reaches a separate unavailable-decoder ingress: it counts packets/bytes and immediately discards their payload without retaining a media queue, interpreting a frame, rendering, playing audio or claiming decoder availability. This is an interim transport diagnostic, not a media decoder. At most 32 packets are processed per backend pump; existing transport queue/byte caps remain in place. Counts reset for each new attempt.
+
+Invalid control frames or unsupported channel/text input fail the connection with a categorized `inbound-control` or `inbound-channel` report and the existing -6200 guest event. They retain the attempt snapshot instead of escaping into the main WASM loop. Strict validation is preserved; malformed control is not accepted as media.
+
+Tests cover independent media/control accounting, privacy, saturation/reset, invalid packet categories and failure cleanup. The existing local encrypted ICE/DTLS/SCTP control probe now sends synthetic binary data over channels 1 and 2, then calls the guest's exact metrics import and verifies both media counts, continued control status and decoder-unavailable flags. No account or real captured media is used.
+
+Limitations: native video decoding/rendering and native audio output are still absent. No picture or sound is promised by this build. The prototype's existing native worker lifetime remains bounded to 30 seconds; this change does not establish long-session stability. Real-host behavior requires a new user test.

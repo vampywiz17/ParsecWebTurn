@@ -49,6 +49,8 @@ pub struct Output {
 #[serde(rename_all = "kebab-case")]
 pub enum FailureStage {
     Worker,
+    InboundChannel,
+    InboundControl,
     IceTransport,
     DtlsTransport,
     PeerTransport,

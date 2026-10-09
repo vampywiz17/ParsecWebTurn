@@ -369,7 +369,7 @@ fn probe_mode(mode: Mode, legacy_rsa_1024: bool) -> Result<serde_json::Value> {
                 &mut store,
                 &instance,
                 &runtime,
-                &channels[0],
+                &channels,
                 &mut rx,
                 connected_event,
             )?)
@@ -551,11 +551,12 @@ fn control_exchange(
     store: &mut wasmtime::Store<crate::host::HostState>,
     instance: &wasmtime::Instance,
     runtime: &tokio::runtime::Runtime,
-    channel: &Arc<webrtc::data_channel::RTCDataChannel>,
+    channels: &[Arc<webrtc::data_channel::RTCDataChannel>],
     receipts: &mut tokio::sync::mpsc::Receiver<(u16, bool, Bytes)>,
     mut connected_event: bool,
 ) -> Result<serde_json::Value> {
     let memory = store.data().memory.clone();
+    let channel = &channels[0];
     let (id, is_text, startup) = runtime
         .block_on(async { tokio::time::timeout(Duration::from_secs(5), receipts.recv()).await })?
         .context("startup packet missing")?;
@@ -659,6 +660,45 @@ fn control_exchange(
     {
         bail!("host mode mismatch");
     }
+    // Actual encrypted SCTP ingress on both media channels, followed by the
+    // same guest metrics import implicated in the real crash report.
+    for media_channel in &channels[1..=2] {
+        runtime.block_on(async {
+            tokio::time::timeout(
+                Duration::from_secs(5),
+                media_channel.send(&Bytes::from_static(b"synthetic-media-not-a-real-frame")),
+            )
+            .await
+        })??;
+    }
+    let metrics = instance.get_typed_func::<(), ()>(&mut *store, "metrics")?;
+    let until = Instant::now() + Duration::from_secs(5);
+    loop {
+        metrics.call(&mut *store, ())?;
+        let backend = store
+            .data()
+            .backend
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if backend.media_ingress.video_packets_received == 1
+            && backend.media_ingress.audio_packets_received == 1
+        {
+            anyhow::ensure!(
+                backend.status == Some(0)
+                    && backend.control_frames_received == 6
+                    && !backend.media_ingress.video_decoder_available
+                    && !backend.media_ingress.audio_decoder_available,
+                "unavailable media must not claim decoding or change control state"
+            );
+            break;
+        }
+        anyhow::ensure!(
+            Instant::now() < until,
+            "media ingress did not reach guest metrics"
+        );
+        drop(backend);
+        std::thread::sleep(Duration::from_millis(10));
+    }
     instance
         .get_typed_func::<(), ()>(&mut *store, "metrics")?
         .call(&mut *store, ())?;
@@ -679,7 +719,7 @@ fn control_exchange(
         bail!("unsupported absolute mouse input accepted");
     }
     Ok(
-        serde_json::json!({"startup_configuration_verified":true,"wasm_input_packet_verified":true,"unsupported_absolute_mouse_rejected":true,"status_events_verified":true,"rumble_event_verified":true,"clipboard_request_event_verified":true,"guest_self_metadata_verified":true,"host_mode_verified":true,"encode_latency_verified":true,"host_frames_verified":6,"synthetic_host":true,"real_parsec_host_compatible":false}),
+        serde_json::json!({"unavailable_media_ingress_verified":true,"media_metrics_import_continues_verified":true,"startup_configuration_verified":true,"wasm_input_packet_verified":true,"unsupported_absolute_mouse_rejected":true,"status_events_verified":true,"rumble_event_verified":true,"clipboard_request_event_verified":true,"guest_self_metadata_verified":true,"host_mode_verified":true,"encode_latency_verified":true,"host_frames_verified":6,"synthetic_host":true,"real_parsec_host_compatible":false}),
     )
 }
 
@@ -827,7 +867,7 @@ fn buffer_exchange(
     if retained == 0 || size.call(&mut *store, retained as i32)? != 1 {
         bail!("cleanup payload not retained");
     }
-    let text = "árvíz ✓";
+    let text = "ĂˇrvĂ­z âś“";
     memory.c_string(8192, 1024, text)?;
     instance
         .get_typed_func::<i32, ()>(&mut *store, "send_user")?

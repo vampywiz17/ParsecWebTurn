@@ -1666,7 +1666,7 @@ dependencies = [
 
 [[package]]
 name = "parsec-native-wasm"
-version = "0.14.17"
+version = "0.14.18"
 dependencies = [
  "anyhow",
  "bytes",

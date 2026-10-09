@@ -1,6 +1,6 @@
 //! Snapshot-specific Parsec ABI state. Transport and decoding are separate:
 //! initializing this object must never imply an established session.
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::VecDeque;
@@ -17,6 +17,7 @@ pub struct Backend {
     pub host_mode: i32,
     pub encode_latency: f32,
     pub control_frames_received: u64,
+    pub media_ingress: crate::media_ingress::Ingress,
     pub attempt_failure: Option<crate::attempt::FailureStage>,
     pub attempt_diagnostic: Option<Value>,
     pub remote_begin_diagnostic: Option<Value>,
@@ -66,6 +67,7 @@ impl Backend {
         self.host_mode = 0;
         self.encode_latency = 0.0;
         self.control_frames_received = 0;
+        self.media_ingress = Default::default();
         self.guests.clear();
         self.me = Value::Null;
         self.attempt_id.clear();
@@ -104,6 +106,7 @@ impl Backend {
         self.host_mode = 0;
         self.encode_latency = 0.0;
         self.control_frames_received = 0;
+        self.media_ingress = Default::default();
     }
 
     /// Include a live attempt without consuming, cancelling or pumping it.
@@ -205,18 +208,16 @@ impl Backend {
     }
 
     pub fn pump_native_events(&mut self) -> Result<()> {
-        let outcome = self.pump();
-        if outcome.is_err() {
-            self.native_attempt.take();
-            self.status = Some(-3);
-            self.events.clear();
-            self.buffers.clear();
-            self.guests.clear();
-            self.me = Value::Null;
-            self.host_mode = 0;
-            self.encode_latency = 0.0;
+        if let Err(error) = self.pump() {
+            let stage = error
+                .downcast_ref::<crate::attempt::FailureStage>()
+                .copied()
+                .unwrap_or(crate::attempt::FailureStage::InboundControl);
+            // Malformed/unsupported inbound traffic fails this connection,
+            // preserving its snapshot and notifying the guest, not trapping WASM.
+            self.fail_native_attempt(stage)?;
         }
-        outcome
+        Ok(())
     }
 
     fn pump(&mut self) -> Result<()> {
@@ -233,43 +234,67 @@ impl Backend {
                 }
                 self.events.push_back(event);
             }
-            if attempt.control_ready() {
-                while self.events.len() < 32 {
-                    let Some((channel, text, bytes)) = attempt.pop_binary() else {
-                        break;
-                    };
-                    if channel != 0 || text {
-                        bail!("native media/text message bridge is not implemented");
-                    }
-                    let decoded = crate::control::decode(&bytes)?;
-                    self.control_frames_received = self.control_frames_received.saturating_add(1);
-                    match decoded {
-                        crate::control::Message::Status(status) => {
-                            self.status = Some(status);
-                            self.events.push_back(json!({"type":7,"status":status,"state":8,"attemptID":self.attempt_id,"duration":self.attempt_started.map_or(0,|t|t.elapsed().as_secs())}));
-                        }
-                        crate::control::Message::EncodeLatency(value) => {
-                            self.encode_latency = value
-                        }
-                        crate::control::Message::Event(event) => self.events.push_back(event),
-                        crate::control::Message::HostMode(value) => self.host_mode = value,
-                        crate::control::Message::Guests { list, me } => {
-                            self.guests = list;
-                            self.me = me;
-                        }
-                        crate::control::Message::Buffer { mut event, payload } => {
-                            let key = if let Some(range) = payload {
-                                self.buffers.insert(bytes, range)?
-                            } else {
-                                0
-                            };
-                            event["key"] = json!(key);
-                            self.events.push_back(event);
-                        }
-                        crate::control::Message::Ignored => {}
-                    }
+        }
+        if self
+            .native_attempt
+            .as_ref()
+            .is_some_and(|a| a.control_ready())
+        {
+            // Media packets do not enqueue UI events. Bound work even while
+            // their producer is faster than the UI's polling loop.
+            for _ in 0..32 {
+                if self.events.len() >= 32 {
+                    break;
                 }
+                let Some((channel, text, bytes)) =
+                    self.native_attempt.as_ref().and_then(|a| a.pop_binary())
+                else {
+                    break;
+                };
+                self.handle_message(channel, text, bytes)?;
             }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn handle_message(
+        &mut self,
+        channel: u16,
+        text: bool,
+        bytes: bytes::Bytes,
+    ) -> Result<()> {
+        if text || channel > 2 {
+            return Err(crate::attempt::FailureStage::InboundChannel.into());
+        }
+        if channel != 0 {
+            self.media_ingress.unavailable(channel, bytes.len());
+            return Ok(());
+        }
+        let decoded =
+            crate::control::decode(&bytes).context(crate::attempt::FailureStage::InboundControl)?;
+        self.control_frames_received = self.control_frames_received.saturating_add(1);
+        match decoded {
+            crate::control::Message::Status(status) => {
+                self.status = Some(status);
+                self.events.push_back(json!({"type":7,"status":status,"state":8,"attemptID":self.attempt_id,"duration":self.attempt_started.map_or(0,|t|t.elapsed().as_secs())}));
+            }
+            crate::control::Message::EncodeLatency(value) => self.encode_latency = value,
+            crate::control::Message::Event(event) => self.events.push_back(event),
+            crate::control::Message::HostMode(value) => self.host_mode = value,
+            crate::control::Message::Guests { list, me } => {
+                self.guests = list;
+                self.me = me;
+            }
+            crate::control::Message::Buffer { mut event, payload } => {
+                let key = if let Some(range) = payload {
+                    self.buffers.insert(bytes, range)?
+                } else {
+                    0
+                };
+                event["key"] = json!(key);
+                self.events.push_back(event);
+            }
+            crate::control::Message::Ignored => {}
         }
         Ok(())
     }
