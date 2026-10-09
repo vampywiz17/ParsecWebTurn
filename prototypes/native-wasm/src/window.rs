@@ -212,10 +212,10 @@ impl Window {
         if down {
             self.pressed_buttons.fetch_or(bit, Ordering::AcqRel);
             SetCapture(self.handle());
-        } else if self.pressed_buttons.fetch_and(!bit, Ordering::AcqRel) & !bit == 0 {
-            if GetCapture() == self.handle() {
-                ReleaseCapture();
-            }
+        } else if self.pressed_buttons.fetch_and(!bit, Ordering::AcqRel) & !bit == 0
+            && GetCapture() == self.handle()
+        {
+            ReleaseCapture();
         }
         self.push(Event::Button(down, button, x, y));
     }
