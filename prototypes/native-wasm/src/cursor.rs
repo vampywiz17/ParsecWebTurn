@@ -50,7 +50,9 @@ impl Frame {
     }
     fn bgra(&self) -> Vec<u8> {
         self.rgba
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .flat_map(|p| {
                 let premultiply = |c: u8| ((u32::from(c) * u32::from(p[3]) + 127) / 255) as u8;
                 [
@@ -181,7 +183,7 @@ fn create(frame: &Frame) -> Result<OwnedCursor> {
         // CreateBitmap takes WORD-aligned scan lines, with top-down source rows.
         let stride = (frame.width as usize).div_ceil(16) * 2;
         let mut mask = vec![0u8; stride * frame.height as usize];
-        for (i, pixel) in frame.rgba.chunks_exact(4).enumerate() {
+        for (i, pixel) in frame.rgba.as_chunks::<4>().0.iter().enumerate() {
             if pixel[3] == 0 {
                 mask[(i / frame.width as usize) * stride + (i % frame.width as usize) / 8] |=
                     0x80 >> (i % frame.width as usize % 8);
