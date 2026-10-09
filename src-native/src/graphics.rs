@@ -250,6 +250,7 @@ impl Graphics {
         );
         // Explicit optional test artifact only: one readback, never the normal
         // presentation path. Capture the rendered backbuffer before swapping.
+        #[cfg(any(test, feature = "diagnostics"))]
         if self.report.frames_presented == 10 {
             let capture = self
                 .window

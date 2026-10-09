@@ -97,6 +97,7 @@ unsafe fn set_style(hwnd: HWND, style: isize) -> Result<()> {
     Ok(())
 }
 
+#[cfg(any(test, feature = "diagnostics"))]
 pub fn probe() -> Result<serde_json::Value> {
     struct OwnedWindow(HWND);
     impl Drop for OwnedWindow {

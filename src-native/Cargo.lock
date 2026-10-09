@@ -1685,8 +1685,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "parsec-native-wasm"
-version = "0.17.0"
+name = "parsec-web-turn"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "bytes",

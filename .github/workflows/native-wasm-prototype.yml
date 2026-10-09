@@ -1,11 +1,11 @@
-name: Native WASM prototype
+name: Native client validation
 
 on:
   workflow_dispatch:
   push:
-    branches: [codex/native-wasm-prototype]
+    branches: [dev]
     paths:
-      - 'prototypes/native-wasm/**'
+      - 'src-native/**'
       - '.github/workflows/native-wasm-prototype.yml'
 
 permissions:
@@ -21,39 +21,51 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: prototypes/native-wasm
+          workspaces: src-native
           cache-on-failure: true
-      - name: Build diagnostic executable for local GPU feedback
+      - name: Fetch pinned embedded core
+        shell: pwsh
+        run: ./src-native/fetch-core.ps1
+      - name: Build normal executable for local UI feedback
         shell: pwsh
         run: |
-          cargo build --locked --manifest-path prototypes/native-wasm/Cargo.toml
+          cargo build --locked --manifest-path src-native/Cargo.toml
           if ($LASTEXITCODE -ne 0) { throw 'Diagnostic build failed' }
       - uses: actions/upload-artifact@v4
         with:
-          name: Native-WASM-prototype-debug-win64
-          path: prototypes/native-wasm/target/debug/parsec-native-wasm.exe
+          name: Native-client-debug-win64
+          path: src-native/target/debug/parsec-web-turn.exe
           if-no-files-found: error
       - name: Validate and build independent Rust host
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          cargo fmt --manifest-path prototypes/native-wasm/Cargo.toml -- --check
+          cargo fmt --manifest-path src-native/Cargo.toml -- --check
           if ($LASTEXITCODE -ne 0) { throw 'Formatting failed' }
-          cargo test --locked --manifest-path prototypes/native-wasm/Cargo.toml
+          cargo test --locked --manifest-path src-native/Cargo.toml --features diagnostics
           if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
-          cargo clippy --locked --manifest-path prototypes/native-wasm/Cargo.toml --all-targets -- -D warnings
+          cargo clippy --locked --manifest-path src-native/Cargo.toml --all-targets -- -D warnings
           if ($LASTEXITCODE -ne 0) { throw 'Clippy failed' }
-          cargo build --locked --release --manifest-path prototypes/native-wasm/Cargo.toml
+          cargo clippy --locked --manifest-path src-native/Cargo.toml --features diagnostics --all-targets -- -D warnings
+          if ($LASTEXITCODE -ne 0) { throw 'Diagnostic Clippy failed' }
+          cargo build --locked --release --manifest-path src-native/Cargo.toml
           if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
+          New-Item -ItemType Directory -Path src-native/artifacts -Force | Out-Null
+          Copy-Item src-native/target/release/parsec-web-turn.exe src-native/artifacts/ParsecWebTurn.exe
+          ./scripts/package-native.ps1
+          & ./src-native/artifacts/ParsecWebTurn.exe --version
+          if ($LASTEXITCODE -ne 0) { throw "Normal executable failed" }
+          cargo build --locked --manifest-path src-native/Cargo.toml --features diagnostics
+          if ($LASTEXITCODE -ne 0) { throw 'Diagnostic build failed' }
       - name: Run original Parsec WASM without a browser
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          ./prototypes/native-wasm/fetch-core.ps1
-          $artifact = 'prototypes/native-wasm/artifacts'
+          ./src-native/fetch-core.ps1
+          $artifact = 'src-native/artifacts'
           New-Item -ItemType Directory -Path $artifact -Force | Out-Null
-          $exe = 'prototypes/native-wasm/target/release/parsec-native-wasm.exe'
-          $core = 'prototypes/native-wasm/vendor/parsecd.wasm'
+          $exe = 'src-native/target/debug/parsec-web-turn.exe'
+          $core = 'src-native/vendor/parsecd.wasm'
           foreach ($mode in @('inspect', 'allocator', 'boot')) {
             & $exe $mode $core "$artifact/$mode.json" | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "WASM $mode failed" }
@@ -123,12 +135,12 @@ jobs:
           $boot.host | ConvertTo-Json -Depth 5
           $boot.threads | ConvertTo-Json -Depth 5
           $boot.start_error
-          Copy-Item -LiteralPath $exe -Destination "$artifact/parsec-native-wasm.exe"
+          Copy-Item -LiteralPath $exe -Destination "$artifact/parsec-native-diagnostics.exe"
           & $exe guest-tls-probe "$artifact/guest-tls.json"
           if ($LASTEXITCODE -ne 0) { throw 'Native guest HTTPS/WSS imports failed' }
           $tls = Get-Content "$artifact/guest-tls.json" -Raw | ConvertFrom-Json
           if ($tls.tls_connections_verified -ne 6 -or $tls.certificate_rejections_verified -ne 4 -or !$tls.https_import_verified -or !$tls.wss_import_verified -or !$tls.hostname_mismatch_rejected_verified -or !$tls.untrusted_certificate_rejected_verified -or !$tls.servers_closed -or $tls.certificate_verification_disabled -or $tls.external_requests_enabled -or $tls.authentication_integrated) { throw 'Incorrect guest TLS proof' }
-          Copy-Item -LiteralPath prototypes/native-wasm/README.md -Destination "$artifact/README.md"
+          Copy-Item -LiteralPath src-native/README.md -Destination "$artifact/README.md"
           & $exe guest-thread-probe "$artifact/guest-thread.json"
           if ($LASTEXITCODE -ne 0) { throw 'Guest thread lifecycle failed' }
           $thread = Get-Content "$artifact/guest-thread.json" -Raw | ConvertFrom-Json
@@ -137,7 +149,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Shared guest network audit failed' }
           $audit = Get-Content "$artifact/guest-audit.json" -Raw | ConvertFrom-Json
           if ($audit.guest_instances_verified -ne 2 -or $audit.intents_verified -ne 2 -or !$audit.shared_audit_verified -or !$audit.offline_failure_outputs_verified -or !$audit.request_redaction_verified -or !$audit.stdout_redaction_verified -or $audit.external_requests_enabled -or $audit.authentication_integrated) { throw 'Incorrect guest audit proof' }
-          Copy-Item -LiteralPath prototypes/native-wasm/Cargo.lock -Destination "$artifact/Cargo.lock"
+          Copy-Item -LiteralPath src-native/Cargo.lock -Destination "$artifact/Cargo.lock"
           & $exe guest-audio-unavailable-probe "$artifact/guest-audio-unavailable.json"
           if ($LASTEXITCODE -ne 0) { throw 'Audio-unavailable guest contract failed' }
           $audio = Get-Content "$artifact/guest-audio-unavailable.json" -Raw | ConvertFrom-Json
@@ -161,6 +173,15 @@ jobs:
           if ($window.fullscreen_roundtrips -ne 5 -or !$window.native_geometry_restored -or !$window.native_style_restored -or !$window.idempotent_requests_verified -or !$window.guest_import_verified -or $window.real_account_used -or $window.parsec_host_connected) { throw 'Incorrect fullscreen proof' }
       - uses: actions/upload-artifact@v4
         with:
-          name: Native-WASM-prototype-win64
-          path: prototypes/native-wasm/artifacts/
+          name: Native-client-validation-win64
+          path: src-native/artifacts/
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ParsecWebTurn-dev-win64
+          path: |
+            ParsecWebTurn.exe
+            dist/ParsecWebTurn-v*-win64.zip
+            dist/SHA256SUMS.txt
           if-no-files-found: error

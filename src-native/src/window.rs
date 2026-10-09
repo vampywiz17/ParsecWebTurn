@@ -381,21 +381,20 @@ impl Window {
 
 unsafe fn create_window(state: &Arc<Window>, opengl_required: bool) -> Result<HWND> {
     let instance = GetModuleHandleW(std::ptr::null());
-    let name: Vec<u16> = "ParsecNativePrototype\0".encode_utf16().collect();
+    let name: Vec<u16> = "ParsecWebTurnNative\0".encode_utf16().collect();
     let class = WNDCLASSW {
         style: CS_OWNDC | CS_HREDRAW | CS_VREDRAW,
         lpfnWndProc: Some(window_proc),
         hInstance: instance,
         hCursor: LoadCursorW(std::ptr::null_mut(), IDC_ARROW),
+        hIcon: LoadIconW(instance, 1usize as *const u16),
         lpszClassName: name.as_ptr(),
         ..std::mem::zeroed()
     };
     if RegisterClassW(&class) == 0 {
         bail!("RegisterClassW failed: {}", GetLastError());
     }
-    let title: Vec<u16> = "Parsec native WASM â€” GPU prototype\0"
-        .encode_utf16()
-        .collect();
+    let title: Vec<u16> = "ParsecWebTurn\0".encode_utf16().collect();
     let hwnd = CreateWindowExW(
         0,
         name.as_ptr(),

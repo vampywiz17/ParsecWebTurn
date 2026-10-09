@@ -302,6 +302,7 @@ unsafe fn render(
 }
 
 /// Quiet local device smoke test: no account/network and no audible test tone.
+#[cfg(any(test, feature = "diagnostics"))]
 pub fn probe() -> Result<serde_json::Value> {
     let window = crate::window::Window::create_video_probe()?;
     let mut snapshot = None;

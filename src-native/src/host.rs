@@ -474,6 +474,9 @@ pub fn dispatch(
                 .lock()
                 .map_err(|_| anyhow::anyhow!("virtual filesystem lock poisoned"))?;
             let errno = filesystem_call(&m, &mut fs, name, args)?;
+            if errno == 0 && matches!(name, "path_unlink_file" | "path_remove_directory") {
+                fs.flush()?;
+            }
             drop(fs);
             if name.starts_with("path_") && caller.data().filesystem_requests.len() < 32 {
                 let index = if matches!(
@@ -535,6 +538,7 @@ pub fn dispatch(
                     .lock()
                     .map_err(|_| anyhow::anyhow!("virtual filesystem lock poisoned"))?;
                 if fs.close(fd) {
+                    fs.flush()?;
                     0
                 } else {
                     8

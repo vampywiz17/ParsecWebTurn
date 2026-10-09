@@ -207,6 +207,7 @@ fn run_loop(store: &mut Store<HostState>, instance: &Instance, input: bool) -> R
         export(store, instance, "mty_app_set_keys", &[])?;
     }
     let until = Instant::now() + Duration::from_secs(window.run_seconds);
+    #[cfg(any(test, feature = "diagnostics"))]
     let mut script_frame = 0;
     let mut first = true;
     while !window.closing.load(Ordering::Acquire) && (window.live || Instant::now() < until) {
@@ -220,6 +221,7 @@ fn run_loop(store: &mut Store<HostState>, instance: &Instance, input: bool) -> R
             50_000_000
         })?;
         if input {
+            #[cfg(any(test, feature = "diagnostics"))]
             if window.synthetic_login {
                 // Isolated offline test of the pinned UI layout, not login
                 // automation for real accounts. Wait for rendered widgets and

@@ -1,4 +1,4 @@
-//! Ephemeral guest-only filesystem. Never maps a guest path to a host path.
+//! Capability-checked guest filesystem. Guest paths never map directly to host paths.
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const BADF: i32 = 8;
@@ -22,6 +22,8 @@ pub struct VirtualFs {
     pub handles: BTreeMap<u32, Handle>,
     pub directories: BTreeSet<String>,
     next: u32,
+    #[cfg(windows)]
+    pub profile: Option<std::sync::Arc<crate::profile::Profile>>,
 }
 
 impl Default for VirtualFs {
@@ -31,11 +33,21 @@ impl Default for VirtualFs {
             handles: BTreeMap::new(),
             directories: BTreeSet::from(["/".into()]),
             next: 64,
+            #[cfg(windows)]
+            profile: None,
         }
     }
 }
 
 impl VirtualFs {
+    pub fn flush(&self) -> anyhow::Result<()> {
+        #[cfg(windows)]
+        if let Some(profile) = &self.profile {
+            profile.save(self)?;
+        }
+        Ok(())
+    }
+
     pub fn remove_directory(&mut self, path: &[u8]) -> Result<(), i32> {
         let path = Self::path(path)?;
         if path == "/" {

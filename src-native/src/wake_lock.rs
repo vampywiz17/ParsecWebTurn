@@ -31,6 +31,7 @@ impl State {
     }
 }
 
+#[cfg(any(test, feature = "diagnostics"))]
 pub fn probe() -> anyhow::Result<serde_json::Value> {
     let mut config = wasmtime::Config::new();
     config

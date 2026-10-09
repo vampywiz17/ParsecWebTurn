@@ -644,6 +644,7 @@ impl Renderer {
         })
     }
     // Offline synthetic fixture only. Live paths never map/read pixel buffers.
+    #[cfg(any(test, feature = "diagnostics"))]
     unsafe fn verify_pixels(&self, back: &ID3D11Texture2D, size: (u32, u32)) -> Result<bool> {
         let mut desc = D3D11_TEXTURE2D_DESC::default();
         back.GetDesc(&mut desc);
@@ -885,6 +886,7 @@ impl Renderer {
                 }
             }
         }
+        #[cfg(any(test, feature = "diagnostics"))]
         if self.verify_synthetic_pixels && !self.synthetic_pixels_verified {
             self.synthetic_pixels_verified = self.verify_pixels(&back, size)?;
         }
@@ -902,6 +904,7 @@ impl Renderer {
 }
 
 /// No account, network or real content: create and release the actual GPU path.
+#[cfg(any(test, feature = "diagnostics"))]
 pub fn probe(sustained: bool) -> anyhow::Result<serde_json::Value> {
     use std::sync::atomic::Ordering;
     let window = crate::window::Window::create_video_probe()?;

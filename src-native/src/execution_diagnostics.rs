@@ -43,6 +43,7 @@ impl Failure {
     }
 }
 
+#[cfg(any(test, feature = "diagnostics"))]
 pub fn probe() -> anyhow::Result<serde_json::Value> {
     let engine = wasmtime::Engine::default();
     let module = wasmtime::Module::new(
