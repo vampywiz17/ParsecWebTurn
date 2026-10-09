@@ -1,5 +1,40 @@
 # Native dev 0.8.0 promotion evidence
 
+## Post-promotion persistence and disconnect correction
+
+Fix source: `bbda7af8bf26d451a251966dd017c1c2de705f40` on `dev`.
+[Windows validation](https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37995410151)
+passed formatting, the test suite, strict Clippy for both targets and normal
+release packaging. The normal optimized EXE also passed the local smoke test.
+EXE SHA-256: `8b6b4d48023134d4d4e23c6ffec5206e06e524d256f3868f534be7d41eeb4373`.
+ZIP SHA-256: `7c2679ff824981dfa6eedd66f7b73c389a12f633fb3c5dac8be547041b1f699d`.
+The original smoke check below verified an encrypted envelope, but did not check
+whether the original guest had successfully written its files. Isolated old
+profiles contained empty configuration/device files. The WASI preopen omitted
+`fs_rights_inheriting`; wasi-libc masks requested file rights against that field,
+so created descriptors could not write. The bridge now advertises the supported
+inheritable file rights and the correct directory rights. The virtual sandbox and
+current-user DPAPI boundary are unchanged. No old empty profile is deleted.
+
+The strengthened normal-EXE smoke test checks nonempty guest device/configuration
+data, the same device identity after restart, and the ParsecWebTurn window title.
+It passed locally with both corrected debug and optimized builds, using isolated
+profiles. A new
+WAT/WASI regression exercises libc-style rights masking, writes a synthetic
+session through the actual host imports, saves it via DPAPI, then loads and reads
+it in another guest instance. No actual account tokens are used by these tests.
+
+The pinned original `parsec.js` cleanup sends `P(10,0,0,0)` on the control channel
+before closing the connection. Native cleanup now sends that same private Parsec
+frame through the existing WebRTC DTLS/SCTP channel and gives the send buffer a
+bounded opportunity to drain before closing. The notice cannot be guaranteed on
+an already broken network. Window shutdown also invokes backend cleanup. Real
+host disconnection timing still requires a user session test.
+The offline transport regression confirms the 13-byte binary notice is received
+on the control channel by another real DTLS/SCTP peer before closure.
+
+## Original promotion baseline
+
 Build source: `cc5d7b9b0eff96c63a070dc629f5db7a375065bd` on `dev`.
 [Windows validation run](https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37991691938).
 The complete Windows run passed: 128 tests, formatting, strict Clippy for the
