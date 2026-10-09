@@ -191,8 +191,13 @@ fn protect(input: &[u8], encrypt: bool) -> Result<Vec<u8>> {
         bail!("Windows profile protection failed");
     }
     // DPAPI allocates this buffer; copy before releasing with the documented allocator.
-    let bytes =
-        unsafe { std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec() };
+    let bytes = if output.cbData == 0 {
+        Vec::new()
+    } else if output.pbData.is_null() {
+        bail!("Windows profile protection returned no buffer");
+    } else {
+        unsafe { std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec() }
+    };
     unsafe {
         LocalFree(output.pbData.cast());
     }

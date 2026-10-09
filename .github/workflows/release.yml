@@ -28,19 +28,10 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      - name: Validate, build and package
+          workspaces: src-native
+      - name: Validate, build and package native client
         shell: pwsh
         run: ./scripts/build.ps1
-      - name: Ensure CI WebView2 Runtime
-        shell: pwsh
-        run: ./scripts/setup-webview2-ci.ps1
-      - name: Native WebView2 smoke test
-        shell: pwsh
-        run: node scripts/smoke-webview.cjs
       - name: Publish release
         shell: pwsh
         env:

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.0 — Native Rust client (dev)
+
+- Replace the WebView2 launcher with the native Rust client using the pinned Parsec WASM core (150-104a).
+- Embed the core in one executable; no separate WASM file, launcher script or WebView2 runtime is required.
+- Keep sign-in and client preferences in an encrypted, current-Windows-user profile across restarts. Previous Tauri configuration and profiles remain untouched.
+- Present GPU-resident decoded video through the native Windows graphics path; add native Opus/WASAPI audio, keyboard, pointer and the original Parsec overlay. Relative pointer capture remains controlled by the overlay.
+- Enable legacy RSA-1024 host identity compatibility while retaining signature and certificate fingerprint verification.
+- Remove the prototype's forced Cloudflare STUN setting and exclude diagnostic commands, synthetic fixtures and test-only readback from the normal executable.
+
+This dev client does not yet expose custom STUN/TURN settings or the former Tauri statistics panel. Future STUN/TURN configuration will retain the previous settings schema and DPAPI format. Additional audio formats, menu integration and remote input testing remain follow-up work.
+
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
@@ -9,7 +20,7 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - Separate STUN and custom TURN address fields with automatic migration of existing mixed address lists.
-- Add **STUN only � no TURN relay** for direct connections. Cloudflare mode can use its public STUN endpoint without an API token or TURN credential generation. Custom STUN addresses also work alongside Cloudflare TURN.
+- Add **STUN only — no TURN relay** for direct connections. Cloudflare mode can use its public STUN endpoint without an API token or TURN credential generation. Custom STUN addresses also work alongside Cloudflare TURN.
 - Show reported WebRTC DTLS state, version, cipher suite and SRTP protection profile in Connection stats.
 - Show CPU usage for the application and its WebView2 processes, plus WebView2 GPU engine and video-decode utilization when available.
 - Show detected audio codec, sample rate and channel count, retaining these values during silence. The sender's configured bitrate remains unknown when the receiving APIs do not expose it.
@@ -27,7 +38,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Background GitHub stable-release notifications and App → Check for updates.
+- Background GitHub stable-release notifications and App â†’ Check for updates.
 - Native update window with release notes and a direct link to the official Windows ZIP, opened in the default browser only after a click.
 - Bounded metadata-only HTTPS checks, stable numeric version comparison and exact repository ZIP link validation.
 
@@ -41,7 +52,7 @@ All notable changes to this project will be documented in this file.
 - Preserve native WebCodecs callback dictionary conversion, inherited/frozen callbacks and callback capture semantics.
 - Update notifications do not download or run executables, create a helper, replace the app or restart it. Updates are installed manually and follow the browser's organization policies.
 - Correlate selected ICE endpoints with the ICE transport and gathered local/remote candidates to identify additional direct paths, including VPN connections. Positive TURN evidence retains priority; incomplete or ambiguous evidence stays unverified.
-- Label confirmed direct routes as "Direct — no TURN"; VPN routing underneath WebRTC does not imply TURN use. Candidate addresses remain inside the WebView and are not included in telemetry.
+- Label confirmed direct routes as "Direct â€” no TURN"; VPN routing underneath WebRTC does not imply TURN use. Candidate addresses remain inside the WebView and are not included in telemetry.
 
 ## [0.5.0] - 2026-09-30
 

@@ -3,9 +3,17 @@ name: Native client validation
 on:
   workflow_dispatch:
   push:
-    branches: [dev]
+    branches: [dev, main]
     paths:
       - 'src-native/**'
+      - '.github/workflows/native-wasm-prototype.yml'
+      - 'scripts/*native.ps1'
+      - 'VERSION'
+  pull_request:
+    branches: [dev, main]
+    paths:
+      - 'src-native/**'
+      - 'scripts/*native.ps1'
       - '.github/workflows/native-wasm-prototype.yml'
 
 permissions:
