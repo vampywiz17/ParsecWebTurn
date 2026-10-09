@@ -85,8 +85,9 @@ delivery commitment. There are no fixed release dates for these milestones.
 | STUN connectivity | Available, with a fixed server | The native client currently uses Parsec's default STUN server for direct connections. |
 | Custom STUN and TURN relay support | Planned for native; available in the earlier WebView2 client | Choose Cloudflare or your own compatible server, such as coturn or eturnal. Retain compatibility with the old STUN/TURN configuration file. |
 | More audio formats and menu integration | Planned | Support additional audio choices and review which Parsec settings need native integration. |
-| Native connection and playback statistics | Planned | Show useful details about connection quality, playback and resource usage. |
-| Vulkan rendering backend | Planned | Add another GPU rendering option alongside D3D11 and build toward Linux support. D3D12 is not implemented. |
+| Native connection and playback statistics | Planned for native; available in the earlier WebView2 client | Bring the earlier client's statistics to the native app, including connection quality, playback and resource usage. |
+| Vulkan rendering backend | Planned | Add another GPU rendering option alongside D3D11 and build toward Linux support. |
+| D3D12 rendering backend | Exploring | Investigate an additional native GPU rendering option on Windows. |
 | Linux client, distributed as Flatpak | Planned | Make the native client available on Linux with straightforward installation. |
 | Native Android and Android TV clients | Exploring | Investigate a mobile/TV client using the shared Rust foundation and a Vulkan rendering path. |
 
