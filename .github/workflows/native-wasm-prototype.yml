@@ -68,7 +68,7 @@ jobs:
           & $exe transport-probe "$artifact/transport.json"
           if ($LASTEXITCODE -ne 0) { throw 'Native WebRTC transport failed' }
           $transport = Get-Content "$artifact/transport.json" -Raw | ConvertFrom-Json
-          if ($transport.connected_peers -ne 2 -or $transport.binary_messages_verified -ne 6 -or !$transport.peers_closed) { throw 'Native data-channel exchange or cleanup not verified' }
+          if (!$transport.srtp_profiles_verified -or $transport.connected_peers -ne 2 -or $transport.binary_messages_verified -ne 6 -or !$transport.peers_closed) { throw 'Native data-channel exchange or cleanup not verified' }
           & $exe signaling-probe "$artifact/signaling.json"
           if ($LASTEXITCODE -ne 0) { throw 'Compact Parsec signaling adapter failed' }
           $signaling = Get-Content "$artifact/signaling.json" -Raw | ConvertFrom-Json
@@ -80,6 +80,7 @@ jobs:
           & $exe guest-session-probe "$artifact/guest-session.json"
           if ($LASTEXITCODE -ne 0) { throw 'Guest/native ICE/DTLS/SCTP exchange failed' }
           $session = Get-Content "$artifact/guest-session.json" -Raw | ConvertFrom-Json
+          if (!$session.sctp_without_srtp_verified) { throw 'SCTP-only DTLS was not verified' }
           if (!$session.parsec_padded_ufrag_native_negotiation_verified) { throw 'Padded Parsec ufrag authentication was not verified' }
           if (!$session.live_attempt_reporting_verified) { throw 'Live native transport reporting was not verified' }
           & $exe guest-dtls-failure-probe "$artifact/guest-dtls-failure.json"

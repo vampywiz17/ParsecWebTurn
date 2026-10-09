@@ -8,6 +8,8 @@ mod control;
 mod crypto_policy_tests;
 #[cfg(windows)]
 mod cursor;
+#[cfg(test)]
+mod data_only_policy_tests;
 #[cfg(windows)]
 mod desktop;
 mod filesystem;

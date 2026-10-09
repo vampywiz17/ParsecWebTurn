@@ -161,6 +161,7 @@ fn probe_mode(mode: Mode, legacy_rsa_1024: bool) -> Result<serde_json::Value> {
         .build()?;
     let mut settings = SettingEngine::default();
     settings.set_network_types(vec![NetworkType::Udp4]);
+    settings.set_data_channel_only(true);
     if !control {
         // Synthetic peer only. Exercise the reported padded-ufrag shape with
         // real STUN authentication, DTLS and SCTP, without editing SDP tokens.
@@ -445,6 +446,12 @@ fn probe_mode(mode: Mode, legacy_rsa_1024: bool) -> Result<serde_json::Value> {
             {
                 bail!("test server channels not connected");
             }
+            if runtime
+                .block_on(peer.dtls_transport().negotiated_srtp_profile())
+                .is_some()
+            {
+                bail!("SCTP-only peer unexpectedly negotiated SRTP");
+            }
             if control {
                 return Ok(attempt.snapshot());
             }
@@ -518,7 +525,7 @@ fn probe_mode(mode: Mode, legacy_rsa_1024: bool) -> Result<serde_json::Value> {
             bail!("native attempt cleanup failed");
         }
         Ok(
-            serde_json::json!({"schema":1,"scope":if buffers {"controlled-wasm-native-cursor-user-buffers"} else if control {"controlled-wasm-native-parsec-control"} else {"controlled-wasm-guest-native-ice-dtls-sctp"},"original_parsec_guest_attempt_exercised":false,"guest_begin_and_candidate_verified":true,"guest_local_candidate_events":local_count,"guest_sync_ack_verified":ack,"guest_buffer_retry_verified":buffer_retry,"remote_candidates_submitted":remote_count,"connected_peers":2,"binary_messages_verified":if control {0} else {6},"control":control_report,"buffers":buffer_report.map(|p|p.0),"native_connected":connected,"native_closed":closed,"parsec_host_connected":false,"video_decoded":false}),
+            serde_json::json!({"schema":1,"scope":if buffers {"controlled-wasm-native-cursor-user-buffers"} else if control {"controlled-wasm-native-parsec-control"} else {"controlled-wasm-guest-native-ice-dtls-sctp"},"original_parsec_guest_attempt_exercised":false,"guest_begin_and_candidate_verified":true,"guest_local_candidate_events":local_count,"guest_sync_ack_verified":ack,"guest_buffer_retry_verified":buffer_retry,"remote_candidates_submitted":remote_count,"connected_peers":2,"sctp_without_srtp_verified":true,"binary_messages_verified":if control {0} else {6},"control":control_report,"buffers":buffer_report.map(|p|p.0),"native_connected":connected,"native_closed":closed,"parsec_host_connected":false,"video_decoded":false}),
         )
     })();
     // Tear down even when negotiation or validation fails.

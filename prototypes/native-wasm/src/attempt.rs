@@ -329,7 +329,7 @@ impl Attempt {
         serde_json::json!({ "offer_ready": state.progress.ready, "mid":state.progress.mid, "peer_closed": state.progress.closed, "failed": state.progress.failed, "failure_stage": state.progress.failure_stage, "negotiated_channels": state.progress.channels, "channels_open": state.progress.open_mask.count_ones(), "transport_connected":state.progress.transport_connected, "local_candidates":state.progress.local_candidates, "remote_candidates":state.progress.remote_candidates, "messages_received":state.progress.messages_received, "worker_finished": *self.finished.0.lock().unwrap_or_else(|e| e.into_inner()), "host_connected": false,
         "local_description_set":state.progress.local_description_set,"remote_description_set":state.progress.remote_description_set,"sync_received":state.progress.sync_received,"transport_states":state.progress.transport_states,"transport_states_before_close":state.progress.transport_states_before_close,"transport_states_at_failure":state.progress.transport_states_at_failure,
         "local_host_candidates":state.progress.local_host_candidates,"local_srflx_candidates":state.progress.local_srflx_candidates,
-        "legacy_rsa_1024_enabled":state.progress.legacy_rsa_1024,"ice_servers_configured":state.progress.cloudflare_stun,"stun_provider":if state.progress.cloudflare_stun {Some("cloudflare")} else {None},"network_types":["udp4"],"connection_deadline_seconds":30 })
+        "data_channel_only":true,"legacy_rsa_1024_enabled":state.progress.legacy_rsa_1024,"ice_servers_configured":state.progress.cloudflare_stun,"stun_provider":if state.progress.cloudflare_stun {Some("cloudflare")} else {None},"network_types":["udp4"],"connection_deadline_seconds":30 })
     }
 
     fn command(&self, id: &str, command: Command) -> Result<()> {
@@ -450,6 +450,7 @@ fn worker(
         .build()?;
     let mut settings = SettingEngine::default();
     settings.set_network_types(vec![NetworkType::Udp4]);
+    settings.set_data_channel_only(true);
     // Explicit legacy key-size compatibility only. Signature and SDP fingerprint
     // verification remain enabled; insecure hashes are not enabled.
     settings.allow_insecure_verification_algorithm(legacy_rsa_1024);

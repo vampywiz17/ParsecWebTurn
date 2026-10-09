@@ -36,6 +36,7 @@ pub struct ProbeReport {
     pub parsec_host_connected: bool,
     pub video_decoded: bool,
     pub connected_peers: u32,
+    pub srtp_profiles_verified: bool,
     pub binary_messages_verified: u32,
     pub channels: Vec<ChannelReport>,
     pub peers_closed: bool,
@@ -214,12 +215,24 @@ async fn exchange(
     if connected != 2 {
         bail!("ICE/DTLS peer connection not confirmed");
     }
+    for peer in [a, b] {
+        if peer
+            .connection
+            .dtls_transport()
+            .negotiated_srtp_profile()
+            .await
+            .is_none()
+        {
+            bail!("default native peer lost SRTP profile negotiation");
+        }
+    }
     Ok(ProbeReport {
         schema: 1,
         scope: "two-native-peers-on-this-machine",
         parsec_host_connected: false,
         video_decoded: false,
         connected_peers: connected as u32,
+        srtp_profiles_verified: true,
         binary_messages_verified: verified,
         channels: CHANNELS
             .into_iter()
