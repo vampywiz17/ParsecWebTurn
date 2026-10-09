@@ -9,6 +9,30 @@ try {
     $taskBinary = [IO.File]::ReadAllBytes((Join-Path $taskRoot 'src-native/target/x86_64-pc-windows-msvc/release/parsec-web-turn.exe'))
     $taskPeOffset = [BitConverter]::ToInt32($taskBinary, 0x3c)
     if ([BitConverter]::ToUInt16($taskBinary, $taskPeOffset + 24 + 68) -ne 2) { throw 'Only the normal Windows GUI executable may be packaged' }
+    # Read the documented PE32+ import table, rather than searching incidental strings.
+    $taskSectionTable = $taskPeOffset + 24 + [BitConverter]::ToUInt16($taskBinary, $taskPeOffset + 20)
+    $taskSectionCount = [BitConverter]::ToUInt16($taskBinary, $taskPeOffset + 6)
+    function Convert-TaskRva([uint32]$TaskRva) {
+        for ($taskIndex = 0; $taskIndex -lt $taskSectionCount; $taskIndex++) {
+            $taskSection = $taskSectionTable + 40 * $taskIndex
+            $taskStart = [BitConverter]::ToUInt32($taskBinary, $taskSection + 12)
+            $taskSize = [Math]::Max([BitConverter]::ToUInt32($taskBinary, $taskSection + 8), [BitConverter]::ToUInt32($taskBinary, $taskSection + 16))
+            if ($TaskRva -ge $taskStart -and $TaskRva -lt $taskStart + $taskSize) {
+                return [int]([BitConverter]::ToUInt32($taskBinary, $taskSection + 20) + $TaskRva - $taskStart)
+            }
+        }
+        throw 'Invalid executable import address'
+    }
+    if ([BitConverter]::ToUInt16($taskBinary, $taskPeOffset + 24) -ne 0x20b) { throw 'Expected a Windows x64 executable' }
+    $taskImport = Convert-TaskRva ([BitConverter]::ToUInt32($taskBinary, $taskPeOffset + 24 + 112 + 8))
+    while (($taskNameRva = [BitConverter]::ToUInt32($taskBinary, $taskImport + 12)) -ne 0) {
+        $taskNameOffset = Convert-TaskRva $taskNameRva
+        $taskNameEnd = $taskNameOffset
+        while ($taskBinary[$taskNameEnd] -ne 0) { $taskNameEnd++ }
+        $taskDll = [Text.Encoding]::ASCII.GetString($taskBinary, $taskNameOffset, $taskNameEnd - $taskNameOffset)
+        if ($taskDll -match '^(vcruntime|msvcp|libopus|WebView2Loader).*\.dll$') { throw "External application runtime dependency: $taskDll" }
+        $taskImport += 20
+    }
     $taskBinaryText = [Text.Encoding]::Latin1.GetString($taskBinary)
     foreach ($taskMarker in @('video-hardware-probe', 'login-audit', 'synthetic-session-value', 'private-password-token-url')) {
         if ($taskBinaryText.Contains($taskMarker)) { throw "Diagnostic marker in normal executable: $taskMarker" }
