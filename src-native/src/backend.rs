@@ -8,7 +8,7 @@ use std::collections::VecDeque;
 #[derive(Default, Serialize)]
 pub struct Backend {
     pub initialized: bool,
-    pub cloudflare_stun_enabled: bool,
+    pub stun_provider: crate::attempt::StunProvider,
     pub legacy_rsa_1024_enabled: bool,
     pub generation: u64,
     pub status: Option<i32>,

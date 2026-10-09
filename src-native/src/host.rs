@@ -667,7 +667,7 @@ fn backend_call(
                             &id,
                             output.clone(),
                             config,
-                            b.cloudflare_stun_enabled,
+                            b.stun_provider,
                             b.legacy_rsa_1024_enabled,
                         ) {
                             Ok(attempt) => {

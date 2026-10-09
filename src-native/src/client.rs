@@ -71,7 +71,7 @@ fn run() -> Result<()> {
         // Compatibility with the pinned host's legacy identity certificate.
         // Signature and certificate-fingerprint validation remain mandatory.
         backend.legacy_rsa_1024_enabled = true;
-        backend.cloudflare_stun_enabled = false;
+        backend.stun_provider = attempt::StunProvider::Parsec;
     }
     let outcome = (|| -> Result<()> {
         store.data_mut().execution_stage = Some("guest-start");

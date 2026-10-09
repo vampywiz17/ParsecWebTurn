@@ -453,7 +453,11 @@ fn run() -> Result<()> {
                 .backend
                 .lock()
                 .map_err(|_| anyhow::anyhow!("backend lock poisoned"))?;
-            backend.cloudflare_stun_enabled = account_options.cloudflare_stun;
+            backend.stun_provider = if account_options.cloudflare_stun {
+                attempt::StunProvider::Cloudflare
+            } else {
+                attempt::StunProvider::None
+            };
             backend.legacy_rsa_1024_enabled = account_options.legacy_rsa_1024;
         }
         if mode == "boot" || window_mode {

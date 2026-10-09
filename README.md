@@ -61,7 +61,8 @@ This is the first native development build, not a claim that every original menu
 option is supported. Additional audio formats, physical gamepad discovery,
 keyboard grabbing, menu compatibility and custom STUN/TURN configuration are the
 next development work. Previously saved Tauri relay settings are not applied yet.
-The app currently uses the pinned core's ordinary STUN settings and native ICE
+The app currently uses the pinned web client's `stun:stun.parsec.gg:3478` endpoint
+and native ICE
 behavior. Installing a TURN server or selecting relay mode is not part of this
 build. Actual decoder hardware-engine execution is not claimed when unmeasured.
 
