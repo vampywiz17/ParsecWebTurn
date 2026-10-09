@@ -331,6 +331,11 @@ fn probe_mode(mode: Mode) -> Result<serde_json::Value> {
                     {
                         bail!("live diagnostic omitted native phases or consumed the attempt");
                     }
+                    if active["local_srflx_candidates"] != 0
+                        || active["ice_servers_configured"] != false
+                    {
+                        bail!("offline fixture configured public ICE servers");
+                    }
                     break;
                 }
                 if Instant::now() >= until {

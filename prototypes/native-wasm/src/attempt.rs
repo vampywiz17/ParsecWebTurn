@@ -145,6 +145,8 @@ struct Progress {
     open_mask: u8,
     transport_connected: bool,
     local_candidates: usize,
+    local_host_candidates: usize,
+    local_srflx_candidates: usize,
     remote_candidates: usize,
     messages_received: usize,
     control_ready: bool,
@@ -311,6 +313,7 @@ impl Attempt {
         let state = self.completion.lock().unwrap_or_else(|e| e.into_inner());
         serde_json::json!({ "offer_ready": state.progress.ready, "mid":state.progress.mid, "peer_closed": state.progress.closed, "failed": state.progress.failed, "failure_stage": state.progress.failure_stage, "negotiated_channels": state.progress.channels, "channels_open": state.progress.open_mask.count_ones(), "transport_connected":state.progress.transport_connected, "local_candidates":state.progress.local_candidates, "remote_candidates":state.progress.remote_candidates, "messages_received":state.progress.messages_received, "worker_finished": *self.finished.0.lock().unwrap_or_else(|e| e.into_inner()), "host_connected": false,
         "local_description_set":state.progress.local_description_set,"remote_description_set":state.progress.remote_description_set,"sync_received":state.progress.sync_received,"transport_states":state.progress.transport_states,"transport_states_before_close":state.progress.transport_states_before_close,
+        "local_host_candidates":state.progress.local_host_candidates,"local_srflx_candidates":state.progress.local_srflx_candidates,
         "ice_servers_configured":state.progress.cloudflare_stun,"stun_provider":if state.progress.cloudflare_stun {Some("cloudflare")} else {None},"network_types":["udp4"],"connection_deadline_seconds":30 })
     }
 
@@ -452,6 +455,7 @@ fn worker(
             if state.events.len() >= 64 || !matches!(candidate.typ,RTCIceCandidateType::Host|RTCIceCandidateType::Srflx) { state.progress.failed=true; }
             else {
                 state.progress.local_candidates+=1;
+                if candidate.typ==RTCIceCandidateType::Host {state.progress.local_host_candidates+=1;} else if candidate.typ==RTCIceCandidateType::Srflx {state.progress.local_srflx_candidates+=1;}
                 state.events.push_back(serde_json::json!({"type":8,"attemptID":id,"ip":candidate.address,"port":candidate.port,"lan":candidate.typ==RTCIceCandidateType::Host,"fromStun":candidate.typ==RTCIceCandidateType::Srflx,"sync":false}));
             }
             wake.notify_all();
@@ -689,6 +693,8 @@ fn transport_states(peer: &webrtc::peer_connection::RTCPeerConnection) -> serde_
 
 fn ice_configuration(cloudflare_stun: bool) -> RTCConfiguration {
     RTCConfiguration {
+        ice_transport_policy:
+            webrtc::peer_connection::policy::ice_transport_policy::RTCIceTransportPolicy::All,
         ice_servers: if cloudflare_stun {
             vec![RTCIceServer {
                 urls: vec!["stun:stun.cloudflare.com:3478".into()],

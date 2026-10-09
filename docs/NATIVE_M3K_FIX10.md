@@ -24,6 +24,10 @@ STUN is performed by the native ICE engine over UDP, not the HTTP bridge.
 `START-CLOUDFLARE-STUN-DIAGNOSTIC.cmd` explicitly selects this mode. The report
 includes the configuration flag and fixed provider label, plus candidate counts.
 Configuration alone does not prove a STUN response or successful direct path.
+`local_srflx_candidates` counts successful native server-reflexive candidate
+callbacks separately from `local_host_candidates`; zero is not itself a network
+failure verdict. ICE transport policy is explicitly set to `all` rather than
+relying on the library's `unspecified` configuration default.
 
 ## Reporting repair
 
