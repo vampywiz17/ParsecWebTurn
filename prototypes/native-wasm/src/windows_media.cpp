@@ -500,6 +500,21 @@ HRESULT ConfigureLiveVideo(LiveSession *session) {
       FAILED(hr = input->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264_ES)) ||
       FAILED(hr = session->video_decoder->SetInputType(0, input.Get(), 0)))
     return hr;
+  for (DWORD index = 0;; ++index) {
+    ComPtr<IMFMediaType> output;
+    if (FAILED(hr = session->video_decoder->GetOutputAvailableType(
+                   0, index, &output)))
+      return hr;
+    GUID subtype{};
+    if (SUCCEEDED(output->GetGUID(MF_MT_SUBTYPE, &subtype)) &&
+        subtype == MFVideoFormat_NV12) {
+      if (FAILED(hr = session->video_decoder->SetOutputType(0, output.Get(), 0)))
+        return hr;
+      MFGetAttributeSize(output.Get(), MF_MT_FRAME_SIZE, &session->video_width,
+                         &session->video_height);
+      break;
+    }
+  }
   session->video_decoder->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0);
   session->video_decoder->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
   return S_OK;
