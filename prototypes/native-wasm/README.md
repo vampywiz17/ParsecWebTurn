@@ -1,5 +1,11 @@
 # Native Rust / Parsec WASM prototype
 
+M3k-fix8 / 0.14.8 adds aggregate credential character categories. The user's fix7
+report narrows the rejection to an eight-byte remote ufrag with valid length,
+no terminal CR and a matching attempt ID. No acceptance rules are changed and
+the offending character is not yet established. See
+[M3k-fix8](../../docs/NATIVE_M3K_FIX8.md).
+
 M3k-fix7 / 0.14.7 normalizes the pinned JS compact SDP line-ending representation
 at the ABI boundary, preserving strict ICE/DTLS validation. Redacted remote-begin
 diagnostics distinguish credential fields and attempt-ID mismatches. The user's

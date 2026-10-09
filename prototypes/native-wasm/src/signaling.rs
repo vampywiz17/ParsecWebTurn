@@ -44,6 +44,32 @@ fn token(value: &str, min: usize, max: usize) -> Result<()> {
     Ok(())
 }
 
+/// Aggregate categories only: no bytes, positions, prefixes, suffixes or hashes.
+/// In particular, '=' and URL-safe Base64 punctuation are not RFC 8839 ice-char.
+fn token_shape(value: &str, min: usize) -> serde_json::Value {
+    let mut counts = [0usize; 8];
+    for byte in value.bytes() {
+        let category = match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'+' | b'/' => 0,
+            b'=' => 1,
+            b'-' | b'_' => 2,
+            b' ' | b'\t' => 3,
+            b'\r' | b'\n' => 4,
+            0..=31 | 127 => 5,
+            128..=255 => 6,
+            _ => 7,
+        };
+        counts[category] += 1;
+    }
+    serde_json::json!({
+        "length_valid":(min..=256).contains(&value.len()),
+        "ice_char_bytes":counts[0], "equals_bytes":counts[1],
+        "url_safe_punctuation_bytes":counts[2], "space_tab_bytes":counts[3],
+        "cr_lf_bytes":counts[4], "other_control_bytes":counts[5],
+        "non_ascii_bytes":counts[6], "other_ascii_punctuation_bytes":counts[7]
+    })
+}
+
 impl Credentials {
     /// The pinned ia() splits SDP on LF, retaining the single SDP line-ending
     /// CR in its compact fields. Normalize that representation at the ABI edge;
@@ -72,6 +98,8 @@ impl Credentials {
             "fingerprint_terminal_cr":self.fingerprint.ends_with('\r'),
             "ufrag_valid":token(&self.ufrag,4,256).is_ok(),
             "password_valid":token(&self.password,22,256).is_ok(),
+            "ufrag_shape":token_shape(&self.ufrag,4),
+            "password_shape":token_shape(&self.password,22),
             "validation_error":self.validate().err().and_then(|e|e.downcast_ref::<CredentialError>().copied())
         })
     }
@@ -297,6 +325,39 @@ mod tests {
             ufrag: "abcd".into(),
             password: "abcdefghijklmnopqrstuv".into(),
             fingerprint: format!("sha-256 {}", ["AB"; 32].join(":")),
+        }
+    }
+    #[test]
+    fn token_shape_classifies_rejection_without_disclosing_credential() {
+        let synthetic = "Ab09+/==-_ \t\r\n\u{1}\u{7f}é:!";
+        let shape = token_shape(synthetic, 4);
+        for (name, count) in [
+            ("ice_char_bytes", 6),
+            ("equals_bytes", 2),
+            ("url_safe_punctuation_bytes", 2),
+            ("space_tab_bytes", 2),
+            ("cr_lf_bytes", 2),
+            ("other_control_bytes", 2),
+            ("non_ascii_bytes", 2),
+            ("other_ascii_punctuation_bytes", 2),
+        ] {
+            assert_eq!(shape[name], count);
+        }
+        assert_eq!(shape["length_valid"], true);
+        for value in ["abc", &"a".repeat(257)] {
+            assert_eq!(token_shape(value, 4)["length_valid"], false);
+        }
+        let mut c = creds();
+        c.ufrag = "testAA==".into();
+        let diagnostic = c.diagnostic();
+        assert_eq!(diagnostic["ufrag_shape"]["equals_bytes"], 2);
+        assert_eq!(diagnostic["validation_error"], "ice-ufrag");
+        assert!(!diagnostic.to_string().contains(&c.ufrag));
+        // Diagnosing padding or punctuation must not silently change acceptance.
+        for value in ["testAA==", "test-_AA", "abcd efgh", "abcd:efgh"] {
+            c.ufrag = value.into();
+            assert!(c.normalize_compact().validate().is_err());
+            c = creds();
         }
     }
     #[test]

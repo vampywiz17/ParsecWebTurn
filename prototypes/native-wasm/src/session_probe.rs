@@ -733,6 +733,56 @@ fn buffer_exchange(
 #[cfg(test)]
 mod tests {
     #[test]
+    fn invalid_remote_ufrag_retains_only_shape_and_keeps_guest_alive() {
+        use wasmtime::{Config, Engine, Module};
+        let mut config = Config::new();
+        config
+            .wasm_threads(true)
+            .consume_fuel(true)
+            .epoch_interruption(true);
+        let engine = Engine::new(&config).unwrap();
+        let module = Module::new(&engine, r#"(module
+          (import "env" "memory" (memory 1 1 shared))
+          (import "env" "parsec_web_init" (func $init))
+          (import "env" "parsec_web_new_attempt" (func $offer (param i32 i32 i32 i32 i32 i32 i32)))
+          (import "env" "parsec_web_begin_p2p" (func $begin (param i32 i32 i32 i32 i32)))
+          (func (export "start") call $init
+            i32.const 16 i32.const 100 i32.const 400 i32.const 700 i32.const 256 i32.const 64 i32.const 80 call $offer)
+          (func (export "begin") i32.const 16 i32.const 0 i32.const 1024 i32.const 1280 i32.const 1536 call $begin))"#).unwrap();
+        let (mut store, instance) = crate::instantiate(&engine, &module).unwrap();
+        let memory = store.data().memory.clone();
+        memory.c_string(16, 64, "ufrag-shape-test").unwrap();
+        memory.c_string(1024, 258, "testAA==").unwrap();
+        memory
+            .c_string(1280, 258, "abcdefghijklmnopqrstuv")
+            .unwrap();
+        memory
+            .c_string(1536, 258, &format!("sha-256 {}", ["AB"; 32].join(":")))
+            .unwrap();
+        instance
+            .get_typed_func::<(), ()>(&mut store, "start")
+            .unwrap()
+            .call(&mut store, ())
+            .unwrap();
+        instance
+            .get_typed_func::<(), ()>(&mut store, "begin")
+            .unwrap()
+            .call(&mut store, ())
+            .unwrap();
+        let backend = store.data().backend.lock().unwrap();
+        assert_eq!(backend.status, Some(-6200));
+        let shape = backend.remote_begin_diagnostic.as_ref().unwrap();
+        assert_eq!(shape["attempt_matches"], true);
+        assert_eq!(shape["normalized"]["ufrag_shape"]["equals_bytes"], 2);
+        assert_eq!(shape["normalized"]["validation_error"], "ice-ufrag");
+        let report = serde_json::to_string(&*backend).unwrap();
+        for secret in ["testAA==", "abcdefghijklmnopqrstuv", "ufrag-shape-test"] {
+            assert!(!report.contains(secret));
+        }
+        assert!(store.data().boundary.is_none());
+        assert!(backend.native_attempt.is_none());
+    }
+    #[test]
     fn invalid_remote_candidate_returns_connection_error_without_trapping_guest() {
         use wasmtime::{Config, Engine, Module};
         let mut config = Config::new();
