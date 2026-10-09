@@ -482,7 +482,7 @@ fn read_pixels(
                 glow::RGB => [pixel[0], pixel[1], pixel[2], 255],
                 glow::RED => [pixel[0], 0, 0, 255],
                 glow::RG => [pixel[0], pixel[1], 0, 255],
-                glow::ALPHA => [255, 255, 255, pixel[0]],
+                glow::ALPHA => [0, 0, 0, pixel[0]],
                 glow::LUMINANCE => [pixel[0], pixel[0], pixel[0], 255],
                 glow::LUMINANCE_ALPHA => [pixel[0], pixel[0], pixel[0], pixel[1]],
                 _ => unreachable!(),
@@ -498,9 +498,9 @@ fn apply_internal_format(pixels: &mut [u8], format: u32) -> Result<()> {
             glow::RGBA | glow::RGBA8 => {}
             glow::RGB | glow::RGB8 => p[3] = 255,
             glow::ALPHA => {
-                p[0] = 255;
-                p[1] = 255;
-                p[2] = 255;
+                p[0] = 0;
+                p[1] = 0;
+                p[2] = 0;
             }
             glow::LUMINANCE => {
                 p[1] = p[0];
@@ -603,6 +603,12 @@ mod tests {
         assert_eq!(shared.frame.batches.len(), 1);
         capture.publish(&mut shared);
         assert!(shared.frame.batches.is_empty());
+    }
+    #[test]
+    fn legacy_alpha_internal_format_preserves_alpha_and_zeroes_color() {
+        let mut pixels = [10, 20, 30, 40, 255, 255, 255, 127];
+        apply_internal_format(&mut pixels, glow::ALPHA).unwrap();
+        assert_eq!(pixels, [0, 0, 0, 40, 0, 0, 0, 127]);
     }
     #[test]
     fn gui_sampler_selects_its_bound_texture_unit() {

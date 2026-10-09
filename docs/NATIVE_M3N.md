@@ -68,6 +68,7 @@ must still be confirmed with the new package. No real account report is committe
 - [WASAPI stream initialization](https://learn.microsoft.com/en-us/windows/win32/api/audioclient/nf-audioclient-iaudioclient-initialize)
 - [WASAPI rendering](https://learn.microsoft.com/en-us/windows/win32/coreaudio/rendering-a-stream)
 - [Windows Raw Input](https://learn.microsoft.com/en-us/windows/win32/inputdev/raw-input)
+- [GLES 2.0 texture sampling semantics, section 3.8.2](https://registry.khronos.org/OpenGL/specs/es/2.0/es_full_spec_2.0.pdf)
 - [D3D11 alpha blending](https://learn.microsoft.com/en-us/windows/win32/direct3d11/d3d10-graphics-programming-guide-blend-state)
 - Pinned `parsec.js`, `weblib.js`, `matoya-worker.js` and WASM GUI shader source,
   downloaded in the isolated audit directory. These define the private ABI;
