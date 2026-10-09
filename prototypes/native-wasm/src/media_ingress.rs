@@ -148,8 +148,7 @@ impl Queue {
                 }
                 let payload = &bytes[payload_offset..];
                 if payload.is_empty() {
-                    ingress.video_frames_dropped =
-                        ingress.video_frames_dropped.saturating_add(1);
+                    ingress.video_frames_dropped = ingress.video_frames_dropped.saturating_add(1);
                     return self.depths(ingress);
                 }
                 if self.await_keyframe && !keyframe {
