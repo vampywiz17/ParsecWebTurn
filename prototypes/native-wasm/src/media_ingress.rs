@@ -179,8 +179,7 @@ impl Queue {
                 .saturating_add(packet.bytes.len() as u64);
             match packet.channel {
                 1 => {
-                    ingress.video_frames_dequeued =
-                        ingress.video_frames_dequeued.saturating_add(1);
+                    ingress.video_frames_dequeued = ingress.video_frames_dequeued.saturating_add(1);
                     if packet.keyframe {
                         ingress.video_keyframes_dequeued =
                             ingress.video_keyframes_dequeued.saturating_add(1);
