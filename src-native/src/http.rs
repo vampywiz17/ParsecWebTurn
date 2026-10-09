@@ -109,19 +109,21 @@ impl Network {
         // No URL/header/body/error is logged. No proxy, cookie jar or redirect:
         // even a loopback redirect must never reach an unintended destination.
         if self.client.get().is_none() {
-            let mut builder = Client::builder()
+            let builder = Client::builder()
                 .no_proxy()
                 .redirect(reqwest::redirect::Policy::none())
                 .connect_timeout(MAX_TIMEOUT)
                 .timeout(MAX_TIMEOUT)
                 .pool_max_idle_per_host(2);
             #[cfg(any(test, feature = "diagnostics"))]
-            if let Some(root) = &self.fixture_root {
+            let builder = if let Some(root) = &self.fixture_root {
                 // Private trust is scoped to this loopback diagnostic client.
-                builder = builder
+                builder
                     .tls_built_in_root_certs(false)
-                    .add_root_certificate(reqwest::Certificate::from_der(root)?);
-            }
+                    .add_root_certificate(reqwest::Certificate::from_der(root)?)
+            } else {
+                builder
+            };
             let client = builder.build()?;
             let _ = self.client.set(client);
         }

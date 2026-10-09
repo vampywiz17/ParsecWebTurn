@@ -8,7 +8,8 @@ New-Item -ItemType Directory -Path $taskProfile -Force | Out-Null
 foreach ($taskLaunch in 1..2) {
     $taskInfo = [Diagnostics.ProcessStartInfo]::new($taskExecutable)
     $taskInfo.UseShellExecute = $false
-    $taskInfo.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
+    # This launches the client UI under test, not a background helper/service.
+    $taskInfo.WindowStyle = [Diagnostics.ProcessWindowStyle]::Normal
     $taskInfo.Environment['LOCALAPPDATA'] = $taskProfile
     $taskProcess = [Diagnostics.Process]::Start($taskInfo)
     try {
@@ -31,3 +32,4 @@ foreach ($taskLaunch in 1..2) {
     }
 }
 Write-Output 'Normal executable startup, close, encrypted save and restart succeeded.'
+

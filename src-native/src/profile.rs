@@ -7,7 +7,7 @@ use std::{
     fs::{File, OpenOptions},
     io::{Read, Write},
     os::windows::{ffi::OsStrExt, fs::OpenOptionsExt},
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::Arc,
 };
 use windows_sys::Win32::{
@@ -31,7 +31,11 @@ impl Profile {
     pub fn user() -> Result<Arc<Self>> {
         let root = std::env::var_os("LOCALAPPDATA")
             .context("Windows local application data unavailable")?;
-        Self::open(Path::new(&root).join("ParsecWebTurn").join("Native"))
+        Self::open(
+            std::path::Path::new(&root)
+                .join("ParsecWebTurn")
+                .join("Native"),
+        )
     }
     fn open(directory: PathBuf) -> Result<Arc<Self>> {
         std::fs::create_dir_all(&directory).context("Cannot create native profile directory")?;
