@@ -31,3 +31,17 @@ Tests cover bounded images, PNG decoding, alpha conversion, hotspot bounds,
 80 native cursor create/replace/reset cycles, and actual guest calls including
 null reset and invalid guest buffers. No real clipboard or account is involved.
 Real-host stream startup and remote video/audio remain incomplete and unverified.
+
+## Verification
+
+Source: `552ed3f6f8dbddd0124aa64a71b7608c95ebc0f0`.
+Windows CI: https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37895775306
+passed all 64 tests, formatting, strict Clippy, release build and original-core
+integration probes. The initial run passed the same tests but required two
+fixed-size pixel iteration changes for Clippy; only the final run is packaged.
+
+The downloaded release executable also passed the local native-offer wait probe
+and all nine offline original-UI Tab/paste/login steps: 15 accelerated GPU frames,
+79 draw calls, no startup error, no rejected workers, and window resources
+released. Its original-core inspection marks all four cursor imports implemented.
+These checks do not log into a real account or establish a remote host connection.
