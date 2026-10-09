@@ -11,6 +11,7 @@ pub const MAX_BYTES: usize = 8 * 1024 * 1024;
 pub struct Snapshot {
     pub enabled: bool,
     pub decoder_initialized: bool,
+    pub low_latency_request_accepted: bool,
     pub decoder: Option<&'static str>,
     pub renderer: Option<&'static str>,
     pub adapter: Option<String>,

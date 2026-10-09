@@ -13,6 +13,9 @@ rejected. The video processor reads decoder textures directly (including array
 slices), scales/letterboxes and converts to the BGRA swap-chain backbuffer on
 the GPU. Live sessions never map/read decoded pixels or upload CPU pixel images.
 The compressed-input copy required by the MFT is separate from decoded pixels.
+Low-latency decoding is requested via the documented ICodecAPI property using
+the H.264 decoder's required VT_UI4 type. Acceptance is reported; unsupported
+requests do not prevent decoding.
 
 The child video HWND is created/resized/shown/hidden only by the existing UI
 thread. It overlays the OpenGL account UI after a real successful DXGI present;
@@ -57,6 +60,7 @@ are active. Reconnection creates a fresh worker. Native driver hangs cannot be
 safely forcibly terminated in-process; cleanup diagnostics retain that limitation.
 
 References:
+- https://learn.microsoft.com/en-us/windows/win32/medfound/codecapi-avlowlatencymode
 - https://learn.microsoft.com/en-us/windows/win32/medfound/h-264-video-decoder
 - https://learn.microsoft.com/en-us/windows/win32/medfound/supporting-direct3d-11-video-decoding-in-media-foundation
 - https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11videocontext-videoprocessorblt

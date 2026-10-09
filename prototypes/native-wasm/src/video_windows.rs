@@ -17,7 +17,7 @@ use windows::{
             Dxgi::{Common::*, *},
         },
         Media::MediaFoundation::*,
-        System::Com::*,
+        System::{Com::*, Variant::*},
     },
 };
 
@@ -179,6 +179,7 @@ fn run(
             let native = unsafe { Session::create(HWND(hwnd as *mut _), verify_synthetic_pixels)? };
             update(shared, |s| {
                 s.decoder_initialized = true;
+                s.low_latency_request_accepted = native.low_latency_request_accepted;
                 s.decoder = Some("Media Foundation H.264");
                 s.renderer = Some("D3D11 VideoProcessor / DXGI");
                 s.adapter = Some(native.renderer.adapter.clone());
@@ -229,6 +230,7 @@ impl Drop for Runtime {
 }
 
 struct Session {
+    low_latency_request_accepted: bool,
     decoder: IMFTransform,
     _manager: IMFDXGIDeviceManager,
     renderer: Renderer,
@@ -262,8 +264,20 @@ impl Session {
         {
             return Err(unavailable("video-decoder-not-d3d11-aware"));
         }
-        // Optional latency hint; rejection does not disable documented decoding.
-        let _ = attrs.SetUINT32(&CODECAPI_AVLowLatencyMode, 1);
+        // The documented Microsoft H.264 decoder property uses VT_UI4 (unlike
+        // other codecs' VT_BOOL). Request through ICodecAPI; rejection is optional.
+        let low_latency_request_accepted = decoder.cast::<ICodecAPI>().is_ok_and(|codec| {
+            let value = VARIANT {
+                Anonymous: VARIANT_0 {
+                    Anonymous: ManuallyDrop::new(VARIANT_0_0 {
+                        vt: VT_UI4,
+                        Anonymous: VARIANT_0_0_0 { ulVal: 1 },
+                        ..Default::default()
+                    }),
+                },
+            };
+            codec.SetValue(&CODECAPI_AVLowLatencyMode, &value).is_ok()
+        });
         api(
             "video-decoder-set-manager",
             decoder.ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER, manager.as_raw() as usize),
@@ -279,6 +293,7 @@ impl Session {
         )?;
         api("video-input-type", decoder.SetInputType(0, &input, 0))?;
         let mut result = Self {
+            low_latency_request_accepted,
             decoder,
             _manager: manager,
             renderer,
