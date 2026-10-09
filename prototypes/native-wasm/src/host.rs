@@ -650,7 +650,7 @@ fn backend_call(
                         // Spawn returns immediately. Native async work never
                         // needs this backend lock or a Wasmtime Store/Caller.
                         let config = b.video_protocol.as_ref().map(|p| crate::control::Config {
-                            video_protocol: p.version,
+                            video_protocol: p.clone(),
                         });
                         match crate::attempt::Attempt::spawn_configured(
                             &id,

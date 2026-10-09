@@ -192,6 +192,7 @@ struct Completion {
     // Session media has no decoder yet; raw transport probes retain receipts.
     discard_unavailable_media: bool,
     media_ingress: crate::media_ingress::Ingress,
+    video_stream: crate::video_stream::Inspector,
 }
 
 impl Completion {
@@ -231,6 +232,9 @@ impl Completion {
         self.progress.channel_max_message_bytes[i] =
             self.progress.channel_max_message_bytes[i].max(bytes.len());
         if channel != 0 && self.discard_unavailable_media {
+            if channel == 1 {
+                self.video_stream.receive(bytes);
+            }
             self.media_ingress.unavailable(channel, bytes.len());
             return true;
         }
@@ -326,6 +330,10 @@ impl Attempt {
         }
         let permit = Permit;
         let (tx, rx) = mpsc::sync_channel(64);
+        let mut video_stream = crate::video_stream::Inspector::default();
+        if let Some(config) = &config {
+            video_stream.configure(config.video_protocol.clone());
+        }
         let completion = Arc::new(Mutex::new(Completion {
             started_at: std::time::Instant::now(),
             closing: false,
@@ -341,6 +349,7 @@ impl Attempt {
             message_bytes: 0,
             discard_unavailable_media: config.is_some(),
             media_ingress: Default::default(),
+            video_stream,
         }));
         let finished = Arc::new((Mutex::new(false), Condvar::new()));
         let shared = completion.clone();
@@ -427,11 +436,18 @@ impl Attempt {
     }
 
     pub fn media_ingress(&self) -> crate::media_ingress::Ingress {
+        let state = self.completion.lock().unwrap_or_else(|e| e.into_inner());
+        let mut ingress = state.media_ingress.clone();
+        ingress.video_stream = state.video_stream.snapshot();
+        ingress
+    }
+
+    pub fn configure_video_protocol(&self, protocol: crate::backend::VideoProtocol) {
         self.completion
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .media_ingress
-            .clone()
+            .video_stream
+            .configure(protocol);
     }
 
     pub fn pop_binary(&self) -> Option<(u16, bool, Bytes)> {
@@ -687,7 +703,7 @@ fn worker(
                                 Ok::<(), anyhow::Error>(())
                             }.await;
                             let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
-                            if state.cancelled || state.closing { return; }
+                            if state.cancelled || state.closing || state.progress.failed { return; }
                             if sent.is_err() || state.events.len() >= 64 {
                                 state.fail_channel(FailureStage::ControlStartup, id);
                             } else {
@@ -1003,6 +1019,7 @@ mod tests {
             message_bytes: 0,
             discard_unavailable_media: false,
             media_ingress: Default::default(),
+            video_stream: Default::default(),
         }
     }
 

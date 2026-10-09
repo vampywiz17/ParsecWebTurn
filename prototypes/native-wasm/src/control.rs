@@ -8,7 +8,7 @@ const LIMIT: usize = 1024 * 1024;
 
 #[derive(Clone)]
 pub struct Config {
-    pub video_protocol: u32,
+    pub video_protocol: crate::backend::VideoProtocol,
 }
 
 impl Config {
@@ -18,7 +18,7 @@ impl Config {
             0,
             &json!({"_version":1,"_max_w":60000,"_max_h":60000,"_flags":0,
             "resolutionX":1920,"resolutionY":1080,"refreshRate":60,"mediaContainer":0,
-            "_VideoProtocolVersion":self.video_protocol})
+            "_VideoProtocolVersion":self.video_protocol.version})
             .to_string(),
         )
     }

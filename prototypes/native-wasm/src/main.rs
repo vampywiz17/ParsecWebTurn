@@ -41,6 +41,7 @@ mod tls_probe;
 mod transport;
 mod transport_diagnostic_errors;
 mod transport_diagnostics;
+mod video_stream;
 mod wait;
 #[cfg(windows)]
 mod wake_lock;

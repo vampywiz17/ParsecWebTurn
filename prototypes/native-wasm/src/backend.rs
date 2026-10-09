@@ -176,6 +176,9 @@ impl Backend {
         {
             bail!("invalid video protocol header layout");
         }
+        if let Some(attempt) = &self.native_attempt {
+            attempt.configure_video_protocol(protocol.clone());
+        }
         self.video_protocol = Some(protocol);
         Ok(())
     }

@@ -1,3 +1,17 @@
+## M3l / 0.15.0
+
+Pinned video metadata and H.264 Annex B NAL headers are inspected at the receive
+boundary without retaining payloads or occupying the control queue. Reports
+separate announced key/delta chunks from observed IDR/SPS/PPS headers. This is
+preparation for native hardware decoding, not decoded video. See
+[M3l notes](../../docs/NATIVE_M3L.md).
+
+## M3k-fix22 / 0.14.22
+
+Complete real-host video reception was confirmed in the fix21 user report.
+Unavailable media now bypasses the control queue, with bounded burst regression
+coverage. See [fix22 notes](../../docs/NATIVE_M3K_FIX22.md).
+
 ## M3k-fix21 / 0.14.21
 
 All native channels now use the documented detached receive API with a bounded
@@ -5,8 +19,7 @@ All native channels now use the documented detached receive API with a bounded
 Encrypted fixture video-channel messages up to 128 KiB exercise the guest metrics
 path. Reports retain per-channel receive counts/sizes and fixed channel failure
 stages with attempt-relative failure/last-send times. See
-[fix21 notes](../../docs/NATIVE_M3K_FIX21.md). Real-host video reception still
-requires user validation; media decoding and presentation remain unavailable.
+[fix21 notes](../../docs/NATIVE_M3K_FIX21.md). Real-host video reception was subsequently confirmed; media decoding and presentation remain unavailable.
 
 ## M3k-fix19
 

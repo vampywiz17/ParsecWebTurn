@@ -2,6 +2,7 @@
 use serde::Serialize;
 #[derive(Clone, Default, Serialize)]
 pub struct Ingress {
+    pub video_stream: crate::video_stream::Snapshot,
     pub video_packets_received: u64,
     pub video_bytes_received: u64,
     pub audio_packets_received: u64,

@@ -781,6 +781,51 @@ fn control_exchange(
         status.call(&mut *store, ())? == 0,
         "media burst disconnected session"
     );
+    // Pinned metadata + Annex B NAL headers traverse authenticated SCTP.
+    // These fixtures verify framing only, not actual video decoding.
+    let mut metadata = vec![0u8; 16];
+    metadata[..4].copy_from_slice(&1u32.to_le_bytes());
+    metadata[12..16].copy_from_slice(&2u32.to_le_bytes());
+    let key = vec![
+        0, 0, 0, 1, 0x67, 100, 0, 40, 0x80, 0, 0, 1, 0x68, 0x80, 0, 0, 0, 1, 0x65, 0x80,
+    ];
+    for payload in [metadata, key, vec![0, 0, 1, 0x41, 0x80]] {
+        runtime.block_on(async {
+            tokio::time::timeout(
+                Duration::from_secs(5),
+                channels[1].send(&Bytes::from(payload)),
+            )
+            .await
+        })??;
+    }
+    let until = Instant::now() + Duration::from_secs(5);
+    loop {
+        metrics.call(&mut *store, ())?;
+        let backend = store
+            .data()
+            .backend
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let video = &backend.media_ingress.video_stream;
+        if video.metadata_messages == 1 && video.annex_b_messages == 2 {
+            anyhow::ensure!(
+                video.idr_messages == 1
+                    && video.parameter_sets_and_idr_observed
+                    && video.sps_profile_idc == Some(100)
+                    && video.sps_level_idc == Some(40)
+                    && video.delta_chunks_announced == 1
+                    && backend.status == Some(0),
+                "video framing metadata mismatch"
+            );
+            break;
+        }
+        anyhow::ensure!(
+            Instant::now() < until,
+            "video framing not observed through guest metrics"
+        );
+        drop(backend);
+        std::thread::sleep(Duration::from_millis(10));
+    }
     // Cross the former worker lifetime bound before testing real encrypted
     // delivery through the guest import. No external account is used.
     std::thread::sleep(Duration::from_secs(31));
@@ -826,7 +871,7 @@ fn control_exchange(
         "unavailable mouse disrupted connection"
     );
     Ok(
-        serde_json::json!({"unpolled_media_burst_verified":true,"unpolled_media_burst_messages":128,"large_video_channel_messages_verified":true,"largest_video_message_verified":128 * 1024,"established_session_over_30_seconds_verified":true,"unavailable_media_ingress_verified":true,"media_metrics_import_continues_verified":true,"startup_configuration_verified":true,"wasm_input_packet_verified":true,"unsupported_absolute_mouse_rejected":true,"absolute_mouse_unavailable_nonfatal_verified":true,"status_events_verified":true,"rumble_event_verified":true,"clipboard_request_event_verified":true,"guest_self_metadata_verified":true,"host_mode_verified":true,"encode_latency_verified":true,"host_frames_verified":6,"synthetic_host":true,"real_parsec_host_compatible":false}),
+        serde_json::json!({"video_framing_inspection_verified":true,"video_decoder_implemented":false,"unpolled_media_burst_verified":true,"unpolled_media_burst_messages":128,"large_video_channel_messages_verified":true,"largest_video_message_verified":128 * 1024,"established_session_over_30_seconds_verified":true,"unavailable_media_ingress_verified":true,"media_metrics_import_continues_verified":true,"startup_configuration_verified":true,"wasm_input_packet_verified":true,"unsupported_absolute_mouse_rejected":true,"absolute_mouse_unavailable_nonfatal_verified":true,"status_events_verified":true,"rumble_event_verified":true,"clipboard_request_event_verified":true,"guest_self_metadata_verified":true,"host_mode_verified":true,"encode_latency_verified":true,"host_frames_verified":6,"synthetic_host":true,"real_parsec_host_compatible":false}),
     )
 }
 
