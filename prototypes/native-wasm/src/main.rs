@@ -132,7 +132,7 @@ fn main() {
     if let Err(error) = outcome {
         if matches!(
             env::args().nth(1).as_deref(),
-            Some("account" | "session-audit")
+            Some("account" | "account-network-audit" | "session-audit")
         ) {
             eprintln!("Native account runtime failed; guest content is not logged");
         } else {
@@ -145,7 +145,8 @@ fn main() {
 fn run() -> Result<()> {
     let mut args = env::args().skip(1);
     let mode = args.next().unwrap_or_else(|| "help".into());
-    let live_mode = matches!(mode.as_str(), "account" | "session-audit");
+    let account_mode = matches!(mode.as_str(), "account" | "account-network-audit");
+    let live_mode = account_mode || mode == "session-audit";
     let window_mode =
         live_mode || matches!(mode.as_str(), "window" | "window-audit" | "login-audit");
     let audit_mode = live_mode || matches!(mode.as_str(), "window-audit" | "login-audit");
@@ -241,8 +242,10 @@ fn run() -> Result<()> {
                   parsec-native-wasm window-audit <parsecd.wasm> [report.json]\n\
                   parsec-native-wasm login-audit <parsecd.wasm> [report.json]\n\
                   parsec-native-wasm account <parsecd.wasm> [report.json]\n\
+                  parsec-native-wasm account-network-audit <parsecd.wasm> [report.json]\n\
                   parsec-native-wasm session-audit <parsecd.wasm> [report.json]\n\
-                  Only account enables exact HTTPS/WSS origins and runs until close. No decoded remote video.\n\
+                  Account modes enable exact HTTPS/WSS origins and run until close. No decoded remote video.\n\
+                  account-network-audit also reports destination origins (no URL tokens).\n\
                   boot reports the first unimplemented bridge; it is not a connected client."
         );
         return Ok(());
@@ -256,6 +259,7 @@ fn run() -> Result<()> {
             | "window-audit"
             | "login-audit"
             | "account"
+            | "account-network-audit"
             | "session-audit"
     ) {
         bail!("unknown mode: {mode}");
@@ -325,7 +329,7 @@ fn run() -> Result<()> {
         allocator_roundtrip: false,
         start_returned: false,
         start_error: None,
-        network_enabled: mode == "account",
+        network_enabled: account_mode,
         live_session: live_mode,
         shutdown_requested: false,
         native_window_released: false,
@@ -355,7 +359,8 @@ fn run() -> Result<()> {
             Some(window::Window::create(
                 mode == "login-audit",
                 live_mode,
-                mode == "account",
+                account_mode,
+                mode == "account-network-audit",
             )?)
         } else {
             None
@@ -546,6 +551,13 @@ fn instantiate_base_with_window(
             runtime.platform = Arc::new(platform_probe::offline_login_fixture());
         }
         if runtime.window.as_ref().is_some_and(|w| w.online) {
+            if runtime
+                .window
+                .as_ref()
+                .is_some_and(|w| w.network_origin_audit)
+            {
+                runtime.audit = Arc::new(network_audit::Audit::with_destination_origins());
+            }
             let owner = runtime.window.as_ref().unwrap().handle() as usize;
             runtime.platform = Arc::new(platform::Services::new(Box::new(
                 platform_windows::NativeDesktop(owner),

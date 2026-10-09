@@ -37,6 +37,7 @@ pub struct Window {
     pub run_seconds: u64,
     pub live: bool,
     pub online: bool,
+    pub network_origin_audit: bool,
     pub stop: Arc<crate::lifecycle::StopSignal>,
     pressed_keys: Mutex<std::collections::BTreeSet<&'static str>>,
     text_decoder: Mutex<crate::input::TextDecoder>,
@@ -49,7 +50,12 @@ pub struct Window {
 }
 
 impl Window {
-    pub fn create(synthetic_login: bool, live: bool, online: bool) -> Result<Arc<Self>> {
+    pub fn create(
+        synthetic_login: bool,
+        live: bool,
+        online: bool,
+        network_origin_audit: bool,
+    ) -> Result<Arc<Self>> {
         let state = Arc::new(Self {
             hwnd: AtomicUsize::new(0),
             closing: AtomicBool::new(false),
@@ -63,6 +69,7 @@ impl Window {
             run_seconds: if synthetic_login { 20 } else { 8 },
             live,
             online,
+            network_origin_audit,
             stop: Default::default(),
             pressed_keys: Default::default(),
             text_decoder: Default::default(),

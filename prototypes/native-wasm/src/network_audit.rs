@@ -1,4 +1,5 @@
-//! Bounded metadata only. Never retain URLs, paths, queries, headers or bodies.
+//! Bounded metadata; destination origins require explicit diagnostic opt-in.
+//! Never retain URL credentials, paths, queries, headers or bodies.
 use reqwest::Url;
 use serde::Serialize;
 use std::sync::Mutex;
@@ -46,7 +47,16 @@ pub enum Method {
     Other,
 }
 #[derive(Clone, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Bridge {
+    Http,
+    WebSocket,
+}
+#[derive(Clone, Serialize)]
 pub struct Intent {
+    bridge: Bridge,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    destination_origin: Option<String>,
     protocol: Protocol,
     service: Service,
     route: Route,
@@ -62,8 +72,19 @@ pub struct Snapshot {
     pub omitted: u64,
 }
 #[derive(Default)]
-pub struct Audit(Mutex<Snapshot>);
+pub struct Audit {
+    snapshot: Mutex<Snapshot>,
+    destination_origins: bool,
+}
 impl Audit {
+    /// Diagnostic mode only: origins exclude userinfo, paths and query tokens.
+    /// This changes reporting, never connection authorization.
+    pub fn with_destination_origins() -> Self {
+        Self {
+            destination_origins: true,
+            ..Default::default()
+        }
+    }
     pub fn record(
         &self,
         url: &Url,
@@ -71,6 +92,27 @@ impl Audit {
         authorization: bool,
         body_bytes: usize,
         allowed: bool,
+    ) {
+        self.record_bridge(
+            url,
+            method,
+            authorization,
+            body_bytes,
+            allowed,
+            Bridge::Http,
+        );
+    }
+    pub fn record_websocket(&self, url: &Url, allowed: bool) {
+        self.record_bridge(url, "GET", false, 0, allowed, Bridge::WebSocket);
+    }
+    fn record_bridge(
+        &self,
+        url: &Url,
+        method: &str,
+        authorization: bool,
+        body_bytes: usize,
+        allowed: bool,
+        bridge: Bridge,
     ) {
         let service = match url.host_str() {
             Some("kessel-api.parsec.app") => Service::Api,
@@ -106,12 +148,16 @@ impl Audit {
             "CONNECT" => Method::Connect,
             _ => Method::Other,
         };
-        let mut snapshot = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let mut snapshot = self.snapshot.lock().unwrap_or_else(|e| e.into_inner());
         if snapshot.intents.len() >= 64 {
             snapshot.omitted = snapshot.omitted.saturating_add(1);
             return;
         }
         snapshot.intents.push(Intent {
+            bridge,
+            destination_origin: self
+                .destination_origins
+                .then(|| url.origin().ascii_serialization()),
             protocol,
             service,
             route,
@@ -123,7 +169,10 @@ impl Audit {
         });
     }
     pub fn snapshot(&self) -> Snapshot {
-        self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        self.snapshot
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 }
 #[cfg(test)]
@@ -141,6 +190,29 @@ mod tests {
         assert_eq!(snapshot.omitted, 6);
         let json = serde_json::to_string(&snapshot).unwrap();
         assert!(!json.contains("secret-"));
+        assert!(!json.contains("destination_origin"));
         assert!(json.contains("\"has_authorization\":true"));
+    }
+    #[test]
+    fn opt_in_reports_exact_origins_and_bridge_without_url_secrets() {
+        let audit = Audit::with_destination_origins();
+        let url = Url::parse("wss://secret-user:secret-password@signal.example.invalid:8443/secret-path?token=secret-query#secret-fragment").unwrap();
+        audit.record_websocket(&url, false);
+        // The same URL through the wrong bridge must be distinguishable.
+        audit.record(&url, "GET", false, 0, false);
+        let json = serde_json::to_value(audit.snapshot()).unwrap();
+        assert_eq!(
+            json["intents"][0]["destination_origin"],
+            "wss://signal.example.invalid:8443"
+        );
+        assert_eq!(json["intents"][0]["bridge"], "web-socket");
+        assert_eq!(json["intents"][1]["bridge"], "http");
+        assert_eq!(json["intents"][0]["policy_allowed"], false);
+        assert!(!json.to_string().contains("secret-"));
+        for _ in 0..70 {
+            audit.record_websocket(&url, false);
+        }
+        assert_eq!(audit.snapshot().intents.len(), 64);
+        assert_eq!(audit.snapshot().omitted, 8);
     }
 }

@@ -416,7 +416,7 @@ impl Network {
         })
     }
     fn connect(&self, url: reqwest::Url, timeout: Duration) -> std::result::Result<u32, u16> {
-        self.audit.record(&url, "GET", false, 0, self.allowed(&url));
+        self.audit.record_websocket(&url, self.allowed(&url));
         if !self.allowed(&url) {
             return Err(0);
         }
@@ -573,6 +573,26 @@ pub fn dispatch(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn origin_diagnostic_identifies_blocked_destination_without_connecting() {
+        let audit = Arc::new(crate::network_audit::Audit::with_destination_origins());
+        let network = Network::account(audit.clone());
+        let url = reqwest::Url::parse(
+            "wss://unlisted.example.invalid:8443/private-session?token=secret-sentinel",
+        )
+        .unwrap();
+        assert!(network.connect(url, LIMIT).is_err());
+        assert_eq!(network.active_handles(), 0);
+        let report = serde_json::to_value(audit.snapshot()).unwrap();
+        assert_eq!(
+            report["intents"][0]["destination_origin"],
+            "wss://unlisted.example.invalid:8443"
+        );
+        assert_eq!(report["intents"][0]["bridge"], "web-socket");
+        assert_eq!(report["intents"][0]["policy_allowed"], false);
+        assert!(!report.to_string().contains("secret-sentinel"));
+        assert!(!report.to_string().contains("private-session"));
+    }
     use super::*;
     #[test]
     fn shutdown_closes_a_live_socket_and_refuses_reconnect() {

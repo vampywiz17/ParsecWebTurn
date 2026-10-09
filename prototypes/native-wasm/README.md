@@ -1,5 +1,12 @@
 # Native Rust / Parsec WASM prototype
 
+For a rejected signaling destination, `account-network-audit <parsecd.wasm>
+[report.json]` explicitly adds destination origins (scheme, hostname and port)
+to the account network report. It omits URL credentials, paths and query tokens;
+normal `account` reports still omit origins. Both modes report the transport
+bridge. This diagnostic does not expand network permissions or implement a
+signaling fix. See [M3k-fix4](../../docs/NATIVE_M3K_FIX4.md).
+
 This is an **independent native runtime prototype**. It retains the original
 Parsec WASM binary and supplies host imports in Rust using Wasmtime. It does not
 link Tauri, WebView2, a JavaScript engine, or a browser. The production app is
