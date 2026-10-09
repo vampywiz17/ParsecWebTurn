@@ -28,3 +28,16 @@ Run `START-NETWORK-DIAGNOSTIC.cmd`, log in, select Connect once, close the app,
 then preserve/share `account-network-report.json`. It includes destination
 origins only, without URL paths, credentials or query tokens. The normal
 `START-ACCOUNT.cmd` uses the same fix without origin reporting.
+
+## Verified build
+
+Source: `96adaf86db4e3b5418dd6e1764fb05bf3fe23015`.
+[Windows CI 37901324098](https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37901324098)
+passed 69 tests, formatting, strict Clippy, release compilation and the
+original-core/native probes. The downloaded release EXE's local offline original
+login fixture completed all nine scripted steps, presented 14 GPU UI frames on
+the AMD Radeon 780M and released its window without guest errors or rejected
+worker spawns. Its report omitted destination origins and fixture credentials.
+The controlled guest v2 WebSocket intent was classified as signaling and remained
+blocked offline. No real account, remote host or external network was used in
+these automated/local checks. Real-account acceptance of this fix is pending.
