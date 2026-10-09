@@ -867,7 +867,7 @@ fn buffer_exchange(
     if retained == 0 || size.call(&mut *store, retained as i32)? != 1 {
         bail!("cleanup payload not retained");
     }
-    let text = "ĂˇrvĂ­z âś“";
+    let text = "\u{e1}rv\u{ed}z \u{2713}";
     memory.c_string(8192, 1024, text)?;
     instance
         .get_typed_func::<i32, ()>(&mut *store, "send_user")?
