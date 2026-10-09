@@ -18,6 +18,21 @@ pub struct Description {
     pub mid: String,
 }
 
+#[derive(Clone, Copy, Debug, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CredentialError {
+    IceUfrag,
+    IcePassword,
+    FingerprintAlgorithm,
+    FingerprintDigest,
+}
+impl std::fmt::Display for CredentialError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+impl std::error::Error for CredentialError {}
+
 fn token(value: &str, min: usize, max: usize) -> Result<()> {
     if !(min..=max).contains(&value.len())
         || !value
@@ -30,20 +45,50 @@ fn token(value: &str, min: usize, max: usize) -> Result<()> {
 }
 
 impl Credentials {
+    /// The pinned ia() splits SDP on LF, retaining the single SDP line-ending
+    /// CR in its compact fields. Normalize that representation at the ABI edge;
+    /// never strip embedded newlines or relax the standard ICE token grammar.
+    pub fn normalize_compact(mut self) -> Self {
+        for value in [&mut self.ufrag, &mut self.password, &mut self.fingerprint] {
+            if value.ends_with('\r') {
+                value.pop();
+            }
+        }
+        if let Some((algorithm, digest)) = self.fingerprint.split_once(' ') {
+            if algorithm.eq_ignore_ascii_case("sha-256") {
+                self.fingerprint = format!("sha-256 {digest}");
+            }
+        }
+        self
+    }
+
+    /// Shapes and fixed categories only, never credential bytes or hashes.
+    pub fn diagnostic(&self) -> serde_json::Value {
+        serde_json::json!({
+            "ufrag_bytes":self.ufrag.len(), "password_bytes":self.password.len(),
+            "fingerprint_bytes":self.fingerprint.len(),
+            "ufrag_terminal_cr":self.ufrag.ends_with('\r'),
+            "password_terminal_cr":self.password.ends_with('\r'),
+            "fingerprint_terminal_cr":self.fingerprint.ends_with('\r'),
+            "ufrag_valid":token(&self.ufrag,4,256).is_ok(),
+            "password_valid":token(&self.password,22,256).is_ok(),
+            "validation_error":self.validate().err().and_then(|e|e.downcast_ref::<CredentialError>().copied())
+        })
+    }
     pub fn validate(&self) -> Result<()> {
-        token(&self.ufrag, 4, 256)?;
-        token(&self.password, 22, 256)?;
+        token(&self.ufrag, 4, 256).context(CredentialError::IceUfrag)?;
+        token(&self.password, 22, 256).context(CredentialError::IcePassword)?;
         let digest = self
             .fingerprint
             .strip_prefix("sha-256 ")
-            .context("only SHA-256 DTLS fingerprints are supported")?;
+            .context(CredentialError::FingerprintAlgorithm)?;
         let parts: Vec<_> = digest.split(':').collect();
         if parts.len() != 32
             || parts
                 .iter()
                 .any(|s| s.len() != 2 || !s.bytes().all(|c| c.is_ascii_hexdigit()))
         {
-            bail!("invalid SHA-256 fingerprint");
+            return Err(CredentialError::FingerprintDigest.into());
         }
         Ok(())
     }
@@ -253,6 +298,54 @@ mod tests {
             password: "abcdefghijklmnopqrstuv".into(),
             fingerprint: format!("sha-256 {}", ["AB"; 32].join(":")),
         }
+    }
+    #[test]
+    fn compact_sdp_line_endings_normalize_without_relaxing_ice_validation() {
+        let mut c = creds();
+        c.ufrag.push('\r');
+        c.password.push('\r');
+        c.fingerprint = c.fingerprint.replacen("sha-256", "SHA-256", 1) + "\r";
+        let raw = c.diagnostic();
+        assert_eq!(raw["ufrag_terminal_cr"], true);
+        assert_eq!(raw["validation_error"], "ice-ufrag");
+        let c = c.normalize_compact();
+        c.validate().unwrap();
+        assert_eq!(c.ufrag, creds().ufrag);
+        assert_eq!(c.password, creds().password);
+        assert_eq!(c.fingerprint, creds().fingerprint);
+        let d = Description {
+            credentials: creds(),
+            mid: "0".into(),
+        };
+        Description::from_sdp(&d.answer(&c).unwrap()).unwrap();
+        let mut boundary = creds();
+        boundary.ufrag = "a".repeat(256) + "\r";
+        boundary.password = "b".repeat(256) + "\r";
+        boundary.normalize_compact().validate().unwrap();
+    }
+    #[test]
+    fn compact_normalization_rejects_injection_and_diagnostics_do_not_retain_credentials() {
+        for suffix in ["\n", "\r\r", "\r\na=setup:passive", " ", "\t"] {
+            let mut c = creds();
+            c.password.push_str(suffix);
+            assert!(c.normalize_compact().validate().is_err());
+        }
+        let c = creds();
+        let json = c.diagnostic().to_string();
+        assert!(!json.contains(&c.ufrag));
+        assert!(!json.contains(&c.password));
+        assert!(!json.contains(&c.fingerprint));
+        let mut bad = creds();
+        bad.password = "short".into();
+        assert_eq!(bad.diagnostic()["validation_error"], "ice-password");
+        bad = creds();
+        bad.fingerprint = "sha-1 AA:BB".into();
+        assert_eq!(
+            bad.diagnostic()["validation_error"],
+            "fingerprint-algorithm"
+        );
+        bad.fingerprint = "sha-256 AA:BB".into();
+        assert_eq!(bad.diagnostic()["validation_error"], "fingerprint-digest");
     }
     #[test]
     fn rejects_sdp_injection_and_malformed_fingerprints() {

@@ -644,10 +644,16 @@ fn backend_call(
                     let id = m.string(ptr(args, 0)?, 257)?;
                     // The pinned JS ignores port: ICE selects the endpoint.
                     let remote = crate::signaling::Credentials {
-                        ufrag: m.string(ptr(args, 2)?, 257)?,
-                        password: m.string(ptr(args, 3)?, 257)?,
-                        fingerprint: m.string(ptr(args, 4)?, 257)?,
+                        ufrag: m.string(ptr(args, 2)?, 258)?,
+                        password: m.string(ptr(args, 3)?, 258)?,
+                        fingerprint: m.string(ptr(args, 4)?, 258)?,
                     };
+                    let raw_shape = remote.diagnostic();
+                    let remote = remote.normalize_compact();
+                    b.remote_begin_diagnostic = Some(serde_json::json!({
+                        "raw":raw_shape,"normalized":remote.diagnostic(),
+                        "attempt_matches":id == b.attempt_id
+                    }));
                     if let Some(attempt) = &b.native_attempt {
                         if let Err(error) = attempt.begin(&id, remote) {
                             let stage = error

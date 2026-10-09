@@ -53,6 +53,7 @@ pub enum FailureStage {
     CandidateGate,
     AddIceCandidate,
     RemoteBegin,
+    AttemptMismatch,
     RemoteCandidate,
     CandidateAddress,
     CandidatePort,
@@ -302,7 +303,7 @@ impl Attempt {
 
     fn command(&self, id: &str, command: Command) -> Result<()> {
         if id != self.id {
-            bail!("command belongs to a different attempt");
+            return Err(FailureStage::AttemptMismatch.into());
         }
         self.commands
             .as_ref()

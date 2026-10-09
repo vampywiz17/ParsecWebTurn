@@ -17,6 +17,7 @@ pub struct Backend {
     pub control_frames_received: u64,
     pub attempt_failure: Option<crate::attempt::FailureStage>,
     pub attempt_diagnostic: Option<Value>,
+    pub remote_begin_diagnostic: Option<Value>,
     #[serde(skip)]
     pub guests: Vec<Value>,
     #[serde(skip)]
@@ -77,6 +78,7 @@ impl Backend {
     pub fn prepare_attempt(&mut self) {
         self.attempt_failure = None;
         self.attempt_diagnostic = None;
+        self.remote_begin_diagnostic = None;
         self.events.clear();
         self.buffers.clear();
         self.guests.clear();

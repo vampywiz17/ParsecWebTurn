@@ -1,5 +1,11 @@
 # Native Rust / Parsec WASM prototype
 
+M3k-fix7 / 0.14.7 normalizes the pinned JS compact SDP line-ending representation
+at the ABI boundary, preserving strict ICE/DTLS validation. Redacted remote-begin
+diagnostics distinguish credential fields and attempt-ID mismatches. The user's
+specific `remote-begin` rejection still requires a real-account retest. See
+[M3k-fix7](../../docs/NATIVE_M3K_FIX7.md).
+
 M3k-fix6 / 0.14.6 contains remote signaling/ICE attempt errors instead of letting
 them stop the guest worker and app. It retains bounded, redacted attempt failure
 stages for the next real-account diagnostic. Host connectivity is still unverified.

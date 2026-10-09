@@ -192,7 +192,14 @@ fn probe_mode(mode: Mode) -> Result<serde_json::Value> {
             (1300, &remote.credentials.password),
             (1600, &remote.credentials.fingerprint),
         ] {
-            memory.c_string(ptr, 256, value)?;
+            // Exercise the pinned JS LF-split representation through the real
+            // guest import; control/buffer probes retain canonical fields.
+            let compact = if !control {
+                value.replacen("sha-256 ", "SHA-256 ", 1) + "\r"
+            } else {
+                value.clone()
+            };
+            memory.c_string(ptr, 256, &compact)?;
         }
         let mut remote_count = 0;
         // Exercise pre-begin buffering, then the sync marker's ignored address.
@@ -217,6 +224,19 @@ fn probe_mode(mode: Mode) -> Result<serde_json::Value> {
         instance
             .get_typed_func::<(), ()>(&mut store, "begin")?
             .call(&mut store, ())?;
+        if !control {
+            let b = backend.lock().unwrap_or_else(|e| e.into_inner());
+            let shape = b
+                .remote_begin_diagnostic
+                .as_ref()
+                .context("compact credential diagnostic missing")?;
+            if shape["raw"]["ufrag_terminal_cr"] != true
+                || !shape["normalized"]["validation_error"].is_null()
+                || shape["attempt_matches"] != true
+            {
+                bail!("compact credential normalization was not exercised");
+            }
+        }
         let poll = instance.get_typed_func::<i32, i32>(&mut store, "poll")?;
         let mut gate = CandidateGate::new("test-server")?;
         gate.remote_ready("test-server", &compact.mid, &compact.credentials.ufrag)?;
@@ -394,6 +414,7 @@ fn probe_mode(mode: Mode) -> Result<serde_json::Value> {
     runtime
         .block_on(async { tokio::time::timeout(Duration::from_secs(5), peer.close()).await })??;
     let mut report = checked?;
+    report["compact_credentials_normalization_verified"] = serde_json::json!(!control);
     if peer.connection_state() != RTCPeerConnectionState::Closed {
         bail!("test server did not close");
     }
@@ -757,6 +778,7 @@ mod tests {
     #[test]
     fn wasm_candidate_exchange_connects_native_channels_without_claiming_parsec_session() {
         let report = super::probe().unwrap();
+        assert_eq!(report["compact_credentials_normalization_verified"], true);
         assert_eq!(report["binary_messages_verified"], 6);
         assert_eq!(report["guest_buffer_retry_verified"], true);
         assert_eq!(report["peers_closed"], true);
