@@ -15,6 +15,8 @@ pub struct Backend {
     pub host_mode: i32,
     pub encode_latency: f32,
     pub control_frames_received: u64,
+    pub attempt_failure: Option<crate::attempt::FailureStage>,
+    pub attempt_diagnostic: Option<Value>,
     #[serde(skip)]
     pub guests: Vec<Value>,
     #[serde(skip)]
@@ -49,7 +51,7 @@ impl Backend {
     }
 
     pub fn destroy(&mut self) {
-        self.native_attempt.take();
+        self.retain_attempt_diagnostic();
         self.initialized = false;
         self.status = None;
         self.video_protocol = None;
@@ -73,6 +75,8 @@ impl Backend {
     }
 
     pub fn prepare_attempt(&mut self) {
+        self.attempt_failure = None;
+        self.attempt_diagnostic = None;
         self.events.clear();
         self.buffers.clear();
         self.guests.clear();
@@ -128,7 +132,7 @@ impl Backend {
         } else {
             None
         };
-        self.native_attempt.take();
+        self.retain_attempt_diagnostic();
         self.events
             .retain(|event| !matches!(event["type"].as_i64(), Some(1 | 3)));
         self.buffers.clear();
@@ -147,6 +151,26 @@ impl Backend {
 
     pub fn poll_event(&mut self) -> Option<Value> {
         self.events.pop_front()
+    }
+
+    fn retain_attempt_diagnostic(&mut self) {
+        if let Some(attempt) = self.native_attempt.take() {
+            self.attempt_diagnostic = Some(attempt.snapshot());
+        }
+    }
+
+    /// Expected connection failure is an app event, not a Wasmtime trap.
+    pub fn fail_native_attempt(&mut self, stage: crate::attempt::FailureStage) -> Result<()> {
+        self.attempt_failure = Some(stage);
+        let connected = self.status == Some(0);
+        // Reserve space for the single failure event even if ICE events filled
+        // the queue. No success or previously queued media can survive failure.
+        self.events.clear();
+        self.disconnect(-6200, 4)?;
+        if connected {
+            self.events.push_back(json!({"type":7,"status":-6200,"state":8,"attemptID":self.attempt_id,"duration":self.attempt_started.map_or(0,|t|t.elapsed().as_secs())}));
+        }
+        Ok(())
     }
 
     pub fn pump_native_events(&mut self) -> Result<()> {
@@ -226,6 +250,35 @@ impl Backend {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn transport_failure_replaces_pending_events_and_cleans_buffers() {
+        for status in [20, 0] {
+            let mut b = Backend::default();
+            b.init();
+            b.status = Some(status);
+            let key = b
+                .buffers
+                .insert(bytes::Bytes::from_static(b"unread"), 0..6)
+                .unwrap();
+            for _ in 0..32 {
+                b.events.push_back(json!({"type":2}));
+            }
+            b.fail_native_attempt(crate::attempt::FailureStage::RemoteCandidate)
+                .unwrap();
+            assert_eq!(b.status, Some(-6200));
+            assert_eq!(b.buffers.size(key), 0);
+            let event = b.poll_event().unwrap();
+            assert_eq!(event["status"], -6200);
+            assert_eq!(event["state"], if status == 0 { 8 } else { 4 });
+            assert!(b.poll_event().is_none());
+            assert_eq!(
+                serde_json::to_value(&b).unwrap()["attempt_failure"],
+                "remote-candidate"
+            );
+            b.prepare_attempt();
+            assert!(b.attempt_failure.is_none());
+        }
+    }
     use super::*;
 
     #[test]

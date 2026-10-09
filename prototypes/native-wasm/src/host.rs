@@ -648,24 +648,52 @@ fn backend_call(
                         password: m.string(ptr(args, 3)?, 257)?,
                         fingerprint: m.string(ptr(args, 4)?, 257)?,
                     };
-                    b.native_attempt
-                        .as_ref()
-                        .context("no native attempt")?
-                        .begin(&id, remote)?;
+                    if let Some(attempt) = &b.native_attempt {
+                        if let Err(error) = attempt.begin(&id, remote) {
+                            let stage = error
+                                .downcast_ref::<crate::attempt::FailureStage>()
+                                .copied()
+                                .unwrap_or(crate::attempt::FailureStage::RemoteBegin);
+                            b.fail_native_attempt(stage)?;
+                        }
+                    }
                 }
                 "parsec_web_add_candidate" => {
                     let id = m.string(ptr(args, 0)?, 257)?;
-                    let attempt = b.native_attempt.as_ref().context("no native attempt")?;
-                    if int(args, 3)? != 0 {
-                        // Sync is a protocol marker, never an IP endpoint.
-                        attempt.sync(&id)?;
+                    let sync = int(args, 3)? != 0;
+                    let ip = if sync {
+                        String::new()
                     } else {
-                        let candidate = crate::signaling::Candidate::new(
-                            &m.string(ptr(args, 1)?, 128)?,
-                            u16::try_from(int(args, 2)?).context("invalid candidate port")?,
-                            int(args, 4)? != 0,
-                        )?;
-                        attempt.candidate(&id, candidate)?;
+                        m.string(ptr(args, 1)?, 128)?
+                    };
+                    let port = int(args, 2)?;
+                    let from_stun = int(args, 4)? != 0;
+                    if let Some(attempt) = &b.native_attempt {
+                        let outcome = if sync {
+                            // Sync is a protocol marker, never an IP endpoint.
+                            attempt.sync(&id)
+                        } else {
+                            (|| -> Result<()> {
+                                let _: std::net::IpAddr = ip
+                                    .parse()
+                                    .context(crate::attempt::FailureStage::CandidateAddress)?;
+                                let candidate = crate::signaling::Candidate::new(
+                                    &ip,
+                                    u16::try_from(port)
+                                        .context(crate::attempt::FailureStage::CandidatePort)?,
+                                    from_stun,
+                                )
+                                .context(crate::attempt::FailureStage::CandidateEndpoint)?;
+                                attempt.candidate(&id, candidate)
+                            })()
+                        };
+                        if let Err(error) = outcome {
+                            let stage = error
+                                .downcast_ref::<crate::attempt::FailureStage>()
+                                .copied()
+                                .unwrap_or(crate::attempt::FailureStage::RemoteCandidate);
+                            b.fail_native_attempt(stage)?;
+                        }
                     }
                 }
                 "parsec_web_disconnect" => b.disconnect(int(args, 0)?, int(args, 1)?)?,
@@ -702,8 +730,7 @@ fn backend_call(
                         .as_ref()
                         .is_some_and(|attempt| attempt.failed())
                     {
-                        b.status = Some(-3);
-                        b.native_attempt.take();
+                        b.fail_native_attempt(crate::attempt::FailureStage::Worker)?;
                     }
                     result(results, b.status.context("backend status missing")?)
                 }

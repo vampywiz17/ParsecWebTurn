@@ -1,5 +1,10 @@
 # Native Rust / Parsec WASM prototype
 
+M3k-fix6 / 0.14.6 contains remote signaling/ICE attempt errors instead of letting
+them stop the guest worker and app. It retains bounded, redacted attempt failure
+stages for the next real-account diagnostic. Host connectivity is still unverified.
+See [M3k-fix6](../../docs/NATIVE_M3K_FIX6.md).
+
 M3k-fix5 / 0.14.5 adds the exact `wss://kessel-ws-v2.parsec.app` signaling
 origin observed in the user's opt-in diagnostic. This fixes that specific local
 policy rejection; a real host connection remains to be verified. See

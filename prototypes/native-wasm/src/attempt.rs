@@ -43,6 +43,32 @@ pub struct Output {
     error: u32,
 }
 
+/// Static categories, never underlying errors, addresses or ICE credentials.
+#[derive(Clone, Copy, Debug, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FailureStage {
+    Worker,
+    SetLocalDescription,
+    SetRemoteDescription,
+    CandidateGate,
+    AddIceCandidate,
+    RemoteBegin,
+    RemoteCandidate,
+    CandidateAddress,
+    CandidatePort,
+    CandidateEndpoint,
+    CommandQueueFull,
+    CommandQueueClosed,
+    Cancelled,
+    Deadline,
+}
+impl std::fmt::Display for FailureStage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+impl std::error::Error for FailureStage {}
+
 impl Output {
     pub fn new(
         memory: GuestMemory,
@@ -111,6 +137,7 @@ struct Progress {
     ready: bool,
     closed: bool,
     failed: bool,
+    failure_stage: Option<FailureStage>,
     channels: usize,
     mid: String,
     open_mask: u8,
@@ -201,6 +228,14 @@ impl Attempt {
                 let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
                 if result.is_err() {
                     state.progress.failed = true;
+                    state.progress.failure_stage = Some(
+                        result
+                            .as_ref()
+                            .err()
+                            .and_then(|e| e.downcast_ref::<FailureStage>())
+                            .copied()
+                            .unwrap_or(FailureStage::Worker),
+                    );
                     if let Some(output) = state.output.take() {
                         let _ = output.finish(None);
                     }
@@ -262,7 +297,7 @@ impl Attempt {
 
     pub fn snapshot(&self) -> serde_json::Value {
         let state = self.completion.lock().unwrap_or_else(|e| e.into_inner());
-        serde_json::json!({ "offer_ready": state.progress.ready, "mid":state.progress.mid, "peer_closed": state.progress.closed, "failed": state.progress.failed, "negotiated_channels": state.progress.channels, "channels_open": state.progress.open_mask.count_ones(), "transport_connected":state.progress.transport_connected, "local_candidates":state.progress.local_candidates, "remote_candidates":state.progress.remote_candidates, "messages_received":state.progress.messages_received, "worker_finished": *self.finished.0.lock().unwrap_or_else(|e| e.into_inner()), "host_connected": false })
+        serde_json::json!({ "offer_ready": state.progress.ready, "mid":state.progress.mid, "peer_closed": state.progress.closed, "failed": state.progress.failed, "failure_stage": state.progress.failure_stage, "negotiated_channels": state.progress.channels, "channels_open": state.progress.open_mask.count_ones(), "transport_connected":state.progress.transport_connected, "local_candidates":state.progress.local_candidates, "remote_candidates":state.progress.remote_candidates, "messages_received":state.progress.messages_received, "worker_finished": *self.finished.0.lock().unwrap_or_else(|e| e.into_inner()), "host_connected": false })
     }
 
     fn command(&self, id: &str, command: Command) -> Result<()> {
@@ -271,9 +306,14 @@ impl Attempt {
         }
         self.commands
             .as_ref()
-            .context("native attempt is cancelled")?
+            .context(FailureStage::Cancelled)?
             .try_send(command)
-            .map_err(|_| anyhow::anyhow!("native attempt command queue is full or closed"))
+            .map_err(|error| {
+                anyhow::Error::new(match error {
+                    mpsc::TrySendError::Full(_) => FailureStage::CommandQueueFull,
+                    mpsc::TrySendError::Disconnected(_) => FailureStage::CommandQueueClosed,
+                })
+            })
     }
     pub fn begin(&self, id: &str, remote: Credentials) -> Result<()> {
         remote.validate()?;
@@ -522,14 +562,14 @@ fn worker(
         let deadline = std::time::Instant::now() + Duration::from_secs(30);
         loop {
             if std::time::Instant::now() >= deadline {
-                bail!("native diagnostic attempt expired");
+                return Err(FailureStage::Deadline.into());
             }
             let command = match commands
                 .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
             {
                 Ok(command) => command,
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
-                Err(mpsc::RecvTimeoutError::Timeout) => bail!("native diagnostic attempt expired"),
+                Err(mpsc::RecvTimeoutError::Timeout) => return Err(FailureStage::Deadline.into()),
             };
             if shared.lock().unwrap_or_else(|e| e.into_inner()).cancelled {
                 break;
@@ -539,11 +579,11 @@ fn worker(
                     match command {
                         Command::Begin(remote)=>{
                             let local=offer.take().context("remote begin already supplied")?;
-                            peer.set_local_description(local).await?;
-                            peer.set_remote_description(RTCSessionDescription::answer(description.answer(&remote)?)?).await?;
-                            gate.remote_ready(id,&description.mid,&remote.ufrag)?;
+                            peer.set_local_description(local).await.context(FailureStage::SetLocalDescription)?;
+                            peer.set_remote_description(RTCSessionDescription::answer(description.answer(&remote)?)?).await.context(FailureStage::SetRemoteDescription)?;
+                            gate.remote_ready(id,&description.mid,&remote.ufrag).context(FailureStage::CandidateGate)?;
                         }
-                        Command::Candidate(candidate)=>gate.push(id,candidate)?,
+                        Command::Candidate(candidate)=>gate.push(id,candidate).context(FailureStage::CandidateGate)?,
                         Command::Sync=>{
                             gate.sync(id)?;
                             if !sync_ack_scheduled {
@@ -567,7 +607,7 @@ fn worker(
                             channel.send(&payload).await?;
                         }
                     }
-                    while let Some(candidate)=gate.pop_ready() { peer.add_ice_candidate(candidate).await?; shared.lock().unwrap_or_else(|e|e.into_inner()).progress.remote_candidates+=1; }
+                    while let Some(candidate)=gate.pop_ready() { peer.add_ice_candidate(candidate).await.context(FailureStage::AddIceCandidate)?; shared.lock().unwrap_or_else(|e|e.into_inner()).progress.remote_candidates+=1; }
                     Ok::<(),anyhow::Error>(())
                 }).await
             })??;
@@ -582,6 +622,17 @@ fn worker(
     {
         let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
         state.progress.closed = is_closed;
+        // Publish before dropping the command receiver: a producer observing
+        // a closed queue must still be able to retain the worker's cause.
+        if let Err(error) = &outcome {
+            state.progress.failed = true;
+            state.progress.failure_stage = Some(
+                error
+                    .downcast_ref::<FailureStage>()
+                    .copied()
+                    .unwrap_or(FailureStage::Worker),
+            );
+        }
         if is_closed {
             state.progress.transport_connected = false;
             state.progress.open_mask = 0;
