@@ -81,7 +81,9 @@ impl HostState {
 
 pub fn implemented(module: &str, name: &str) -> bool {
     #[cfg(windows)]
-    if module == "env" && (crate::cursor::handles(name) || name == "web_set_fullscreen") {
+    if module == "env"
+        && (crate::cursor::handles(name) || matches!(name, "web_set_fullscreen" | "web_wake_lock"))
+    {
         return true;
     }
     if module == "env" && crate::audio::handles(name) {
@@ -214,12 +216,17 @@ pub fn dispatch(
     // prototype. Releasing an inactive capability is valid and idempotent;
     // acquisition still reaches the explicit unsupported boundary below.
     if module == "env"
-        && matches!(
-            name,
-            "web_set_pointer_lock" | "web_set_kb_grab" | "web_wake_lock"
-        )
+        && matches!(name, "web_set_pointer_lock" | "web_set_kb_grab")
         && int(args, 0)? == 0
     {
+        return Ok(());
+    }
+    #[cfg(windows)]
+    if module == "env" && name == "web_wake_lock" {
+        let enable = int(args, 0)? != 0;
+        if let Some(window) = &caller.data().window {
+            window.set_wake_lock(enable);
+        }
         return Ok(());
     }
     #[cfg(windows)]

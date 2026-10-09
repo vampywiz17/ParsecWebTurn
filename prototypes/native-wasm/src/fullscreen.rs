@@ -218,7 +218,7 @@ mod tests {
             .consume_fuel(true)
             .epoch_interruption(true);
         let engine = wasmtime::Engine::new(&config).unwrap();
-        for name in ["web_set_pointer_lock", "web_set_kb_grab", "web_wake_lock"] {
+        for name in ["web_set_pointer_lock", "web_set_kb_grab"] {
             let module = wasmtime::Module::new(
                 &engine,
                 format!(

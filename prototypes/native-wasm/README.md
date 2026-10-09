@@ -1,3 +1,7 @@
+## M3k-fix16
+
+Optional screen wake lock now uses the documented Windows API on the window UI thread. Rejection does not terminate the guest; minimize and shutdown release it. See [fix16 notes](../../docs/NATIVE_M3K_FIX16.md). Audio output remains unavailable.
+
 # Native Parsec WASM prototype
 
 M3k-fix15 / 0.14.15 returns an explicit unavailable-output failure from the

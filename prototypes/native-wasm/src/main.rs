@@ -40,6 +40,8 @@ mod transport;
 mod transport_diagnostic_errors;
 mod transport_diagnostics;
 mod wait;
+#[cfg(windows)]
+mod wake_lock;
 mod websocket;
 mod websocket_probe;
 #[cfg(windows)]
@@ -109,6 +111,8 @@ struct Report {
     live_session: bool,
     shutdown_requested: bool,
     native_window_released: bool,
+    #[cfg(windows)]
+    native_wake_lock: Option<wake_lock::State>,
     video_rendered: bool,
     host: Option<HostState>,
     threads: Vec<threads::ThreadRecord>,
@@ -210,12 +214,22 @@ fn run() -> Result<()> {
             | "guest-audio-unavailable-probe"
             | "guest-platform-probe"
             | "guest-window-probe"
+            | "guest-wake-lock-probe"
     ) {
         let path = args.next().map(PathBuf::from);
         if args.next().is_some() {
             bail!("too many arguments");
         }
-        let report = if mode == "guest-window-probe" {
+        let report = if mode == "guest-wake-lock-probe" {
+            #[cfg(windows)]
+            {
+                wake_lock::probe()?
+            }
+            #[cfg(not(windows))]
+            {
+                bail!("wake lock probe requires Windows");
+            }
+        } else if mode == "guest-window-probe" {
             #[cfg(windows)]
             {
                 fullscreen::probe()?
@@ -371,10 +385,7 @@ fn run() -> Result<()> {
                 } else if host::disabled_web_stub(i.module(), i.name()) {
                     "unavailable-as-in-web-client"
                 } else if i.module() == "env"
-                    && matches!(
-                        i.name(),
-                        "web_set_pointer_lock" | "web_set_kb_grab" | "web_wake_lock"
-                    )
+                    && matches!(i.name(), "web_set_pointer_lock" | "web_set_kb_grab")
                 {
                     "inactive-release-only"
                 } else if i.module() == "env" && audio::handles(i.name()) {
@@ -398,6 +409,8 @@ fn run() -> Result<()> {
         live_session: live_mode,
         shutdown_requested: false,
         native_window_released: false,
+        #[cfg(windows)]
+        native_wake_lock: None,
         video_rendered: false,
         host: None,
         threads: Vec::new(),
@@ -524,6 +537,7 @@ fn run() -> Result<()> {
                     std::thread::sleep(Duration::from_millis(10));
                 }
                 report.native_window_released = window.handle().is_null();
+                report.native_wake_lock = Some(window.wake_lock_snapshot());
             }
         }
         if let Some(runtime) = &store.data().threads {

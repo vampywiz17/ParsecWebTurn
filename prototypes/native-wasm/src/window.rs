@@ -47,6 +47,8 @@ pub struct Window {
     fullscreen: Mutex<crate::fullscreen::State>,
     fullscreen_active: AtomicBool,
     fullscreen_pending: AtomicUsize,
+    wake_pending: AtomicUsize,
+    wake_lock: Mutex<crate::wake_lock::State>,
 }
 
 impl Window {
@@ -79,6 +81,8 @@ impl Window {
             fullscreen: Default::default(),
             fullscreen_active: AtomicBool::new(false),
             fullscreen_pending: AtomicUsize::new(0),
+            wake_pending: AtomicUsize::new(0),
+            wake_lock: Default::default(),
         });
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         let ui = state.clone();
@@ -97,6 +101,7 @@ impl Window {
                             DispatchMessageW(&msg);
                         }
                     }
+                    ui.apply_wake_lock(false, false);
                     ui.hwnd.store(0, Ordering::Release);
                 }
                 Err(error) => {
@@ -167,6 +172,35 @@ impl Window {
             }
         }
     }
+    pub fn wake_lock_snapshot(&self) -> crate::wake_lock::State {
+        self.wake_lock
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+    // Only window_proc and the UI thread exit path call this method.
+    fn apply_wake_lock(&self, requested: bool, visible: bool) {
+        self.wake_lock
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .update(requested, visible);
+    }
+    pub fn set_wake_lock(&self, enable: bool) {
+        if self.closing.load(Ordering::Acquire) || !self.online {
+            return;
+        }
+        if self
+            .wake_pending
+            .swap(if enable { 2 } else { 1 }, Ordering::AcqRel)
+            == 0
+        {
+            unsafe {
+                if PostMessageW(self.handle(), WM_APP + 4, 0, 0) == 0 {
+                    self.wake_pending.store(0, Ordering::Release);
+                }
+            }
+        }
+    }
     fn push(&self, event: Event) {
         let mut queue = self.events.lock().unwrap_or_else(|e| e.into_inner());
         if queue.len() < 256 {
@@ -189,7 +223,7 @@ unsafe fn create_window(state: &Arc<Window>) -> Result<HWND> {
     if RegisterClassW(&class) == 0 {
         bail!("RegisterClassW failed: {}", GetLastError());
     }
-    let title: Vec<u16> = "Parsec native WASM — GPU prototype\0"
+    let title: Vec<u16> = "Parsec native WASM â€” GPU prototype\0"
         .encode_utf16()
         .collect();
     let hwnd = CreateWindowExW(
@@ -251,6 +285,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
         let y = (lp >> 16) as i16 as i32;
         match message {
             WM_CLOSE => {
+                s.apply_wake_lock(false, false);
                 s.request_stop();
                 return 0;
             }
@@ -299,6 +334,16 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
                 }
                 return 0;
             }
+            m if m == WM_APP + 4 => {
+                let pending = s.wake_pending.swap(0, Ordering::AcqRel);
+                if pending != 0 {
+                    s.apply_wake_lock(
+                        pending == 2 && !s.closing.load(Ordering::Acquire),
+                        IsIconic(hwnd) == 0,
+                    );
+                }
+                return 0;
+            }
             WM_KEYDOWN if wp as u32 == VK_F11 as u32 => {
                 if lp & (1 << 30) == 0 {
                     s.set_fullscreen(!s.fullscreen_active.load(Ordering::Acquire));
@@ -307,6 +352,9 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
             }
             WM_KEYUP if wp as u32 == VK_F11 as u32 => return 0,
             WM_SIZE => {
+                let requested =
+                    s.wake_lock_snapshot().requested && !s.closing.load(Ordering::Acquire);
+                s.apply_wake_lock(requested, wp as u32 != SIZE_MINIMIZED);
                 let w = (lp as u32 & 0xffff) as i32;
                 let h = ((lp as u32 >> 16) & 0xffff) as i32;
                 *s.dimensions.lock().unwrap_or_else(|e| e.into_inner()) = (w, h);
@@ -366,6 +414,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
                 return 0;
             }
             WM_DESTROY => {
+                s.apply_wake_lock(false, false);
                 // Cursor resources are created, replaced and freed on this UI
                 // thread. The remaining Arc state owns no native cursor handle.
                 *s.cursor.lock().unwrap_or_else(|e| e.into_inner()) = Default::default();
