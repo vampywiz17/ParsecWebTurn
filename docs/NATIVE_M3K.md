@@ -48,6 +48,12 @@ This clipboard is for the local original UI. It does not establish clipboard
 delivery to a connected remote host. Actual Connect, remote media and full
 menu functionality remain unverified.
 
+The current native attempt adapter still gathers UDP/IPv4 host candidates with
+an empty ICE-server configuration. This milestone does not add the production
+Tauri app's STUN/TURN settings. A first Connect test should therefore use a
+directly reachable LAN/VPN host; failure on a relay-only network does not test
+these local desktop changes.
+
 ## Validation
 
 The guest-platform probe executes the actual imports against a synthetic
@@ -74,3 +80,28 @@ References:
 - https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getclipboarddata
 - https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setclipboarddata
 - https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shellexecutew
+
+## Verified build
+
+Source `86b51d65cd57868ce5f8d88954ee27332abd7633`,
+[Windows CI 37892171870](https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37892171870):
+all 57 tests passed, formatting and Clippy with warnings denied passed,
+and release compilation and all native import/transport probes passed.
+The new guest-platform probe verified Unicode clipboard ownership, HTTPS
+link handling, unsafe-target rejection, dialogs, forward aliases and disabled
+fallback using a synthetic desktop. No real clipboard/browser was accessed.
+
+The local diagnostic executable also passed the original-core nine-stage
+login-audit: Tab switched fields, Ctrl+V caused exactly one synthetic clipboard
+read, and the original UI generated the expected 133-byte authentication POST
+blocked offline. It presented 15 GPU UI frames with 79 draw calls and two
+shaders, released the native window, and rejected no thread spawns.
+
+The downloaded final release executable passed the same local original-core
+regression with the same nine steps, single synthetic clipboard read,
+133-byte blocked authentication POST, 15 presentations and normal shutdown.
+This validates the original UI's Tab/paste path. Actual Windows clipboard,
+default-browser launch and post-login behavior with this build still need
+the user's acceptance test; automated tests intentionally leave those real
+desktop resources untouched. Two waiting workers remain in the shutdown
+snapshot, so no all-workers-joined claim is made.
