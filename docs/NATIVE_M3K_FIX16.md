@@ -7,3 +7,5 @@ The pinned `(i32) -> void` guest import posts a coalesced request to the native 
 Documented Windows contract: https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-setthreadexecutionstate
 
 Validation covers the exact guest import, visibility transitions, idempotence, rejected acquisition/release and retry, and a native same-thread API call/release. Windows CI also runs all existing transport and guest probes. Real-host streaming must still be retested by the user. Native audio output remains unavailable; this fix adds no audio/video decoder and does not claim a completed streaming client.
+
+Verified: Windows CI 37923922089 (source b1e1cb5690030b02fc931b83f7df2fc011998bdb) passed formatting, 93 tests, strict Clippy, release build and all guest/transport probes. The local original-WASM offline login completed 9 synthetic UI steps and 15 hardware-accelerated frames, released its window, and reported no requested/applied wake lock or power-request failure. The final ZIP verifies all 37 file hashes. Real-host streaming remains awaiting user testing.
