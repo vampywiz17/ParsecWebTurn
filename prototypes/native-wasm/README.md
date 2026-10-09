@@ -2,7 +2,7 @@
 
 All native channels now use the documented detached receive API with a bounded
 1 MiB message buffer, replacing the library callback's 65,535-byte buffer.
-Encrypted fixture video-channel messages up to 1 MiB exercise the guest metrics
+Encrypted fixture video-channel messages up to 128 KiB exercise the guest metrics
 path. Reports retain per-channel receive counts/sizes and fixed channel failure
 stages with attempt-relative failure/last-send times. See
 [fix21 notes](../../docs/NATIVE_M3K_FIX21.md). Real-host video reception still

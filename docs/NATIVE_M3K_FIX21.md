@@ -32,7 +32,7 @@ type byte is retained, never key values, coordinates, text or payload. Transport
 counts precede the UI queue, so an unprocessed video receipt remains observable.
 
 Regression coverage: real authenticated DTLS/SCTP fixture delivery of complete
-65,535-, 65,536-, 131,072-, 524,288- and 1,048,576-byte video-channel messages,
+65,535-, 65,536- and 131,072-byte video-channel messages,
 through the actual WASM metrics import, with exact byte counts and connected
 status. These are synthetic bytes, not valid encoded video. Existing control,
 audio, input-after-31-seconds and shutdown probes remain. Unit tests cover size
@@ -43,3 +43,11 @@ Video/audio decoding and remote-video presentation are not implemented in this
 build. The next acceptance target is nonzero channel 1/video ingress counters.
 
 Reference: https://docs.rs/webrtc/0.14.0/webrtc/data_channel/struct.RTCDataChannel.html#method.detach
+The upstream synthetic sender's SCTP pending queue has a separate 128 KiB
+backpressure issue: append_large can wait for queue permits before notifying
+its writer. Concurrent CI probes timed out sending larger messages. The receive
+regression therefore caps synthetic sends at 128 KiB, already beyond the old
+65,535-byte callback limit; no sender keepalive/timing workaround or library patch
+is added. A local standalone debug probe did deliver a complete 1 MiB message,
+but this is not a reliable CI sender guarantee. The application size/queue-bound
+unit tests still cover 1 MiB acceptance and 1 MiB + 1 rejection.
