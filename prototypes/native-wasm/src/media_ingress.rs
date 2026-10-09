@@ -69,9 +69,10 @@ struct VideoClassifier {
 }
 
 impl VideoClassifier {
-    fn classify(&mut self, bytes: &[u8]) -> Option<bool> {
+    fn classify(&mut self, bytes: &[u8]) -> Option<(bool, usize)> {
         let layout = self.layout;
-        if bytes.len() == layout.message_size as usize {
+        let header_size = layout.message_size as usize;
+        if bytes.len() >= header_size {
             let version = usize::try_from(layout.version_offset)
                 .ok()
                 .and_then(|offset| bytes.get(offset..offset + 4))
@@ -85,14 +86,19 @@ impl VideoClassifier {
                     .map(u32::from_le_bytes)
                     .unwrap_or(0);
                 self.metadata_seen = true;
-                self.next_keyframe = flags & 2 != 0;
-                return None;
+                let keyframe = flags & 2 != 0;
+                if bytes.len() == header_size {
+                    self.next_keyframe = keyframe;
+                    return None;
+                }
+                self.next_keyframe = false;
+                return Some((keyframe, header_size));
             }
         }
         if !self.metadata_seen {
-            Some(true)
+            Some((true, 0))
         } else {
-            Some(std::mem::take(&mut self.next_keyframe))
+            Some((std::mem::take(&mut self.next_keyframe), 0))
         }
     }
 }
@@ -131,11 +137,21 @@ impl Queue {
         ingress.unavailable(channel, bytes.len());
         match channel {
             1 => {
-                let Some(keyframe) = self.classifier.classify(bytes) else {
+                let Some((keyframe, payload_offset)) = self.classifier.classify(bytes) else {
                     ingress.video_protocol_messages =
                         ingress.video_protocol_messages.saturating_add(1);
                     return self.depths(ingress);
                 };
+                if payload_offset != 0 {
+                    ingress.video_protocol_messages =
+                        ingress.video_protocol_messages.saturating_add(1);
+                }
+                let payload = &bytes[payload_offset..];
+                if payload.is_empty() {
+                    ingress.video_frames_dropped =
+                        ingress.video_frames_dropped.saturating_add(1);
+                    return self.depths(ingress);
+                }
                 if self.await_keyframe && !keyframe {
                     ingress.video_frames_dropped = ingress.video_frames_dropped.saturating_add(1);
                     return self.depths(ingress);
@@ -157,7 +173,7 @@ impl Queue {
                 self.video.push_back(Packet {
                     channel,
                     keyframe,
-                    bytes: Bytes::copy_from_slice(bytes),
+                    bytes: Bytes::copy_from_slice(payload),
                 });
                 ingress.video_frames_queued = ingress.video_frames_queued.saturating_add(1);
             }
@@ -246,6 +262,19 @@ mod tests {
         assert_eq!(ingress.video_protocol_messages, 1);
         assert!(queue.pop(&mut ingress).unwrap().keyframe);
         assert!(!queue.pop(&mut ingress).unwrap().keyframe);
+    }
+
+    #[test]
+    fn parsec_metadata_prefixed_to_frame_is_stripped_before_decode() {
+        let mut queue = queue();
+        let mut ingress = Ingress::default();
+        let mut combined = metadata(2).to_vec();
+        combined.extend_from_slice(b"\0\0\0\x01\x65-key");
+        queue.push(1, &combined, &mut ingress);
+        let packet = queue.pop(&mut ingress).unwrap();
+        assert!(packet.keyframe);
+        assert_eq!(packet.bytes, &b"\0\0\0\x01\x65-key"[..]);
+        assert_eq!(ingress.video_protocol_messages, 1);
     }
 
     #[test]

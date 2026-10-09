@@ -355,8 +355,7 @@ class AudioRenderer {
     if (SUCCEEDED(hr)) {
       period_frames_ = minimum;
       hr = client->InitializeSharedAudioStream(
-          AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_NOPERSIST,
-          minimum, &format, nullptr);
+          AUDCLNT_STREAMFLAGS_EVENTCALLBACK, minimum, &format, nullptr);
     }
     if (SUCCEEDED(hr)) {
       event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
