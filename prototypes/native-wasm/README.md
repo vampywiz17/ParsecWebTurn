@@ -1,3 +1,17 @@
+## Native low-latency media bootstrap
+
+`media-probe [report.json]` now exercises the intended Windows media backends
+without a Parsec account or retained media payload: a hardware D3D11 device,
+the D3D11-aware Microsoft H.264 decoder MFT with the DXVA and low-latency codec
+properties, a native Opus decoder MFT for 48 kHz stereo, and `IAudioClient3`'s
+minimum shared-mode engine period. A software/WARP D3D adapter is rejected.
+
+This command proves that the documented native components can be configured on
+the machine. It does not yet submit live compressed packets, present decoded
+NV12 textures, or start a WASAPI render stream, so the live-session decoder
+availability flags remain false. Those flags must change only after an actual
+decoded frame/sample is produced; capability detection alone is not playback.
+
 ## M3k-fix21 / 0.14.21
 
 All native channels now use the documented detached receive API with a bounded

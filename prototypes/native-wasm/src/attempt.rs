@@ -191,6 +191,7 @@ struct Completion {
     message_bytes: usize,
     // Session media has no decoder yet; raw transport probes retain receipts.
     discard_unavailable_media: bool,
+    media_queue: Option<crate::media_ingress::Queue>,
     media_ingress: crate::media_ingress::Ingress,
 }
 
@@ -231,7 +232,11 @@ impl Completion {
         self.progress.channel_max_message_bytes[i] =
             self.progress.channel_max_message_bytes[i].max(bytes.len());
         if channel != 0 && self.discard_unavailable_media {
-            self.media_ingress.unavailable(channel, bytes.len());
+            if let Some(queue) = &mut self.media_queue {
+                queue.push(channel, bytes, &mut self.media_ingress);
+            } else {
+                self.media_ingress.unavailable(channel, bytes.len());
+            }
             return true;
         }
         if self.messages.len() >= 16 || self.message_bytes + bytes.len() > 4 * MAX_CHANNEL_MESSAGE {
@@ -326,6 +331,14 @@ impl Attempt {
         }
         let permit = Permit;
         let (tx, rx) = mpsc::sync_channel(64);
+        let media_queue = config.as_ref().map(|config| {
+            crate::media_ingress::Queue::new(crate::media_ingress::VideoLayout {
+                version: config.video_protocol,
+                message_size: config.video_message_size,
+                version_offset: config.video_version_offset,
+                flag_offset: config.video_flag_offset,
+            })
+        });
         let completion = Arc::new(Mutex::new(Completion {
             started_at: std::time::Instant::now(),
             closing: false,
@@ -340,6 +353,7 @@ impl Attempt {
             messages: Default::default(),
             message_bytes: 0,
             discard_unavailable_media: config.is_some(),
+            media_queue,
             media_ingress: Default::default(),
         }));
         let finished = Arc::new((Mutex::new(false), Condvar::new()));
@@ -400,6 +414,9 @@ impl Attempt {
         state.events.clear();
         state.messages.clear();
         state.message_bytes = 0;
+        if let Some(queue) = &mut state.media_queue {
+            queue.clear(&mut state.media_ingress);
+        }
         if let Some(output) = state.output.take() {
             if output.finish(None).is_err() {
                 state.progress.failed = true;
@@ -441,13 +458,23 @@ impl Attempt {
         Some(message)
     }
 
+    pub fn pop_media(&self) -> Option<crate::media_ingress::Packet> {
+        let mut state = self.completion.lock().unwrap_or_else(|e| e.into_inner());
+        let Completion {
+            media_queue,
+            media_ingress,
+            ..
+        } = &mut *state;
+        media_queue.as_mut()?.pop(media_ingress)
+    }
+
     pub fn snapshot(&self) -> serde_json::Value {
         let state = self.completion.lock().unwrap_or_else(|e| e.into_inner());
         serde_json::json!({ "offer_ready": state.progress.ready, "mid":state.progress.mid, "peer_closed": state.progress.closed, "failed": state.progress.failed, "failure_stage": state.progress.failure_stage, "negotiated_channels": state.progress.channels, "channels_open": state.progress.open_mask.count_ones(), "transport_connected":state.progress.transport_connected, "local_candidates":state.progress.local_candidates, "remote_candidates":state.progress.remote_candidates, "messages_received":state.progress.messages_received, "worker_finished": *self.finished.0.lock().unwrap_or_else(|e| e.into_inner()), "host_connected": false,
         "local_description_set":state.progress.local_description_set,"remote_description_set":state.progress.remote_description_set,"sync_received":state.progress.sync_received,"transport_states":state.progress.transport_states,"transport_states_before_close":state.progress.transport_states_before_close,"transport_states_at_failure":state.progress.transport_states_at_failure,
         "local_host_candidates":state.progress.local_host_candidates,"local_srflx_candidates":state.progress.local_srflx_candidates,
         "data_channel_only":true,"legacy_rsa_1024_enabled":state.progress.legacy_rsa_1024,"ice_servers_configured":state.progress.cloudflare_stun,"stun_provider":if state.progress.cloudflare_stun {Some("cloudflare")} else {None},"network_types":["udp4"],"connection_deadline_seconds":30,"connection_deadline_scope":"establishment-only","connection_established":state.progress.connection_established,
-        "channel_receive_api":"detached","unavailable_media_bypasses_control_queue":state.discard_unavailable_media,"queued_messages":state.messages.len(),"queued_message_bytes":state.message_bytes,"channel_message_limit_bytes":MAX_CHANNEL_MESSAGE,
+        "channel_receive_api":"detached","unavailable_media_bypasses_control_queue":state.discard_unavailable_media,"bounded_media_queue":state.media_queue.is_some(),"queued_messages":state.messages.len(),"queued_message_bytes":state.message_bytes,"channel_message_limit_bytes":MAX_CHANNEL_MESSAGE,
         "channel_messages_received":state.progress.channel_messages_received,
         "channel_bytes_received":state.progress.channel_bytes_received,
         "channel_max_message_bytes":state.progress.channel_max_message_bytes,
@@ -1002,6 +1029,7 @@ mod tests {
             messages: VecDeque::new(),
             message_bytes: 0,
             discard_unavailable_media: false,
+            media_queue: None,
             media_ingress: Default::default(),
         }
     }
@@ -1034,6 +1062,14 @@ mod tests {
     fn media_burst_without_ui_polling_preserves_control_and_constant_queue_memory() {
         let mut state = empty_completion();
         state.discard_unavailable_media = true;
+        state.media_queue = Some(crate::media_ingress::Queue::new(
+            crate::media_ingress::VideoLayout {
+                version: 0,
+                message_size: 11,
+                version_offset: 0,
+                flag_offset: 4,
+            },
+        ));
         assert!(state.receive(0, false, b"control"));
         let payload = vec![0x5a; MAX_CHANNEL_MESSAGE];
         for _ in 0..128 {
@@ -1053,6 +1089,8 @@ mod tests {
             state.media_ingress.packets_discarded_decoder_unavailable,
             256
         );
+        assert!(state.media_ingress.video_queue_depth <= 2);
+        assert!(state.media_ingress.audio_queue_depth <= 8);
         assert!(!state.progress.failed);
         for _ in 0..15 {
             assert!(state.receive(0, false, b"control"));

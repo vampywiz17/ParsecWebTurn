@@ -651,6 +651,9 @@ fn backend_call(
                         // needs this backend lock or a Wasmtime Store/Caller.
                         let config = b.video_protocol.as_ref().map(|p| crate::control::Config {
                             video_protocol: p.version,
+                            video_message_size: p.message_size,
+                            video_version_offset: p.version_offset,
+                            video_flag_offset: p.flag_offset,
                         });
                         match crate::attempt::Attempt::spawn_configured(
                             &id,

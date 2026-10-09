@@ -9,6 +9,9 @@ const LIMIT: usize = 1024 * 1024;
 #[derive(Clone)]
 pub struct Config {
     pub video_protocol: u32,
+    pub video_message_size: u32,
+    pub video_version_offset: u32,
+    pub video_flag_offset: u32,
 }
 
 impl Config {
