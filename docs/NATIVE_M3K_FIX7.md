@@ -44,3 +44,19 @@ Connect once, close the app normally, then preserve/share `account-network-repor
 This may fix the observed rejection if it was caused by representation differences;
 otherwise the new fields identify the exact validation failure. A real host
 connection is still unverified. STUN/TURN and media decoding remain separate work.
+
+## Verified build
+
+Source commit: `e5648bd2dfd2d149ff787661fcc5f474b0b54726`.
+[Windows CI run 37905059016](https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37905059016)
+passed formatting, strict Clippy, all 73 tests, the optimized release build and
+the bridge probes. The compact-credential probe connected two local native peers,
+verified six binary messages and closed both peers cleanly; it did not connect
+to a real Parsec host.
+
+The downloaded release executable also passed the offline original-core login
+fixture locally: nine synthetic input steps, including Tab and paste, 15 GPU
+frames on AMD Radeon 780M, and clean native-window release. There was no startup
+error or rejected thread spawn. Networking remained disabled, and the serialized
+fixture report contained neither fixture credentials nor destination origins.
+Real-account acceptance of this fix remains pending the next user test.
