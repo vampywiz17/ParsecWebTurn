@@ -323,9 +323,25 @@ impl Backend {
                 };
                 #[cfg(windows)]
                 if let Some(worker) = &mut self.media_worker {
-                    worker.submit(packet);
+                    let ready = match packet.channel {
+                        1 => self.media_pipeline.video_ready,
+                        2 => self.media_pipeline.audio_ready,
+                        _ => false,
+                    };
+                    if ready {
+                        worker.submit(packet);
+                    } else {
+                        self.media_ingress.packets_discarded_decoder_unavailable = self
+                            .media_ingress
+                            .packets_discarded_decoder_unavailable
+                            .saturating_add(1);
+                    }
                     continue;
                 }
+                self.media_ingress.packets_discarded_decoder_unavailable = self
+                    .media_ingress
+                    .packets_discarded_decoder_unavailable
+                    .saturating_add(1);
                 drop(packet);
             }
         }

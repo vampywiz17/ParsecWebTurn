@@ -96,10 +96,7 @@ unsafe extern "C" {
         data: *const u8,
         size: u32,
     ) -> i32;
-    fn parsec_native_media_session_stats(
-        session: *mut std::ffi::c_void,
-        stats: *mut NativeStats,
-    );
+    fn parsec_native_media_session_stats(session: *mut std::ffi::c_void, stats: *mut NativeStats);
     fn parsec_native_media_session_destroy(session: *mut std::ffi::c_void);
 }
 
@@ -113,8 +110,7 @@ pub struct Pipeline {
 #[cfg(windows)]
 impl Pipeline {
     pub fn new(window: std::sync::Arc<crate::window::Window>) -> Result<Self> {
-        let (tx, rx) =
-            std::sync::mpsc::sync_channel::<crate::media_ingress::Packet>(8);
+        let (tx, rx) = std::sync::mpsc::sync_channel::<crate::media_ingress::Packet>(8);
         let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
         let stats = std::sync::Arc::new(std::sync::Mutex::new(Stats::default()));
         let shared = stats.clone();
@@ -184,7 +180,11 @@ impl Pipeline {
     }
 
     pub fn submit(&mut self, packet: crate::media_ingress::Packet) {
-        if self.tx.as_ref().is_some_and(|tx| tx.try_send(packet).is_err()) {
+        if self
+            .tx
+            .as_ref()
+            .is_some_and(|tx| tx.try_send(packet).is_err())
+        {
             let mut stats = self.stats.lock().unwrap_or_else(|e| e.into_inner());
             stats.worker_packets_dropped = stats.worker_packets_dropped.saturating_add(1);
         }

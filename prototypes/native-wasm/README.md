@@ -6,11 +6,20 @@ the D3D11-aware Microsoft H.264 decoder MFT with the DXVA and low-latency codec
 properties, a native Opus decoder MFT for 48 kHz stereo, and `IAudioClient3`'s
 minimum shared-mode engine period. A software/WARP D3D adapter is rejected.
 
-This command proves that the documented native components can be configured on
-the machine. It does not yet submit live compressed packets, present decoded
-NV12 textures, or start a WASAPI render stream, so the live-session decoder
-availability flags remain false. Those flags must change only after an actual
-decoded frame/sample is produced; capability detection alone is not playback.
+The live attempt also routes channel 1 H.264 and channel 2 Opus packets to a
+dedicated bounded media worker. The video decoder exposes its D3D11 NV12 output
+surface directly to one video-processor pass whose destination is the flip-model
+swapchain backbuffer. There is no CPU readback, staging texture, or intermediate
+GPU texture. `Present` is non-blocking and overload drops frames instead of
+building latency. The only video copy is the unavoidable compressed SCTP payload
+copy into the Media Foundation input buffer; it is not a decoded-frame copy.
+
+Opus is decoded to 48 kHz stereo float PCM and fed to an event-driven
+`IAudioClient3` stream using the minimum supported shared-mode engine period.
+The audio queue is bounded to four periods and drops old audio on overflow.
+Diagnostics distinguish configured capability from real playback: decoder
+availability changes only after an actual frame/sample is decoded and includes
+decoded, presented/rendered, dropped, and underflow counters.
 
 ## M3k-fix21 / 0.14.21
 
@@ -398,8 +407,8 @@ or reports. All other diagnostic modes remain offline.
 2. Integrate the native data-channel transport with the guest's live-attempt
    bridge: signaling, explicit STUN/TURN configuration and control-message framing.
    The WASM module alone does not supply the JavaScript WebRTC implementation.
-3. Decode incoming H.264 and Opus natively and present real frames/audio.
-   Verify a first frame on a real host before claiming client compatibility.
+3. Validate the native H.264/Opus playback path on a real host, including the
+   first D3D11-presented frame, audible output, resize and disconnect cleanup.
 4. Add full session lifecycle, cleanup, clipboard and controlled live diagnostics.
 
 The public Wasmtime/Windows/WebRTC interfaces can be supported APIs. The

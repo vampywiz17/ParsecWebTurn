@@ -31,7 +31,7 @@ pub struct Ingress {
 }
 
 impl Ingress {
-    pub fn unavailable(&mut self, channel: u16, size: usize) {
+    fn received(&mut self, channel: u16, size: usize) {
         let (packets, bytes) = match channel {
             1 => (
                 &mut self.video_packets_received,
@@ -45,6 +45,10 @@ impl Ingress {
         };
         *packets = packets.saturating_add(1);
         *bytes = bytes.saturating_add(size as u64);
+    }
+
+    pub fn unavailable(&mut self, channel: u16, size: usize) {
+        self.received(channel, size);
         self.packets_discarded_decoder_unavailable =
             self.packets_discarded_decoder_unavailable.saturating_add(1);
     }
@@ -121,7 +125,7 @@ impl Queue {
     }
 
     pub fn push(&mut self, channel: u16, bytes: &[u8], ingress: &mut Ingress) {
-        ingress.unavailable(channel, bytes.len());
+        ingress.received(channel, bytes.len());
         match channel {
             1 => {
                 let Some(keyframe) = self.classifier.classify(bytes) else {
