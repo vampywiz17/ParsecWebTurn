@@ -51,3 +51,18 @@ Connect once. Close normally and share `account-network-report.json`. If the
 token matches the narrow padding rule, this removes the confirmed early grammar
 rejection. Real host connectivity, STUN/TURN and media decoding remain unverified;
 a subsequent failure can identify the next boundary rather than prove completion.
+
+## Verified build
+
+Source commit: `6f669783b4ed5f60b3eafda088aea18e7320d16c`.
+[Windows CI run 37909340218](https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37909340218)
+passed formatting, strict Clippy, all 77 tests, the optimized release build and
+all bridge probes. The padded-ufrag fixture connected two native peers and
+verified six binary messages, with clean peer closure. The generated proof has
+`parsec_padded_ufrag_native_negotiation_verified: true`; it continues to report
+`parsec_host_connected: false`, since no real Parsec host was tested.
+
+The downloaded release executable also passed the offline original-core login
+fixture locally: nine synthetic input steps, 15 GPU frames, clean native-window
+release, no startup error or rejected thread spawn. Networking remained disabled
+and fixture credentials/destination origins were absent from the default report.
