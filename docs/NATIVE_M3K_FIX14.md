@@ -53,3 +53,20 @@ Extract into a separate folder and run
 `START-LEGACY-RSA-CLOUDFLARE-DIAGNOSTIC.cmd`. Connect once, close normally and
 share `account-network-report.json`. Real host connectivity and video decoding
 remain unverified until this user test.
+
+## Verified build
+
+Source `6ac47627296d3778e95eb6ac0f41bf91140908f0` passed
+[Windows CI 37920786086](https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37920786086):
+88 tests, formatting, strict Clippy, release compilation and all bridge probes.
+The SCTP-only native/WASM probe exchanged six binary messages over three
+channels, with no negotiated SRTP profile and both peers closed. Both strict
+and legacy RSA wrong-fingerprint probes rejected the peer on this SCTP-only
+path with zero open channels. The separate default transport probe still
+negotiated an SRTP profile and successfully exchanged binary messages.
+
+The local offline original-login test completed nine synthetic steps and
+presented 15 accelerated UI frames. There were no external requests, start
+errors or rejected thread spawns, and the native window closed cleanly.
+Default account settings still leave RSA compatibility disabled and omit
+optional library diagnostics. Actual host connection and video await retest.
