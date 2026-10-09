@@ -474,7 +474,7 @@ impl Attempt {
         "local_description_set":state.progress.local_description_set,"remote_description_set":state.progress.remote_description_set,"sync_received":state.progress.sync_received,"transport_states":state.progress.transport_states,"transport_states_before_close":state.progress.transport_states_before_close,"transport_states_at_failure":state.progress.transport_states_at_failure,
         "local_host_candidates":state.progress.local_host_candidates,"local_srflx_candidates":state.progress.local_srflx_candidates,
         "data_channel_only":true,"legacy_rsa_1024_enabled":state.progress.legacy_rsa_1024,"ice_servers_configured":state.progress.cloudflare_stun,"stun_provider":if state.progress.cloudflare_stun {Some("cloudflare")} else {None},"network_types":["udp4"],"connection_deadline_seconds":30,"connection_deadline_scope":"establishment-only","connection_established":state.progress.connection_established,
-        "channel_receive_api":"detached","unavailable_media_bypasses_control_queue":state.discard_unavailable_media,"bounded_media_queue":state.media_queue.is_some(),"queued_messages":state.messages.len(),"queued_message_bytes":state.message_bytes,"channel_message_limit_bytes":MAX_CHANNEL_MESSAGE,
+        "channel_receive_api":"detached","unavailable_media_bypasses_control_queue":state.discard_unavailable_media,"queued_messages":state.messages.len(),"queued_message_bytes":state.message_bytes,"channel_message_limit_bytes":MAX_CHANNEL_MESSAGE,
         "channel_messages_received":state.progress.channel_messages_received,
         "channel_bytes_received":state.progress.channel_bytes_received,
         "channel_max_message_bytes":state.progress.channel_max_message_bytes,
