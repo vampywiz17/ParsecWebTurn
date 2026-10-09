@@ -35,6 +35,7 @@ enum Object {
 
 pub struct Graphics {
     gl: glow::Context,
+    overlay: crate::overlay::Capture,
     dc: HDC,
     context: HGLRC,
     module: windows_sys::Win32::Foundation::HMODULE,
@@ -186,6 +187,7 @@ impl Graphics {
             *window.graphics.lock().unwrap_or_else(|e| e.into_inner()) = Some(report.clone());
             Ok(Self {
                 gl,
+                overlay: Default::default(),
                 dc,
                 context,
                 module,
@@ -239,6 +241,13 @@ impl Graphics {
     }
 
     pub fn present(&mut self) -> Result<()> {
+        self.overlay.publish(
+            &mut self
+                .window
+                .overlay
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()),
+        );
         // Explicit optional test artifact only: one readback, never the normal
         // presentation path. Capture the rendered backbuffer before swapping.
         if self.report.frames_presented == 10 {
@@ -287,6 +296,17 @@ impl Graphics {
     }
 
     pub fn call(
+        &mut self,
+        name: &str,
+        memory: &GuestMemory,
+        args: &[wasmtime::Val],
+    ) -> Result<Option<i32>> {
+        let result = self.gl_call(name, memory, args)?;
+        self.overlay.observe(name, memory, args, result);
+        Ok(result)
+    }
+
+    fn gl_call(
         &mut self,
         name: &str,
         m: &GuestMemory,

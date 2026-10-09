@@ -16,6 +16,9 @@ impl Viewport {
             (sw as f64 * scale).round() as i32,
             (sh as f64 * scale).round() as i32,
         );
+        if w == 0 || h == 0 {
+            return None;
+        }
         Some([
             (cw as i32 - w) / 2,
             (ch as i32 - h) / 2,

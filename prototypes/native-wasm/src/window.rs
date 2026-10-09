@@ -8,7 +8,7 @@ use windows_sys::Win32::{
     Foundation::*,
     Graphics::{Gdi::*, OpenGL::*},
     System::LibraryLoader::*,
-    UI::Input::KeyboardAndMouse::*,
+    UI::Input::{KeyboardAndMouse::*, *},
     UI::WindowsAndMessaging::*,
 };
 
@@ -17,6 +17,8 @@ pub enum Event {
     Size(i32, i32),
     Focus(bool),
     Motion(i32, i32),
+    RelativeMotion(i32, i32),
+    RelativeMode(bool),
     Button(bool, i32, i32, i32),
     Text(u32),
     Key(bool, &'static str, i32),
@@ -30,6 +32,7 @@ pub struct Window {
     pub active_contexts: AtomicUsize,
     pub events: Mutex<std::collections::VecDeque<Event>>,
     pub dimensions: Mutex<(i32, i32)>,
+    pub overlay: Mutex<crate::overlay::Shared>,
     pub graphics: Mutex<Option<crate::graphics::GraphicsReport>>,
     pub audio_registry: Mutex<crate::audio_windows::Registry>,
     pub video_report: Mutex<Option<crate::video_output::Snapshot>>,
@@ -45,6 +48,8 @@ pub struct Window {
     pub online: bool,
     pub network_origin_audit: bool,
     pub stop: Arc<crate::lifecycle::StopSignal>,
+    relative_mouse: AtomicBool,
+    relative_pending: AtomicUsize,
     pressed_keys: Mutex<std::collections::BTreeSet<&'static str>>,
     text_decoder: Mutex<crate::input::TextDecoder>,
     cursor_pending: Mutex<crate::cursor::Pending>,
@@ -86,6 +91,7 @@ impl Window {
             events: Default::default(),
             dimensions: Mutex::new((1024, 720)),
             graphics: Default::default(),
+            overlay: Default::default(),
             video_report: Default::default(),
             audio_registry: Default::default(),
             video_hwnd: AtomicUsize::new(0),
@@ -100,6 +106,8 @@ impl Window {
             online,
             network_origin_audit,
             stop: Default::default(),
+            relative_mouse: AtomicBool::new(false),
+            relative_pending: AtomicUsize::new(0),
             pressed_keys: Default::default(),
             text_decoder: Default::default(),
             cursor_pending: Default::default(),
@@ -195,6 +203,63 @@ impl Window {
         };
         viewport.rect()?;
         Some(viewport)
+    }
+
+    pub fn set_relative_mouse(&self, enabled: bool) {
+        self.relative_pending
+            .store(if enabled { 2 } else { 1 }, Ordering::Release);
+        unsafe {
+            PostMessageW(self.handle(), WM_APP + 7, 0, 0);
+        }
+    }
+    unsafe fn apply_relative_mouse(&self, enabled: bool) {
+        let enabled = enabled
+            && GetForegroundWindow() == self.handle()
+            && !self.closing.load(Ordering::Acquire);
+        let device = RAWINPUTDEVICE {
+            usUsagePage: 1,
+            usUsage: 2,
+            dwFlags: if enabled { 0 } else { RIDEV_REMOVE },
+            hwndTarget: if enabled {
+                self.handle()
+            } else {
+                std::ptr::null_mut()
+            },
+        };
+        let acquired =
+            RegisterRawInputDevices(&device, 1, std::mem::size_of::<RAWINPUTDEVICE>() as u32) != 0
+                && enabled;
+        if acquired {
+            let mut rect = RECT::default();
+            GetClientRect(self.handle(), &mut rect);
+            let mut points = [
+                POINT {
+                    x: rect.left,
+                    y: rect.top,
+                },
+                POINT {
+                    x: rect.right,
+                    y: rect.bottom,
+                },
+            ];
+            MapWindowPoints(self.handle(), std::ptr::null_mut(), points.as_mut_ptr(), 2);
+            rect = RECT {
+                left: points[0].x,
+                top: points[0].y,
+                right: points[1].x,
+                bottom: points[1].y,
+            };
+            if ClipCursor(&rect) == 0 {
+                self.apply_relative_mouse(false);
+                return;
+            }
+            SetCursor(std::ptr::null_mut());
+        } else {
+            ClipCursor(std::ptr::null());
+        }
+        if self.relative_mouse.swap(acquired, Ordering::AcqRel) != acquired {
+            self.push(Event::RelativeMode(acquired));
+        }
     }
 
     pub fn initial_geometry(&self) -> (i32, i32, i32, i32, bool) {
@@ -369,6 +434,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
         let y = (lp >> 16) as i16 as i32;
         match message {
             WM_CLOSE => {
+                s.apply_relative_mouse(false);
                 s.apply_wake_lock(false, false);
                 s.request_stop();
                 return 0;
@@ -402,6 +468,10 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
                 return 0;
             }
             WM_SETCURSOR if lp as u16 as u32 == HTCLIENT => {
+                if s.relative_mouse.load(Ordering::Acquire) {
+                    SetCursor(std::ptr::null_mut());
+                    return 1;
+                }
                 s.cursor.lock().unwrap_or_else(|e| e.into_inner()).select();
                 return 1;
             }
@@ -465,10 +535,41 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
                 s.show_video_surface();
                 return 0;
             }
+            m if m == WM_APP + 7 => {
+                let pending = s.relative_pending.swap(0, Ordering::AcqRel);
+                if pending != 0 {
+                    s.apply_relative_mouse(pending == 2);
+                }
+                return 0;
+            }
+            WM_INPUT if s.relative_mouse.load(Ordering::Acquire) => {
+                let mut raw: RAWINPUT = std::mem::zeroed();
+                let mut size = std::mem::size_of::<RAWINPUT>() as u32;
+                let read = GetRawInputData(
+                    lp as HRAWINPUT,
+                    RID_INPUT,
+                    (&mut raw as *mut RAWINPUT).cast(),
+                    &mut size,
+                    std::mem::size_of::<RAWINPUTHEADER>() as u32,
+                );
+                if read != u32::MAX
+                    && raw.header.dwType == RIM_TYPEMOUSE
+                    && read
+                        >= std::mem::size_of::<RAWINPUTHEADER>() as u32
+                            + std::mem::size_of::<RAWMOUSE>() as u32
+                {
+                    let mouse = raw.data.mouse;
+                    if mouse.usFlags & MOUSE_MOVE_ABSOLUTE == 0 {
+                        s.push(Event::RelativeMotion(mouse.lLastX, mouse.lLastY));
+                    }
+                }
+                // DefWindowProc releases the foreground WM_INPUT bookkeeping.
+            }
             WM_KEYDOWN
                 if wp as u32 == VK_F8 as u32 && s.video_hwnd.load(Ordering::Acquire) != 0 =>
             {
                 if lp & (1 << 30) == 0 {
+                    s.apply_relative_mouse(false);
                     s.video_visible.fetch_xor(true, Ordering::AcqRel);
                     s.show_video_surface();
                 }
@@ -507,6 +608,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
             }
             WM_SETFOCUS => s.push(Event::Focus(true)),
             WM_KILLFOCUS => {
+                s.apply_relative_mouse(false);
                 let mut pressed = s.pressed_keys.lock().unwrap_or_else(|e| e.into_inner());
                 for code in std::mem::take(&mut *pressed) {
                     s.push(Event::Key(false, code, 0));
@@ -514,9 +616,23 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
                 s.push(Event::Focus(false));
                 *s.text_decoder.lock().unwrap_or_else(|e| e.into_inner()) = Default::default();
             }
-            WM_MOUSEMOVE => s.push(Event::Motion(x, y)),
+            WM_MOUSEMOVE if !s.relative_mouse.load(Ordering::Acquire) => {
+                s.push(Event::Motion(x, y))
+            }
             WM_LBUTTONDOWN | WM_LBUTTONUP => {
                 s.push(Event::Button(message == WM_LBUTTONDOWN, 0, x, y))
+            }
+            WM_MBUTTONDOWN | WM_MBUTTONUP => {
+                s.push(Event::Button(message == WM_MBUTTONDOWN, 1, x, y));
+            }
+            WM_XBUTTONDOWN | WM_XBUTTONUP => {
+                s.push(Event::Button(
+                    message == WM_XBUTTONDOWN,
+                    if ((wp >> 16) & 0xffff) == 1 { 3 } else { 4 },
+                    x,
+                    y,
+                ));
+                return 1;
             }
             WM_RBUTTONDOWN | WM_RBUTTONUP => {
                 s.push(Event::Button(message == WM_RBUTTONDOWN, 2, x, y))
@@ -559,6 +675,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
                 return 0;
             }
             WM_DESTROY => {
+                s.apply_relative_mouse(false);
                 s.apply_wake_lock(false, false);
                 // Cursor resources are created, replaced and freed on this UI
                 // thread. The remaining Arc state owns no native cursor handle.

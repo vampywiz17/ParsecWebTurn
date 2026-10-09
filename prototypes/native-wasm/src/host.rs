@@ -219,6 +219,13 @@ pub fn dispatch(
     let id = format!("{module}::{name}");
     *caller.data_mut().calls.entry(id.clone()).or_default() += 1;
     caller.data_mut().last_host_call = Some(id.clone());
+    #[cfg(windows)]
+    if module == "env" && name == "web_set_pointer_lock" {
+        if let Some(window) = &caller.data().window {
+            window.set_relative_mouse(int(args, 0)? != 0);
+            return Ok(());
+        }
+    }
     // None of these optional capabilities can currently be acquired by this
     // prototype. Releasing an inactive capability is valid and idempotent;
     // acquisition still reaches the explicit unsupported boundary below.

@@ -305,6 +305,10 @@ fn run_loop(store: &mut Store<HostState>, instance: &Instance, input: bool) -> R
                         )?;
                         ("mty_window_focus", vec![app, f as i32])
                     }
+                    Event::RelativeMode(active) => {
+                        ("mty_window_update_relative_mouse", vec![app, active as i32])
+                    }
+                    Event::RelativeMotion(x, y) => ("mty_window_motion", vec![app, 1, x, y]),
                     Event::Motion(x, y) => ("mty_window_motion", vec![app, 0, x, y]),
                     Event::Button(down, button, x, y) => {
                         ("mty_window_button", vec![app, down as i32, button, x, y])

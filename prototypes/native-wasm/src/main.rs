@@ -31,6 +31,10 @@ mod media_ingress;
 mod memory;
 mod network_audit;
 mod network_policy;
+#[cfg(windows)]
+mod overlay;
+#[cfg(windows)]
+mod overlay_windows;
 mod platform;
 mod platform_probe;
 #[cfg(windows)]
@@ -126,6 +130,8 @@ struct Report {
     native_wake_lock: Option<wake_lock::State>,
     #[cfg(windows)]
     native_video_output: Option<video_output::Snapshot>,
+    #[cfg(windows)]
+    native_overlay: Option<overlay::Report>,
     video_rendered: bool,
     host: Option<HostState>,
     threads: Vec<threads::ThreadRecord>,
@@ -443,6 +449,8 @@ fn run() -> Result<()> {
         native_wake_lock: None,
         #[cfg(windows)]
         native_video_output: None,
+        #[cfg(windows)]
+        native_overlay: None,
         video_rendered: false,
         host: None,
         threads: Vec::new(),
@@ -579,6 +587,14 @@ fn run() -> Result<()> {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .clone();
+            report.native_overlay = Some(
+                window
+                    .overlay
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .report
+                    .clone(),
+            );
             report.synthetic_login_steps = window.script_steps.load(Ordering::Acquire);
             report.native_video_output = window
                 .video_report

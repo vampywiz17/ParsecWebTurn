@@ -504,9 +504,9 @@ impl Session {
                 s.color_matrix = matrix;
                 s.nominal_range = nominal;
             });
-            let presented = self
-                .renderer
-                .present(&texture, subresource, source, color, shared)?;
+            let presented =
+                self.renderer
+                    .present(&texture, subresource, source, color, shared, window)?;
             update(shared, |s| {
                 s.synthetic_pixel_variation_verified = self.renderer.synthetic_pixels_verified
             });
@@ -569,6 +569,8 @@ struct Renderer {
     synthetic_pixels_verified: bool,
     size: (u32, u32),
     processor: Option<ProcessorCache>,
+    overlay: Option<crate::overlay_windows::Renderer>,
+    overlay_failed: bool,
 }
 impl Renderer {
     unsafe fn create(hwnd: HWND) -> Result<Self> {
@@ -637,6 +639,8 @@ impl Renderer {
             synthetic_pixels_verified: false,
             size,
             processor: None,
+            overlay: None,
+            overlay_failed: false,
         })
     }
     // Offline synthetic fixture only. Live paths never map/read pixel buffers.
@@ -683,6 +687,7 @@ impl Renderer {
         source: RECT,
         color: u32,
         shared: &Shared,
+        window: &crate::window::Window,
     ) -> Result<Presentation> {
         let width = (source.right - source.left) as u32;
         let height = (source.bottom - source.top) as u32;
@@ -847,6 +852,34 @@ impl Renderer {
         api("video-processor-blt", result)?;
         if self.verify_synthetic_pixels && !self.synthetic_pixels_verified {
             self.synthetic_pixels_verified = self.verify_pixels(&back, size)?;
+        }
+        if !self.overlay_failed {
+            let frame = {
+                window
+                    .overlay
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .frame
+                    .clone()
+            };
+            if !frame.batches.is_empty() {
+                let result = (|| -> windows::core::Result<u64> {
+                    if self.overlay.is_none() {
+                        self.overlay =
+                            Some(crate::overlay_windows::Renderer::create(&self.device)?);
+                    }
+                    self.overlay.as_mut().unwrap().draw(frame, &back, size)
+                })();
+                let mut overlay = window.overlay.lock().unwrap_or_else(|e| e.into_inner());
+                match result {
+                    Ok(count) => overlay.report.draw_calls_composited += count,
+                    Err(_) => {
+                        overlay.report.failure = Some("d3d11-gui-composition-failed");
+                        self.overlay_failed = true;
+                        self.overlay = None;
+                    }
+                }
+            }
         }
         // Never pace reference-picture decoding against display refresh. A busy
         // swap chain skips only this display submission, not encoded pictures.
