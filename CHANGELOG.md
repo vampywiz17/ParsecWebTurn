@@ -1,5 +1,11 @@
 # Changelog
 
+## Native dev fixes
+
+- Fix WASI inherited file rights so the Parsec core can actually save sign-in data and client preferences to the encrypted profile.
+- Send the original client's disconnect notification before closing an established connection, including application-window shutdown.
+- Keep the native window title as ParsecWebTurn when the Parsec core requests a title change.
+
 ## 0.8.0 — Native Rust client (dev)
 
 - Replace the WebView2 launcher with the native Rust client using the pinned Parsec WASM core (150-104a).

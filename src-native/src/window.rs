@@ -395,7 +395,7 @@ unsafe fn create_window(state: &Arc<Window>, opengl_required: bool) -> Result<HW
     if RegisterClassW(&class) == 0 {
         bail!("RegisterClassW failed: {}", GetLastError());
     }
-    let title: Vec<u16> = "ParsecWebTurn\0".encode_utf16().collect();
+    let title: Vec<u16> = crate::APP_TITLE.encode_utf16().chain([0]).collect();
     let hwnd = CreateWindowExW(
         0,
         name.as_ptr(),

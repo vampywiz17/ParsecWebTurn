@@ -386,7 +386,10 @@ pub fn dispatch(
                     result(results, 0);
                 }
             }
-            "web_set_title" => caller.data_mut().title = Some(m.string(ptr(args, 0)?, 1024)?),
+            "web_set_title" => {
+                m.string(ptr(args, 0)?, 1024)?;
+                caller.data_mut().title = Some(crate::APP_TITLE.into());
+            }
             "web_set_app" => caller.data_mut().app_pointer = Some(ptr(args, 0)?),
             "MTY_GetRandomBytes" => {
                 let len = ptr(args, 1)? as usize;
@@ -522,10 +525,13 @@ pub fn dispatch(
                 stat[0] = if int(args, 0)? == 3 { 3 } else { 2 };
                 let rights: u64 = match int(args, 0)? {
                     0 => 2,
-                    3 => 512 | 1024 | 8192 | 262144 | 524288,
+                    3 => crate::filesystem::DIRECTORY_RIGHTS,
                     _ => 64,
                 };
                 stat[8..16].copy_from_slice(&rights.to_le_bytes());
+                if fd == 3 {
+                    stat[16..24].copy_from_slice(&crate::filesystem::FILE_RIGHTS.to_le_bytes());
+                }
                 m.write(ptr(args, 1)?, &stat)?;
                 0
             }

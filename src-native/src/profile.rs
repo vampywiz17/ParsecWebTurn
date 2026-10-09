@@ -37,7 +37,7 @@ impl Profile {
                 .join("Native"),
         )
     }
-    fn open(directory: PathBuf) -> Result<Arc<Self>> {
+    pub(crate) fn open(directory: PathBuf) -> Result<Arc<Self>> {
         std::fs::create_dir_all(&directory).context("Cannot create native profile directory")?;
         let lock = OpenOptions::new()
             .create(true)

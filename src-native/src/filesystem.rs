@@ -10,6 +10,10 @@ pub const NOTEMPTY: i32 = 55;
 pub const NOENT: i32 = 44;
 pub const NOTCAPABLE: i32 = 76;
 pub const LIMIT: usize = 1024 * 1024;
+// WASI Preview 1 rights. libc intersects file-open rights with the preopen's
+// inheriting mask; an empty mask silently produces unwritable file handles.
+pub const FILE_RIGHTS: u64 = 2 | 4 | 8 | 64;
+pub const DIRECTORY_RIGHTS: u64 = 512 | 1024 | 8192 | 262144 | 33554432 | 67108864;
 
 pub struct Handle {
     pub path: String,

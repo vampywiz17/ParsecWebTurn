@@ -240,7 +240,10 @@ impl Backend {
     }
 
     fn retain_attempt_diagnostic(&mut self) {
-        if let Some(attempt) = self.native_attempt.take() {
+        if let Some(mut attempt) = self.native_attempt.take() {
+            if self.status == Some(0) {
+                attempt.disconnect();
+            }
             self.media_ingress = attempt.media_ingress();
             self.attempt_diagnostic = Some(attempt.snapshot());
         }

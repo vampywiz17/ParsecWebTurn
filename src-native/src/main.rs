@@ -5,6 +5,7 @@
 // Optional ABI/telemetry helpers are retained in source; LTO removes unreachable code.
 #![cfg_attr(not(any(test, feature = "diagnostics")), allow(dead_code))]
 mod attempt;
+const APP_TITLE: &str = "ParsecWebTurn";
 #[cfg(any(test, feature = "diagnostics"))]
 mod attempt_probe;
 mod audio;
@@ -44,6 +45,8 @@ mod network_policy;
 mod overlay;
 #[cfg(windows)]
 mod overlay_windows;
+#[cfg(all(test, windows))]
+mod persistence_tests;
 mod platform;
 #[cfg(any(test, feature = "diagnostics"))]
 mod platform_probe;

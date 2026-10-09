@@ -83,6 +83,13 @@ fn run() -> Result<()> {
             result
         }
     })();
+    // Also notify the host when the user closes the application window.
+    store
+        .data()
+        .backend
+        .lock()
+        .map_err(|_| anyhow::anyhow!("Backend lock failed"))?
+        .destroy();
     // Persistence is also committed when guest files close. This final checkpoint
     // includes preferences still open at a normal application shutdown.
     let saved_result = store

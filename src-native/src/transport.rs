@@ -42,6 +42,7 @@ mod diagnostics {
         pub connected_peers: u32,
         pub srtp_profiles_verified: bool,
         pub binary_messages_verified: u32,
+        pub disconnect_notice_verified: bool,
         pub channels: Vec<ChannelReport>,
         pub peers_closed: bool,
         pub signaling: &'static str,
@@ -219,6 +220,15 @@ mod diagnostics {
         if connected != 2 {
             bail!("ICE/DTLS peer connection not confirmed");
         }
+        crate::attempt::send_disconnect(&a.channels[0]).await?;
+        let (side, id, text, notice) = rx.recv().await.context("disconnect notice missing")?;
+        if side != 1
+            || id != 0
+            || text
+            || notice.as_ref() != [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10]
+        {
+            bail!("incorrect Parsec disconnect control frame");
+        }
         for peer in [a, b] {
             if peer
                 .connection
@@ -238,6 +248,7 @@ mod diagnostics {
             connected_peers: connected as u32,
             srtp_profiles_verified: true,
             binary_messages_verified: verified,
+            disconnect_notice_verified: true,
             channels: CHANNELS
                 .into_iter()
                 .map(|(id, label)| ChannelReport {

@@ -299,6 +299,7 @@ enum Command {
     Candidate(Candidate),
     Sync,
     Send(u16, Bytes),
+    Disconnect,
 }
 
 /// Default web-client STUN, with offline/test alternatives kept explicit.
@@ -441,6 +442,17 @@ impl Attempt {
             finished,
             wake,
         })
+    }
+
+    pub fn disconnect(&mut self) {
+        // Let the transport worker send the pinned client's exit notification
+        // before cancellation closes SCTP. Never wait indefinitely for a host.
+        if let Some(commands) = &self.commands {
+            if commands.try_send(Command::Disconnect).is_ok() {
+                let _ = self.wait_finished(Duration::from_millis(900));
+            }
+        }
+        self.cancel();
     }
 
     pub fn cancel(&mut self) {
@@ -851,6 +863,10 @@ fn worker(
             if shared.lock().unwrap_or_else(|e| e.into_inner()).cancelled {
                 break;
             }
+            if matches!(command, Command::Disconnect) {
+                let _ = runtime.block_on(send_disconnect(&channels[0]));
+                break;
+            }
             runtime.block_on(async {
                 tokio::time::timeout(Duration::from_secs(5),async {
                     match command {
@@ -889,6 +905,7 @@ fn worker(
                             state.progress.last_send_elapsed_ms=Some(state.elapsed_ms());
                             state.progress.last_sent_control_kind=if id==0 { payload.get(12).copied() } else { None };
                         }
+                        Command::Disconnect => unreachable!("handled before command dispatch"),
                     }
                     while let Some(candidate)=gate.pop_ready() { peer.add_ice_candidate(candidate).await.context(FailureStage::AddIceCandidate)?; shared.lock().unwrap_or_else(|e|e.into_inner()).progress.remote_candidates+=1; }
                     Ok::<(),anyhow::Error>(())
@@ -943,6 +960,23 @@ fn worker(
         bail!("native offer peer did not close within the deadline");
     }
     outcome
+}
+
+pub(crate) async fn send_disconnect(channel: &webrtc::data_channel::RTCDataChannel) -> Result<()> {
+    if channel.ready_state() != RTCDataChannelState::Open {
+        return Ok(());
+    }
+    // Z() in the audited parsec.js sends P(10,0,0,0) on control before close.
+    // This private Parsec frame travels over the normal DTLS/SCTP channel.
+    tokio::time::timeout(Duration::from_millis(500), async {
+        channel.send(&crate::control::header(10, 0, 0, 0)).await?;
+        while channel.buffered_amount().await != 0 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        Ok::<(), anyhow::Error>(())
+    })
+    .await??;
+    Ok(())
 }
 
 // This timer bounds initial ICE/DTLS/SCTP establishment, never session lifetime.
