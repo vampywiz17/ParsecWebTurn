@@ -49,3 +49,18 @@ Extract into a separate folder; run
 `START-LEGACY-RSA-CLOUDFLARE-DIAGNOSTIC.cmd`. Connect once, observe whether the
 window remains open and any image appears, close normally if needed, and share
 `account-network-report.json`. Audio is unavailable in this test build.
+
+## Verified build
+
+Source `154cc1052c8e870d9b691b6da35492579b18148f` passed
+[Windows CI 37922409494](https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37922409494):
+89 tests, formatting, strict Clippy, release compilation and all bridge probes.
+The synthetic five-argument AudioCreate calls returned null without trapping;
+subsequent guest code executed, null destroy was idempotent and a fabricated
+context was rejected. No device was opened or audio played.
+The SCTP-only exchange and both wrong-fingerprint probes still passed.
+
+The local offline original-login test completed nine synthetic steps and
+presented 15 accelerated UI frames, with no external requests, start error
+or rejected thread spawns, and with clean window shutdown. Actual Parsec
+media startup after a failed audio factory remains a user-test requirement.
