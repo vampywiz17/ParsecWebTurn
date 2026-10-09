@@ -185,6 +185,42 @@ mod tests {
         assert!(decoder.decode(&[3]).is_err());
     }
     #[test]
+    fn reference_opus_roundtrip_retains_stereo_pcm_signal() {
+        let mut error = 0;
+        let encoder = unsafe {
+            libopus_sys::opus_encoder_create(
+                48_000,
+                2,
+                libopus_sys::OPUS_APPLICATION_AUDIO as i32,
+                &mut error,
+            )
+        };
+        assert!(!encoder.is_null());
+        assert_eq!(error, 0);
+        let input: Vec<i16> = (0..960)
+            .flat_map(|i| {
+                let v = ((i as f32 * 0.08).sin() * 8000.) as i16;
+                [v, -v]
+            })
+            .collect();
+        let mut packet = vec![0; 4096];
+        let size = unsafe {
+            libopus_sys::opus_encode(
+                encoder,
+                input.as_ptr(),
+                960,
+                packet.as_mut_ptr(),
+                packet.len() as i32,
+            )
+        };
+        unsafe { libopus_sys::opus_encoder_destroy(encoder) };
+        assert!(size > 0);
+        packet.truncate(size as usize);
+        let pcm = Decoder::new().unwrap().decode(&packet).unwrap();
+        assert_eq!(pcm.len(), 1920);
+        assert!(pcm.iter().map(|v| i64::from(*v).abs()).sum::<i64>() > 100_000);
+    }
+    #[test]
     fn decoded_audio_is_retained_until_a_valid_guest_copy_and_released_on_stop() {
         let mut config = wasmtime::Config::new();
         config.wasm_threads(true);

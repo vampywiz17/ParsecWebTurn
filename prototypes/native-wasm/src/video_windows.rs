@@ -926,16 +926,17 @@ pub fn probe(sustained: bool) -> anyhow::Result<serde_json::Value> {
         vertices.extend_from_slice(&[0; 8]);
         vertices.extend_from_slice(&[255, 0, 0, 255]);
     }
+    let client = *window.dimensions.lock().unwrap_or_else(|e| e.into_inner());
     window
         .overlay
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .frame = Arc::new(crate::overlay::Frame {
-        size: (1024, 720),
+        size: (client.0 as u32, client.1 as u32),
         batches: vec![crate::overlay::Batch {
             vertices,
             texture,
-            clip: [0, 0, 1024, 720],
+            clip: [0, 0, client.0, client.1],
         }],
     });
     let pipeline = Pipeline::start_mode(window.clone(), true);

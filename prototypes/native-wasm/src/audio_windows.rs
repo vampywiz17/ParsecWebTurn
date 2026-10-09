@@ -73,11 +73,12 @@ impl Playback {
         min_buffer: u32,
         max_buffer: u32,
     ) -> Result<Self> {
-        if min_buffer > max_buffer || max_buffer == 0 || max_buffer > 24_000 {
+        if min_buffer > max_buffer || max_buffer == 0 || max_buffer > 500 {
             bail!("invalid audio latency limits");
         }
-        let max_frames = max_buffer as usize;
-        let min_frames = min_buffer as usize;
+        // Pinned AudioWorklet converts its latency arguments from milliseconds to frames.
+        let max_frames = max_buffer as usize * 48;
+        let min_frames = min_buffer as usize * 48;
         let shared = Arc::new(Mutex::new(State::default()));
         let state = shared.clone();
         let (tx, rx) = mpsc::sync_channel(1);
@@ -290,7 +291,7 @@ unsafe fn render(
 pub fn probe() -> Result<serde_json::Value> {
     let window = crate::window::Window::create_video_probe()?;
     let mut snapshot = None;
-    if let Ok(output) = Playback::create(window.clone(), 0, 9600) {
+    if let Ok(output) = Playback::create(window.clone(), 0, 200) {
         for _ in 0..10 {
             output.queue(&[0; 1920]);
             std::thread::sleep(std::time::Duration::from_millis(20));

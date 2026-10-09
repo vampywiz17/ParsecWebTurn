@@ -221,7 +221,7 @@ impl Capture {
                 let bytes = m.read(u(3)?, 64)?;
                 let mut values = [0.; 16];
                 for (n, b) in bytes.as_chunks::<4>().0.iter().enumerate() {
-                    values[n] = f32::from_le_bytes(b.try_into()?);
+                    values[n] = f32::from_le_bytes(*b);
                 }
                 if values.iter().any(|v| !v.is_finite()) {
                     bail!("invalid UI projection");
