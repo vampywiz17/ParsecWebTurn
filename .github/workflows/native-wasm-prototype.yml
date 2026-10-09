@@ -126,6 +126,10 @@ jobs:
           $audit = Get-Content "$artifact/guest-audit.json" -Raw | ConvertFrom-Json
           if ($audit.guest_instances_verified -ne 2 -or $audit.intents_verified -ne 2 -or !$audit.shared_audit_verified -or !$audit.offline_failure_outputs_verified -or !$audit.request_redaction_verified -or !$audit.stdout_redaction_verified -or $audit.external_requests_enabled -or $audit.authentication_integrated) { throw 'Incorrect guest audit proof' }
           Copy-Item -LiteralPath prototypes/native-wasm/Cargo.lock -Destination "$artifact/Cargo.lock"
+          & $exe guest-audio-unavailable-probe "$artifact/guest-audio-unavailable.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Audio-unavailable guest contract failed' }
+          $audio = Get-Content "$artifact/guest-audio-unavailable.json" -Raw | ConvertFrom-Json
+          if (!$audio.null_factory_result_verified -or !$audio.guest_continues_verified -or !$audio.fabricated_context_rejected -or $audio.audio_played -or $audio.device_opened) { throw 'Audio unavailability must not impersonate a renderer' }
           & $exe guest-platform-probe "$artifact/guest-platform.json"
           if ($LASTEXITCODE -ne 0) { throw 'Guest local desktop imports failed' }
           $platform = Get-Content "$artifact/guest-platform.json" -Raw | ConvertFrom-Json

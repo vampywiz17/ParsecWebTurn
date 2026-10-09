@@ -1,5 +1,6 @@
 mod attempt;
 mod attempt_probe;
+mod audio;
 mod audit_probe;
 mod backend;
 mod buffers;
@@ -206,6 +207,7 @@ fn run() -> Result<()> {
             | "guest-tls-probe"
             | "guest-audit-probe"
             | "guest-thread-probe"
+            | "guest-audio-unavailable-probe"
             | "guest-platform-probe"
             | "guest-window-probe"
     ) {
@@ -222,6 +224,8 @@ fn run() -> Result<()> {
             {
                 bail!("native window probe requires Windows");
             }
+        } else if mode == "guest-audio-unavailable-probe" {
+            audio::probe()?
         } else if mode == "guest-platform-probe" {
             platform_probe::probe()?
         } else if mode == "guest-thread-probe" {
@@ -373,6 +377,8 @@ fn run() -> Result<()> {
                     )
                 {
                     "inactive-release-only"
+                } else if i.module() == "env" && audio::handles(i.name()) {
+                    "audio-output-unavailable"
                 } else if host::implemented(i.module(), i.name()) {
                     "implemented"
                 } else {

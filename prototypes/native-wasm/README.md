@@ -1,4 +1,12 @@
-# Native Rust / Parsec WASM prototype
+# Native Parsec WASM prototype
+
+M3k-fix15 / 0.14.15 returns an explicit unavailable-output failure from the
+previously missing audio factory, instead of trapping the guest worker.
+Audio playback is not implemented. Fix14 user telemetry confirmed connected
+ICE/DTLS, three open channels and incoming data before this audio boundary.
+See [fix15](../../docs/NATIVE_M3K_FIX15.md) and
+[the isolated SCTP-only correction](../../docs/NATIVE_M3K_FIX14.md).
+
 
 M3k-fix12 / 0.14.12 expands opt-in diagnostic classification to all fixed DTLS
 errors, exact peer alert descriptions and the generic ring crypto error. It also

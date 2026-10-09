@@ -54,6 +54,7 @@ impl Records {
             cancelled: false,
             error: None,
             boundary: None,
+            audio_output: None,
             exit_code: None,
             calls: Default::default(),
         });
@@ -98,6 +99,8 @@ pub struct ThreadRecord {
     pub cancelled: bool,
     pub error: Option<String>,
     pub boundary: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio_output: Option<crate::audio::Output>,
     pub exit_code: Option<u32>,
     pub calls: std::collections::BTreeMap<String, u64>,
 }
@@ -211,6 +214,9 @@ impl ThreadRuntime {
             record.cancelled = cancelled;
             record.error = error;
             if let Some(host) = host {
+                if host.audio_output.create_requests > 0 || host.audio_output.destroy_requests > 0 {
+                    record.audio_output = Some(host.audio_output);
+                }
                 record.boundary = host.boundary;
                 record.calls = host.calls;
                 record.exit_code = host.guest_exit_code;

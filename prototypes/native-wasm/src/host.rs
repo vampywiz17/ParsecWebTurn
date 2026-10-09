@@ -9,6 +9,7 @@ use wasmtime::{Caller, Val};
 
 #[derive(Serialize)]
 pub struct HostState {
+    pub audio_output: crate::audio::Output,
     #[serde(skip)]
     pub memory: GuestMemory,
     #[serde(skip)]
@@ -50,6 +51,7 @@ pub struct HostState {
 impl HostState {
     pub fn new(memory: GuestMemory) -> Self {
         Self {
+            audio_output: Default::default(),
             memory,
             threads: None,
             filesystem: Default::default(),
@@ -80,6 +82,9 @@ impl HostState {
 pub fn implemented(module: &str, name: &str) -> bool {
     #[cfg(windows)]
     if module == "env" && (crate::cursor::handles(name) || name == "web_set_fullscreen") {
+        return true;
+    }
+    if module == "env" && crate::audio::handles(name) {
         return true;
     }
     if disabled_web_stub(module, name) {
@@ -240,6 +245,13 @@ pub fn dispatch(
     if module == "env" && caller.data().window.is_some() && crate::desktop::handles(name) {
         let outcome = crate::desktop::dispatch(&mut caller, name, args, results);
         if outcome.is_err() && name != "web_run_and_yield" {
+            caller.data_mut().boundary = Some(id);
+        }
+        return outcome;
+    }
+    if module == "env" && crate::audio::handles(name) {
+        let outcome = crate::audio::dispatch(&mut caller, name, args, results);
+        if outcome.is_err() {
             caller.data_mut().boundary = Some(id);
         }
         return outcome;
