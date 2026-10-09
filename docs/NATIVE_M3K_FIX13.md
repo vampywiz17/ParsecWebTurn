@@ -51,3 +51,18 @@ the legacy option and Cloudflare STUN. `START-ACCOUNT.cmd` and the existing
 Cloudflare launcher retain strict verification. Real Parsec host connectivity
 and video decoding require the user's test; this build does not claim they
 have already been verified.
+
+## Verified build
+
+Source `4ea108cc3c01331bb70ed5215b23ec31dd333ced` passed
+[Windows CI 37919183769](https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37919183769):
+87 tests, formatting, strict Clippy, release compilation and all native bridge
+probes. Both strict and compatibility modes rejected the deliberately wrong
+fingerprint with zero open channels and both peers closed. The actual library
+reported `certificate-fingerprint-mismatch` in both controlled tests.
+
+The local offline original-login test completed nine synthetic steps and
+presented 15 hardware-accelerated UI frames, with no external requests,
+no start error, clean window shutdown and no rejected thread spawns. The
+normal report left legacy compatibility disabled and omitted optional library
+diagnostics. Real-host connection and video remain unverified pending retest.
