@@ -49,6 +49,9 @@ pub struct Output {
 #[serde(rename_all = "kebab-case")]
 pub enum FailureStage {
     Worker,
+    IceTransport,
+    DtlsTransport,
+    PeerTransport,
     SetLocalDescription,
     SetRemoteDescription,
     CandidateGate,
@@ -155,6 +158,7 @@ struct Progress {
     sync_received: bool,
     transport_states: serde_json::Value,
     transport_states_before_close: serde_json::Value,
+    transport_states_at_failure: serde_json::Value,
     cloudflare_stun: bool,
 }
 
@@ -312,7 +316,7 @@ impl Attempt {
     pub fn snapshot(&self) -> serde_json::Value {
         let state = self.completion.lock().unwrap_or_else(|e| e.into_inner());
         serde_json::json!({ "offer_ready": state.progress.ready, "mid":state.progress.mid, "peer_closed": state.progress.closed, "failed": state.progress.failed, "failure_stage": state.progress.failure_stage, "negotiated_channels": state.progress.channels, "channels_open": state.progress.open_mask.count_ones(), "transport_connected":state.progress.transport_connected, "local_candidates":state.progress.local_candidates, "remote_candidates":state.progress.remote_candidates, "messages_received":state.progress.messages_received, "worker_finished": *self.finished.0.lock().unwrap_or_else(|e| e.into_inner()), "host_connected": false,
-        "local_description_set":state.progress.local_description_set,"remote_description_set":state.progress.remote_description_set,"sync_received":state.progress.sync_received,"transport_states":state.progress.transport_states,"transport_states_before_close":state.progress.transport_states_before_close,
+        "local_description_set":state.progress.local_description_set,"remote_description_set":state.progress.remote_description_set,"sync_received":state.progress.sync_received,"transport_states":state.progress.transport_states,"transport_states_before_close":state.progress.transport_states_before_close,"transport_states_at_failure":state.progress.transport_states_at_failure,
         "local_host_candidates":state.progress.local_host_candidates,"local_srflx_candidates":state.progress.local_srflx_candidates,
         "ice_servers_configured":state.progress.cloudflare_stun,"stun_provider":if state.progress.cloudflare_stun {Some("cloudflare")} else {None},"network_types":["udp4"],"connection_deadline_seconds":30 })
     }
@@ -435,13 +439,13 @@ fn worker(
     let mut settings = SettingEngine::default();
     settings.set_network_types(vec![NetworkType::Udp4]);
     let api = APIBuilder::new().with_setting_engine(settings).build();
-    let peer = runtime.block_on(async {
+    let peer = Arc::new(runtime.block_on(async {
         tokio::time::timeout(
             Duration::from_secs(5),
             api.new_peer_connection(ice_configuration(cloudflare_stun)),
         )
         .await
-    })??;
+    })??);
     let callback_state = shared.clone();
     let callback_wake = wake.clone();
     let attempt_id = id.to_owned();
@@ -463,15 +467,36 @@ fn worker(
     }));
     let callback_state = shared.clone();
     let callback_wake = wake.clone();
+    // A weak reference avoids a peer -> callback -> peer ownership cycle.
+    let callback_peer = Arc::downgrade(&peer);
     peer.on_peer_connection_state_change(Box::new(move |connection_state| {
         let shared = callback_state.clone();
         let wake = callback_wake.clone();
+        let peer = callback_peer.upgrade();
         Box::pin(async move {
+            let failure = if connection_state == RTCPeerConnectionState::Failed {
+                peer.as_ref().map(|peer| {
+                    let mut states = transport_states(peer);
+                    states["peer"] = serde_json::json!(connection_state.to_string());
+                    let stage = transport_failure_stage(
+                        peer.ice_connection_state(),
+                        peer.dtls_transport().state(),
+                    );
+                    (states, stage)
+                })
+            } else {
+                None
+            };
             let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
             if !state.cancelled {
                 state.progress.transport_connected =
                     connection_state == RTCPeerConnectionState::Connected;
                 if connection_state == RTCPeerConnectionState::Failed {
+                    if let Some((states, stage)) = failure {
+                        state.progress.transport_states = states.clone();
+                        state.progress.transport_states_at_failure = states;
+                        state.progress.failure_stage.get_or_insert(stage);
+                    }
                     state.progress.failed = true;
                 }
             }
@@ -691,6 +716,21 @@ fn transport_states(peer: &webrtc::peer_connection::RTCPeerConnection) -> serde_
     })
 }
 
+fn transport_failure_stage(
+    ice: webrtc::ice_transport::ice_connection_state::RTCIceConnectionState,
+    dtls: webrtc::dtls_transport::dtls_transport_state::RTCDtlsTransportState,
+) -> FailureStage {
+    use webrtc::dtls_transport::dtls_transport_state::RTCDtlsTransportState;
+    use webrtc::ice_transport::ice_connection_state::RTCIceConnectionState;
+    if dtls == RTCDtlsTransportState::Failed {
+        FailureStage::DtlsTransport
+    } else if ice == RTCIceConnectionState::Failed {
+        FailureStage::IceTransport
+    } else {
+        FailureStage::PeerTransport
+    }
+}
+
 fn ice_configuration(cloudflare_stun: bool) -> RTCConfiguration {
     RTCConfiguration {
         ice_transport_policy:
@@ -709,6 +749,23 @@ fn ice_configuration(cloudflare_stun: bool) -> RTCConfiguration {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn failure_stage_uses_current_transport_states() {
+        use webrtc::dtls_transport::dtls_transport_state::RTCDtlsTransportState as D;
+        use webrtc::ice_transport::ice_connection_state::RTCIceConnectionState as I;
+        assert!(matches!(
+            super::transport_failure_stage(I::Connected, D::Failed),
+            super::FailureStage::DtlsTransport
+        ));
+        assert!(matches!(
+            super::transport_failure_stage(I::Failed, D::Connecting),
+            super::FailureStage::IceTransport
+        ));
+        assert!(matches!(
+            super::transport_failure_stage(I::Connected, D::Connecting),
+            super::FailureStage::PeerTransport
+        ));
+    }
     #[test]
     fn cloudflare_stun_is_opt_in_without_turn_or_credentials() {
         assert!(super::ice_configuration(false).ice_servers.is_empty());

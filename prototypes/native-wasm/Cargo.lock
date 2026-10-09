@@ -1666,7 +1666,7 @@ dependencies = [
 
 [[package]]
 name = "parsec-native-wasm"
-version = "0.14.10"
+version = "0.14.11"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1674,6 +1674,7 @@ dependencies = [
  "getrandom 0.3.4",
  "glow",
  "image",
+ "log",
  "rcgen",
  "reqwest",
  "rustls",

@@ -1,5 +1,12 @@
 # Native Rust / Parsec WASM prototype
 
+M3k-fix11 / 0.14.11 captures fresh peer/ICE/DTLS failure states and fixed native
+failure stages. Optional `account-network-audit` adds bounded, redacted,
+experimental webrtc-rs diagnostic categories; default account mode omits them.
+No network/cryptographic behavior changes. A wrong-fingerprint native fixture
+checks rejection and failure capture. Real-host 6200 is not yet fixed.
+See [M3k-fix11](../../docs/NATIVE_M3K_FIX11.md).
+
 M3k-fix10 / 0.14.10 adds opt-in Cloudflare STUN to account modes via
 `--cloudflare-stun` after the report path. It fixes missing active-attempt reports
 and preserves four previous attempt diagnostics across retries, including native

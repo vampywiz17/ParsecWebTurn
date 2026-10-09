@@ -36,10 +36,16 @@ enum Mode {
     Transport,
     Control,
     Buffers,
+    #[cfg(test)]
+    DtlsFailure,
 }
 
 fn probe_mode(mode: Mode) -> Result<serde_json::Value> {
-    let control = !matches!(mode, Mode::Transport);
+    #[cfg(test)]
+    let dtls_failure = matches!(mode, Mode::DtlsFailure);
+    #[cfg(not(test))]
+    let dtls_failure = false;
+    let control = !matches!(mode, Mode::Transport) && !dtls_failure;
     let buffers = matches!(mode, Mode::Buffers);
     let mut config = Config::new();
     config
@@ -191,7 +197,12 @@ fn probe_mode(mode: Mode) -> Result<serde_json::Value> {
         let answer = runtime
             .block_on(peer.local_description())
             .context("server answer absent")?;
-        let remote = Description::from_parsec_remote_sdp(&answer.sdp)?;
+        let mut remote = Description::from_parsec_remote_sdp(&answer.sdp)?;
+        if dtls_failure {
+            // Synthetic negative peer: keep ICE valid but advertise a different
+            // certificate digest. Native fingerprint verification must reject it.
+            remote.credentials.fingerprint = format!("sha-256 {}", ["00"; 32].join(":"));
+        }
         for (ptr, value) in [
             (1000, &remote.credentials.ufrag),
             (1300, &remote.credentials.password),
@@ -252,7 +263,7 @@ fn probe_mode(mode: Mode) -> Result<serde_json::Value> {
         let mut ack = false;
         let mut buffer_retry = false;
         let mut connected_event = false;
-        while Instant::now() < deadline && (local_count == 0 || !ack) {
+        while Instant::now() < deadline && (local_count == 0 || (!dtls_failure && !ack)) {
             if !buffer_retry && poll.call(&mut store, 1).is_err() {
                 buffer_retry = true;
             }
@@ -286,8 +297,37 @@ fn probe_mode(mode: Mode) -> Result<serde_json::Value> {
                 local_count += 1;
             }
         }
-        if local_count == 0 || !ack || !buffer_retry {
+        if local_count == 0 || (!dtls_failure && (!ack || !buffer_retry)) {
             bail!("guest candidate exchange/sync/copy retry incomplete");
+        }
+        if dtls_failure {
+            let mut attempt = backend
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .native_attempt
+                .take()
+                .context("negative native attempt absent")?;
+            let until = Instant::now() + Duration::from_secs(10);
+            while attempt.failure_stage().is_none() && Instant::now() < until {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            let failure = attempt.snapshot();
+            if failure["failure_stage"] != "dtls-transport"
+                || failure["transport_states_at_failure"]["dtls"] != "failed"
+                || failure["transport_states_at_failure"]["peer"] != "failed"
+                || failure["channels_open"] != 0
+            {
+                bail!(
+                    "DTLS failure callback lost fresh states or allowed unauthenticated channels"
+                );
+            }
+            attempt.cancel();
+            attempt.wait_finished(Duration::from_secs(10))?;
+            if attempt.snapshot()["peer_closed"] != true {
+                bail!("negative native attempt did not close");
+            }
+            return Ok(serde_json::json!({"dtls_failure_capture_verified":true,
+                "fingerprint_rejection_verified":true,"native_failure":failure}));
         }
         let control_report = if control {
             Some(control_exchange(
@@ -453,7 +493,8 @@ fn probe_mode(mode: Mode) -> Result<serde_json::Value> {
         .block_on(async { tokio::time::timeout(Duration::from_secs(5), peer.close()).await })??;
     let mut report = checked?;
     report["compact_credentials_normalization_verified"] = serde_json::json!(!control);
-    report["parsec_padded_ufrag_native_negotiation_verified"] = serde_json::json!(!control);
+    report["parsec_padded_ufrag_native_negotiation_verified"] =
+        serde_json::json!(!control && !dtls_failure);
     report["live_attempt_reporting_verified"] = serde_json::json!(true);
     if peer.connection_state() != RTCPeerConnectionState::Closed {
         bail!("test server did not close");
@@ -772,6 +813,17 @@ fn buffer_exchange(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn native_dtls_failure_retains_callback_state_and_rejects_wrong_fingerprint() {
+        let report = super::probe_mode(super::Mode::DtlsFailure).unwrap();
+        assert_eq!(report["fingerprint_rejection_verified"], true);
+        assert_eq!(report["dtls_failure_capture_verified"], true);
+        assert_eq!(report["peers_closed"], true);
+        assert_eq!(
+            report["native_failure"]["transport_states_at_failure"]["ice"],
+            "connected"
+        );
+    }
     #[test]
     fn invalid_remote_ufrag_retains_only_shape_and_keeps_guest_alive() {
         use wasmtime::{Config, Engine, Module};

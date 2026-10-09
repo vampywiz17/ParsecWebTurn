@@ -32,6 +32,7 @@ mod thread_probe;
 mod threads;
 mod tls_probe;
 mod transport;
+mod transport_diagnostics;
 mod wait;
 mod websocket;
 mod websocket_probe;
@@ -107,6 +108,8 @@ struct Report {
     threads: Vec<threads::ThreadRecord>,
     thread_runtime: Option<threads::ThreadSummary>,
     native_backend: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    native_transport_diagnostics: Option<transport_diagnostics::Snapshot>,
     network_audit: Option<network_audit::Snapshot>,
     local_platform: Option<platform::Snapshot>,
     synthetic_login_steps: usize,
@@ -300,6 +303,8 @@ fn run() -> Result<()> {
     if args.next().is_some() {
         bail!("too many arguments");
     }
+    // Supplementary pinned-library diagnostics are explicit opt-in only.
+    let transport_logger = (mode == "account-network-audit").then(transport_diagnostics::enable);
     let bytes = fs::read(&path).context("reading WASM")?;
     let hash = format!("{:x}", Sha256::digest(&bytes));
     if hash != PINNED_SHA256 {
@@ -359,6 +364,7 @@ fn run() -> Result<()> {
         threads: Vec::new(),
         thread_runtime: None,
         native_backend: None,
+        native_transport_diagnostics: None,
         network_audit: None,
         local_platform: None,
         synthetic_login_steps: 0,
@@ -499,6 +505,7 @@ fn run() -> Result<()> {
         );
         report.host = Some(store.into_data());
     }
+    report.native_transport_diagnostics = transport_logger.map(transport_diagnostics::snapshot);
     if audit_mode {
         // Keep the dedicated account-flow audit independent of guest strings,
         // window titles, filenames and potentially sensitive exception details.
