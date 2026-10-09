@@ -90,6 +90,11 @@ pub fn dispatch(
                             .unwrap_or_else(|e| e.into_inner())
                             .remove(handle)?;
                         output.stop();
+                        window
+                            .audio_registry
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .retain_snapshot(output.snapshot());
                         caller.data_mut().audio_output.playback = Some(output.snapshot());
                         memory.set_u32(pointer, 0)?;
                     }

@@ -30,8 +30,22 @@ pub struct Snapshot {
 pub struct Registry {
     next: u32,
     outputs: BTreeMap<u32, Arc<Playback>>,
+    completed: VecDeque<Snapshot>,
 }
 impl Registry {
+    pub fn snapshots(&self) -> Vec<Snapshot> {
+        self.completed
+            .iter()
+            .cloned()
+            .chain(self.outputs.values().map(|v| v.snapshot()))
+            .collect()
+    }
+    pub fn retain_snapshot(&mut self, snapshot: Snapshot) {
+        if self.completed.len() == 8 {
+            self.completed.pop_front();
+        }
+        self.completed.push_back(snapshot);
+    }
     pub fn insert(&mut self, output: Playback) -> Result<u32> {
         if self.outputs.len() >= 4 {
             bail!("audio context limit");

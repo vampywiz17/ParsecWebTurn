@@ -20,6 +20,7 @@ pub struct Renderer {
     ps: ID3D11PixelShader,
     layout: ID3D11InputLayout,
     blend: ID3D11BlendState,
+    depth: ID3D11DepthStencilState,
     raster: ID3D11RasterizerState,
     sampler: ID3D11SamplerState,
     buffer: Option<ID3D11Buffer>,
@@ -99,6 +100,28 @@ impl Renderer {
             DepthClipEnable: true.into(),
             ..Default::default()
         };
+        let mut depth = None;
+        device.CreateDepthStencilState(
+            &D3D11_DEPTH_STENCIL_DESC {
+                DepthEnable: false.into(),
+                DepthWriteMask: D3D11_DEPTH_WRITE_MASK_ZERO,
+                DepthFunc: D3D11_COMPARISON_ALWAYS,
+                FrontFace: D3D11_DEPTH_STENCILOP_DESC {
+                    StencilFailOp: D3D11_STENCIL_OP_KEEP,
+                    StencilDepthFailOp: D3D11_STENCIL_OP_KEEP,
+                    StencilPassOp: D3D11_STENCIL_OP_KEEP,
+                    StencilFunc: D3D11_COMPARISON_ALWAYS,
+                },
+                BackFace: D3D11_DEPTH_STENCILOP_DESC {
+                    StencilFailOp: D3D11_STENCIL_OP_KEEP,
+                    StencilDepthFailOp: D3D11_STENCIL_OP_KEEP,
+                    StencilPassOp: D3D11_STENCIL_OP_KEEP,
+                    StencilFunc: D3D11_COMPARISON_ALWAYS,
+                },
+                ..Default::default()
+            },
+            Some(&mut depth),
+        )?;
         let mut raster = None;
         device.CreateRasterizerState(&desc, Some(&mut raster))?;
         let desc = D3D11_SAMPLER_DESC {
@@ -119,6 +142,7 @@ impl Renderer {
             ps: ps.unwrap(),
             layout: layout.unwrap(),
             blend: blend.unwrap(),
+            depth: depth.unwrap(),
             raster: raster.unwrap(),
             sampler: sampler.unwrap(),
             buffer: None,
@@ -191,6 +215,7 @@ impl Renderer {
                     CPUAccessFlags: D3D11_CPU_ACCESS_WRITE.0 as u32,
                     ..Default::default()
                 };
+                self.buffer = None;
                 self.device
                     .CreateBuffer(&desc, None, Some(&mut self.buffer))?;
             }
@@ -210,9 +235,10 @@ impl Renderer {
         let mut target = None;
         self.device
             .CreateRenderTargetView(back, None, Some(&mut target))?;
+        let _bindings = Bindings(self.context.clone());
         self.context.OMSetRenderTargets(Some(&[target]), None);
         self.context.OMSetBlendState(&self.blend, None, u32::MAX);
-        self.context.OMSetDepthStencilState(None, 0);
+        self.context.OMSetDepthStencilState(&self.depth, 0);
         self.context.RSSetState(&self.raster);
         self.context.RSSetViewports(Some(&[D3D11_VIEWPORT {
             Width: size.0 as f32,
@@ -251,5 +277,15 @@ impl Renderer {
         self.textures
             .retain(|version, _| frame.batches.iter().any(|b| b.texture.version == *version));
         Ok(frame.batches.len() as u64)
+    }
+}
+
+struct Bindings(ID3D11DeviceContext);
+impl Drop for Bindings {
+    fn drop(&mut self) {
+        unsafe {
+            self.0.PSSetShaderResources(0, Some(&[None]));
+            self.0.OMSetRenderTargets(None, None);
+        }
     }
 }

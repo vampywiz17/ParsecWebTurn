@@ -132,6 +132,8 @@ struct Report {
     native_video_output: Option<video_output::Snapshot>,
     #[cfg(windows)]
     native_overlay: Option<overlay::Report>,
+    #[cfg(windows)]
+    native_audio_outputs: Vec<audio_windows::Snapshot>,
     video_rendered: bool,
     host: Option<HostState>,
     threads: Vec<threads::ThreadRecord>,
@@ -461,6 +463,8 @@ fn run() -> Result<()> {
         native_video_output: None,
         #[cfg(windows)]
         native_overlay: None,
+        #[cfg(windows)]
+        native_audio_outputs: Vec::new(),
         video_rendered: false,
         host: None,
         threads: Vec::new(),
@@ -597,6 +601,11 @@ fn run() -> Result<()> {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .clone();
+            report.native_audio_outputs = window
+                .audio_registry
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .snapshots();
             report.native_overlay = Some(
                 window
                     .overlay
