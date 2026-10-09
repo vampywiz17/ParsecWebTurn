@@ -330,18 +330,15 @@ impl Backend {
                     };
                     if ready {
                         worker.submit(packet);
-                    } else {
                         self.media_ingress.packets_discarded_decoder_unavailable = self
                             .media_ingress
                             .packets_discarded_decoder_unavailable
-                            .saturating_add(1);
+                            .saturating_sub(1);
+                    } else {
+                        drop(packet);
                     }
                     continue;
                 }
-                self.media_ingress.packets_discarded_decoder_unavailable = self
-                    .media_ingress
-                    .packets_discarded_decoder_unavailable
-                    .saturating_add(1);
                 drop(packet);
             }
         }

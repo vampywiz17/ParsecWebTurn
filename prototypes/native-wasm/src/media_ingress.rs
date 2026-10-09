@@ -125,7 +125,10 @@ impl Queue {
     }
 
     pub fn push(&mut self, channel: u16, bytes: &[u8], ingress: &mut Ingress) {
-        ingress.received(channel, bytes.len());
+        // Count as unavailable until the backend successfully hands the
+        // bounded packet to an active native decoder. This preserves accurate
+        // diagnostics even if no UI pump ever drains the queue.
+        ingress.unavailable(channel, bytes.len());
         match channel {
             1 => {
                 let Some(keyframe) = self.classifier.classify(bytes) else {
