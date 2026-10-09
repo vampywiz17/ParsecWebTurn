@@ -54,7 +54,7 @@ impl Decoder {
                 0,
             )
         };
-        if frames <= 0 || frames > 5760 {
+        if !(1..=5760).contains(&frames) {
             bail!("Opus packet rejected");
         }
         pcm.truncate(frames as usize * 2);

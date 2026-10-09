@@ -118,7 +118,9 @@ pub fn dispatch(
                                 .context("missing audio PCM")? as u32;
                         let bytes = memory.read(address, frames as usize * 4)?;
                         let pcm: Vec<i16> = bytes
-                            .chunks_exact(2)
+                            .as_chunks::<2>()
+                            .0
+                            .iter()
                             .map(|b| i16::from_le_bytes([b[0], b[1]]))
                             .collect();
                         output.queue(&pcm);

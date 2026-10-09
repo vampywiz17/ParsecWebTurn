@@ -209,7 +209,7 @@ impl Capture {
                 }
                 let bytes = m.read(u(3)?, 64)?;
                 let mut values = [0.; 16];
-                for (n, b) in bytes.chunks_exact(4).enumerate() {
+                for (n, b) in bytes.as_chunks::<4>().0.iter().enumerate() {
                     values[n] = f32::from_le_bytes(b.try_into()?);
                 }
                 if values.iter().any(|v| !v.is_finite()) {
@@ -261,6 +261,9 @@ impl Capture {
         {
             return Ok(());
         };
+        if count == 0 {
+            return Ok(());
+        }
         if mode != glow::TRIANGLES || count > 300_000 || self.frame.batches.len() >= 512 {
             bail!("UI draw limit");
         }
@@ -373,12 +376,14 @@ impl Capture {
 mod tests {
     use super::*;
     fn triangle() -> Capture {
-        let mut capture = Capture::default();
-        capture.program = 1;
-        capture.elements = 2;
-        capture.texture = 3;
-        capture.viewport = [0, 0, 100, 100];
-        capture.scissor = Some([20, 30, 40, 50]);
+        let mut capture = Capture {
+            program: 1,
+            elements: 2,
+            texture: 3,
+            viewport: [0, 0, 100, 100],
+            scissor: Some([20, 30, 40, 50]),
+            ..Default::default()
+        };
         let mut vertices = Vec::new();
         for (x, y) in [(0.0f32, 0.0f32), (1., 0.), (0., 1.)] {
             vertices.extend_from_slice(&x.to_le_bytes());
