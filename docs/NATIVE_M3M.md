@@ -45,7 +45,9 @@ A successful DXGI present is a submitted presentation, not proof of monitor scan
 Hardware-decode utilization is unknown (null): D3D11-backed output alone is not
 presented as a measured GPU decode-engine utilization or independent proof.
 
-The standalone video-hardware-probe uses eight locally generated synthetic
+The standalone video-hardware-probe uses a plain Win32 window without a WGL
+pixel-format requirement; the production account UI still requires accelerated
+OpenGL. The probe uses eight locally generated synthetic
 1920x1080 High-profile H.264 pictures (one IDR, seven delta pictures) and no network/account. It tests actual decode, NV12 texture
 output, color conversion and presentation. Only this offline probe may read a
 small set of synthetic backbuffer pixels once to verify variation; live sessions

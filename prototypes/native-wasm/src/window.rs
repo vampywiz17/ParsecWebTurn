@@ -63,6 +63,21 @@ impl Window {
         online: bool,
         network_origin_audit: bool,
     ) -> Result<Arc<Self>> {
+        Self::create_mode(synthetic_login, live, online, network_origin_audit, true)
+    }
+
+    // The standalone D3D11 test has no OpenGL UI and must not depend on WGL.
+    pub fn create_video_probe() -> Result<Arc<Self>> {
+        Self::create_mode(false, true, false, false, false)
+    }
+
+    fn create_mode(
+        synthetic_login: bool,
+        live: bool,
+        online: bool,
+        network_origin_audit: bool,
+        opengl_required: bool,
+    ) -> Result<Arc<Self>> {
         let state = Arc::new(Self {
             hwnd: AtomicUsize::new(0),
             closing: AtomicBool::new(false),
@@ -99,7 +114,7 @@ impl Window {
         std::thread::spawn(move || {
             // SAFETY: all window creation/destruction and message dispatch run
             // on this thread. Arc keeps the userdata alive until dispatch ends.
-            let outcome = unsafe { create_window(&ui) };
+            let outcome = unsafe { create_window(&ui, opengl_required) };
             match outcome {
                 Ok(hwnd) => {
                     ui.hwnd.store(hwnd as usize, Ordering::Release);
@@ -255,7 +270,7 @@ impl Window {
     }
 }
 
-unsafe fn create_window(state: &Arc<Window>) -> Result<HWND> {
+unsafe fn create_window(state: &Arc<Window>, opengl_required: bool) -> Result<HWND> {
     let instance = GetModuleHandleW(std::ptr::null());
     let name: Vec<u16> = "ParsecNativePrototype\0".encode_utf16().collect();
     let class = WNDCLASSW {
@@ -289,29 +304,32 @@ unsafe fn create_window(state: &Arc<Window>) -> Result<HWND> {
     if hwnd.is_null() {
         bail!("CreateWindowExW failed: {}", GetLastError());
     }
-    let dc = GetDC(hwnd);
-    let descriptor = PIXELFORMATDESCRIPTOR {
-        nSize: std::mem::size_of::<PIXELFORMATDESCRIPTOR>() as u16,
-        nVersion: 1,
-        dwFlags: PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER,
-        iPixelType: PFD_TYPE_RGBA,
-        cColorBits: 32,
-        cAlphaBits: 8,
-        ..std::mem::zeroed()
-    };
-    let format = ChoosePixelFormat(dc, &descriptor);
-    let mut actual: PIXELFORMATDESCRIPTOR = std::mem::zeroed();
-    let described = DescribePixelFormat(
-        dc,
-        format,
-        std::mem::size_of_val(&actual) as u32,
-        &mut actual,
-    );
-    let configured = format != 0 && described != 0 && SetPixelFormat(dc, format, &descriptor) != 0;
-    ReleaseDC(hwnd, dc);
-    if !configured || actual.dwFlags & PFD_GENERIC_FORMAT != 0 {
-        DestroyWindow(hwnd);
-        bail!("A native accelerated OpenGL pixel format is required; no software fallback");
+    if opengl_required {
+        let dc = GetDC(hwnd);
+        let descriptor = PIXELFORMATDESCRIPTOR {
+            nSize: std::mem::size_of::<PIXELFORMATDESCRIPTOR>() as u16,
+            nVersion: 1,
+            dwFlags: PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER,
+            iPixelType: PFD_TYPE_RGBA,
+            cColorBits: 32,
+            cAlphaBits: 8,
+            ..std::mem::zeroed()
+        };
+        let format = ChoosePixelFormat(dc, &descriptor);
+        let mut actual: PIXELFORMATDESCRIPTOR = std::mem::zeroed();
+        let described = DescribePixelFormat(
+            dc,
+            format,
+            std::mem::size_of_val(&actual) as u32,
+            &mut actual,
+        );
+        let configured =
+            format != 0 && described != 0 && SetPixelFormat(dc, format, &descriptor) != 0;
+        ReleaseDC(hwnd, dc);
+        if !configured || actual.dwFlags & PFD_GENERIC_FORMAT != 0 {
+            DestroyWindow(hwnd);
+            bail!("A native accelerated OpenGL pixel format is required; no software fallback");
+        }
     }
     let mut rect: RECT = std::mem::zeroed();
     GetClientRect(hwnd, &mut rect);

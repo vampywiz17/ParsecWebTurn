@@ -824,7 +824,7 @@ impl Renderer {
 /// No account, network or real content: create and release the actual GPU path.
 pub fn probe() -> anyhow::Result<serde_json::Value> {
     use std::sync::atomic::Ordering;
-    let window = crate::window::Window::create(false, true, false, false)?;
+    let window = crate::window::Window::create_video_probe()?;
     let pipeline = Pipeline::start_mode(window.clone(), true);
     let fixture = include_bytes!("../fixtures/synthetic-1920x1080.h264");
     let mut starts = Vec::new();
