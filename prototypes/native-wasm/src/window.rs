@@ -21,6 +21,7 @@ pub enum Event {
     Text(u32),
     Key(bool, &'static str, i32),
     Scroll(i32, i32),
+    Fullscreen(bool),
 }
 
 pub struct Window {
@@ -42,6 +43,9 @@ pub struct Window {
     cursor_pending: Mutex<crate::cursor::Pending>,
     cursor_posted: AtomicBool,
     cursor: Mutex<crate::cursor::State>,
+    fullscreen: Mutex<crate::fullscreen::State>,
+    fullscreen_active: AtomicBool,
+    fullscreen_pending: AtomicUsize,
 }
 
 impl Window {
@@ -65,6 +69,9 @@ impl Window {
             cursor_pending: Default::default(),
             cursor_posted: AtomicBool::new(false),
             cursor: Default::default(),
+            fullscreen: Default::default(),
+            fullscreen_active: AtomicBool::new(false),
+            fullscreen_pending: AtomicUsize::new(0),
         });
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         let ui = state.clone();
@@ -132,6 +139,23 @@ impl Window {
             unsafe {
                 if PostMessageW(self.handle(), WM_APP + 2, 0, 0) == 0 {
                     self.cursor_posted.store(false, Ordering::Release);
+                }
+            }
+        }
+    }
+    pub fn set_fullscreen(&self, enable: bool) {
+        if self.closing.load(Ordering::Acquire) {
+            return;
+        }
+        // One outstanding UI message, with the latest requested state.
+        if self
+            .fullscreen_pending
+            .swap(if enable { 2 } else { 1 }, Ordering::AcqRel)
+            == 0
+        {
+            unsafe {
+                if PostMessageW(self.handle(), WM_APP + 3, 0, 0) == 0 {
+                    self.fullscreen_pending.store(0, Ordering::Release);
                 }
             }
         }
@@ -255,6 +279,26 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
                 s.cursor.lock().unwrap_or_else(|e| e.into_inner()).select();
                 return 1;
             }
+            m if m == WM_APP + 3 => {
+                let pending = s.fullscreen_pending.swap(0, Ordering::AcqRel);
+                if pending != 0 {
+                    let mut fullscreen = s.fullscreen.lock().unwrap_or_else(|e| e.into_inner());
+                    // Like a rejected browser fullscreen request, an OS failure
+                    // leaves the guest running and reports the retained state.
+                    let _ = fullscreen.set(hwnd, pending == 2);
+                    let active = fullscreen.active();
+                    s.fullscreen_active.store(active, Ordering::Release);
+                    s.push(Event::Fullscreen(active));
+                }
+                return 0;
+            }
+            WM_KEYDOWN if wp as u32 == VK_F11 as u32 => {
+                if lp & (1 << 30) == 0 {
+                    s.set_fullscreen(!s.fullscreen_active.load(Ordering::Acquire));
+                }
+                return 0;
+            }
+            WM_KEYUP if wp as u32 == VK_F11 as u32 => return 0,
             WM_SIZE => {
                 let w = (lp as u32 & 0xffff) as i32;
                 let h = ((lp as u32 >> 16) & 0xffff) as i32;

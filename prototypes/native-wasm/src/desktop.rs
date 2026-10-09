@@ -279,6 +279,9 @@ fn run_loop(store: &mut Store<HostState>, instance: &Instance, input: bool) -> R
                 .collect::<Vec<_>>();
             for event in events {
                 let (name, values) = match event {
+                    Event::Fullscreen(active) => {
+                        ("mty_window_update_fullscreen", vec![app, active as i32])
+                    }
                     Event::Size(w, h) => {
                         export(
                             store,

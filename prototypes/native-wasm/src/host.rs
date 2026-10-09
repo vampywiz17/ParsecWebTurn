@@ -79,7 +79,7 @@ impl HostState {
 
 pub fn implemented(module: &str, name: &str) -> bool {
     #[cfg(windows)]
-    if module == "env" && crate::cursor::handles(name) {
+    if module == "env" && (crate::cursor::handles(name) || name == "web_set_fullscreen") {
         return true;
     }
     if disabled_web_stub(module, name) {
@@ -205,6 +205,14 @@ pub fn dispatch(
     }
     let id = format!("{module}::{name}");
     *caller.data_mut().calls.entry(id.clone()).or_default() += 1;
+    #[cfg(windows)]
+    if module == "env" && name == "web_set_fullscreen" {
+        let enable = int(args, 0)? != 0;
+        if let Some(window) = &caller.data().window {
+            window.set_fullscreen(enable);
+        }
+        return Ok(());
+    }
     #[cfg(windows)]
     if module == "env" && crate::cursor::handles(name) {
         // Invalid/unsupported images fall back to the system arrow, just as a

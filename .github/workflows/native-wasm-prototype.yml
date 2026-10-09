@@ -119,6 +119,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Guest local desktop imports failed' }
           $platform = Get-Content "$artifact/guest-platform.json" -Raw | ConvertFrom-Json
           if (!$platform.unicode_clipboard_imports_verified -or !$platform.guest_owned_clipboard_buffers_verified -or !$platform.https_link_import_verified -or !$platform.unsafe_link_rejected_verified -or !$platform.alert_import_verified -or !$platform.forward_key_alias_verified -or !$platform.disabled_clipboard_verified -or $platform.real_clipboard_accessed -or $platform.browser_launched -or $platform.external_requests_enabled -or $platform.real_account_used) { throw 'Incorrect desktop import proof' }
+          & $exe guest-window-probe "$artifact/guest-window.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Native fullscreen bridge failed' }
+          $window = Get-Content "$artifact/guest-window.json" -Raw | ConvertFrom-Json
+          if ($window.fullscreen_roundtrips -ne 5 -or !$window.native_geometry_restored -or !$window.native_style_restored -or !$window.idempotent_requests_verified -or !$window.guest_import_verified -or $window.real_account_used -or $window.parsec_host_connected) { throw 'Incorrect fullscreen proof' }
       - uses: actions/upload-artifact@v4
         with:
           name: Native-WASM-prototype-win64

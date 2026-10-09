@@ -10,6 +10,8 @@ mod cursor;
 mod desktop;
 mod filesystem;
 #[cfg(windows)]
+mod fullscreen;
+#[cfg(windows)]
 mod graphics;
 mod host;
 mod http;
@@ -159,12 +161,22 @@ fn run() -> Result<()> {
             | "guest-audit-probe"
             | "guest-thread-probe"
             | "guest-platform-probe"
+            | "guest-window-probe"
     ) {
         let path = args.next().map(PathBuf::from);
         if args.next().is_some() {
             bail!("too many arguments");
         }
-        let report = if mode == "guest-platform-probe" {
+        let report = if mode == "guest-window-probe" {
+            #[cfg(windows)]
+            {
+                fullscreen::probe()?
+            }
+            #[cfg(not(windows))]
+            {
+                bail!("native window probe requires Windows");
+            }
+        } else if mode == "guest-platform-probe" {
             platform_probe::probe()?
         } else if mode == "guest-thread-probe" {
             thread_probe::probe()?
@@ -216,6 +228,7 @@ fn run() -> Result<()> {
                   parsec-native-wasm transport-probe [report.json]\n\
                   parsec-native-wasm signaling-probe [report.json]\n\
                   parsec-native-wasm guest-offer-probe [report.json]\n\
+                  parsec-native-wasm guest-window-probe [report.json]\n\
                   parsec-native-wasm guest-session-probe [report.json]\n\
                   parsec-native-wasm guest-control-probe [report.json]\n\
                   parsec-native-wasm guest-buffer-probe [report.json]\n\
