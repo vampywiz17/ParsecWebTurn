@@ -23,6 +23,11 @@ pub struct Snapshot {
     pub frames_submitted: u64,
     pub frames_decoded: u64,
     pub frames_presented: u64,
+    pub presentations_busy: u64,
+    pub presentations_not_visible: u64,
+    pub present_max_us: u64,
+    pub decode_feed_max_us: u64,
+    pub queue_peak_depth: usize,
     pub queue_depth: usize,
     pub queue_bytes: usize,
     pub waiting_for_idr: bool,
@@ -97,6 +102,7 @@ impl Queue {
             timestamp_100ns,
         });
         self.report.queue_depth = self.frames.len();
+        self.report.queue_peak_depth = self.report.queue_peak_depth.max(self.frames.len());
         true
     }
 

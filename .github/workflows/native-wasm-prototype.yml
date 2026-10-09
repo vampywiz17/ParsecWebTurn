@@ -71,6 +71,12 @@ jobs:
           if ($video.external_requests_enabled -or !$video.native_window_released -or !$video.gpu_resources_released -or !$video.video.worker_finished) { throw 'Native video probe cleanup failed' }
           if ($video.video.frames_presented -gt 0 -and (!$video.video.gpu_surface_output -or !$video.video.synthetic_pixel_variation_verified)) { throw 'GPU presentation proof incomplete' }
           if ($video.video.frames_presented -eq 0 -and !$video.video.failure_stage) { throw 'Missing video output without a diagnostic' }
+          & $exe video-hardware-probe "$artifact/video-sustained.json" --sustained
+          if ($LASTEXITCODE -ne 0) { throw 'Sustained video probe did not complete' }
+          $sustained = Get-Content "$artifact/video-sustained.json" -Raw | ConvertFrom-Json
+          if (!$sustained.sustained -or $sustained.external_requests_enabled -or !$sustained.native_window_released -or !$sustained.gpu_resources_released -or !$sustained.video.worker_finished) { throw 'Sustained video cleanup failed' }
+          if ($sustained.video.frames_decoded -gt 0 -and ($sustained.video.frames_decoded -ne 1024 -or $sustained.video.frames_presented -lt 1 -or $sustained.video.failure_stage -or $sustained.video.frames_dropped -ne 0 -or !$sustained.video.synthetic_pixel_variation_verified)) { throw 'Sustained GPU decode did not preserve reference pictures' }
+          if ($sustained.video.frames_decoded -eq 0 -and !$sustained.video.failure_stage) { throw 'Missing sustained GPU diagnostic' }
           & $exe transport-probe "$artifact/transport.json"
           if ($LASTEXITCODE -ne 0) { throw 'Native WebRTC transport failed' }
           $transport = Get-Content "$artifact/transport.json" -Raw | ConvertFrom-Json

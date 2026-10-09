@@ -1,3 +1,12 @@
+## M3m-fix1 / 0.16.1
+
+The first live-host report confirmed 434 decoded/presented 1080p frames before
+bounded encoded-input queue overflow. Presentation now uses documented nonblocking
+DXGI submission, preserving all decoder reference pictures while counting busy
+or non-visible display submissions separately. Timing and queue-peak diagnostics
+and a sustained 1,024-picture GPU probe were added. See
+[fix1 notes](../../docs/NATIVE_M3M_FIX1.md).
+
 ## M3m / 0.16.0
 
 Native H.264 decoding uses Media Foundation with D3D11 NV12 texture output and

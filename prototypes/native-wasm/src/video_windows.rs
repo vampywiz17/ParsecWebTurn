@@ -186,9 +186,14 @@ fn run(
             });
             session = Some(native);
         }
-        unsafe {
-            session.as_mut().unwrap().feed(&frame, shared, window)?;
-        }
+        let feed_started = Instant::now();
+        let result = unsafe { session.as_mut().unwrap().feed(&frame, shared, window) };
+        update(shared, |s| {
+            s.decode_feed_max_us = s
+                .decode_feed_max_us
+                .max(feed_started.elapsed().as_micros().min(u64::MAX as u128) as u64)
+        });
+        result?;
         *window
             .video_report
             .lock()
@@ -501,14 +506,20 @@ impl Session {
             });
             let presented = self
                 .renderer
-                .present(&texture, subresource, source, color)?;
+                .present(&texture, subresource, source, color, shared)?;
             update(shared, |s| {
                 s.synthetic_pixel_variation_verified = self.renderer.synthetic_pixels_verified
             });
-            if presented {
-                update(shared, |s| {
+            update(shared, |s| match presented {
+                Presentation::Presented => {
                     s.frames_presented = s.frames_presented.saturating_add(1)
-                });
+                }
+                Presentation::Busy => s.presentations_busy = s.presentations_busy.saturating_add(1),
+                Presentation::NotVisible => {
+                    s.presentations_not_visible = s.presentations_not_visible.saturating_add(1)
+                }
+            });
+            if presented == Presentation::Presented {
                 window.set_video_ready(true);
             }
         }
@@ -521,6 +532,24 @@ impl Drop for Session {
             let _ = self.decoder.ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH, 0);
         }
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Presentation {
+    Presented,
+    Busy,
+    NotVisible,
+}
+fn presentation_status(status: windows::core::HRESULT) -> Result<Presentation> {
+    if status == DXGI_ERROR_WAS_STILL_DRAWING {
+        return Ok(Presentation::Busy);
+    }
+    api("video-present", status.ok())?;
+    Ok(if status == windows::core::HRESULT(0) {
+        Presentation::Presented
+    } else {
+        Presentation::NotVisible
+    })
 }
 
 struct ProcessorCache {
@@ -653,7 +682,8 @@ impl Renderer {
         subresource: u32,
         source: RECT,
         color: u32,
-    ) -> Result<bool> {
+        shared: &Shared,
+    ) -> Result<Presentation> {
         let width = (source.right - source.left) as u32;
         let height = (source.bottom - source.top) as u32;
         let mut td = D3D11_TEXTURE2D_DESC::default();
@@ -815,14 +845,21 @@ impl Renderer {
         if self.verify_synthetic_pixels && !self.synthetic_pixels_verified {
             self.synthetic_pixels_verified = self.verify_pixels(&back, size)?;
         }
-        let status = self.swap.Present(1, DXGI_PRESENT(0));
-        api("video-present", status.ok())?;
-        Ok(status == windows::core::HRESULT(0))
+        // Never pace reference-picture decoding against display refresh. A busy
+        // swap chain skips only this display submission, not encoded pictures.
+        let started = Instant::now();
+        let status = self.swap.Present(0, DXGI_PRESENT_DO_NOT_WAIT);
+        update(shared, |s| {
+            s.present_max_us = s
+                .present_max_us
+                .max(started.elapsed().as_micros().min(u64::MAX as u128) as u64)
+        });
+        presentation_status(status)
     }
 }
 
 /// No account, network or real content: create and release the actual GPU path.
-pub fn probe() -> anyhow::Result<serde_json::Value> {
+pub fn probe(sustained: bool) -> anyhow::Result<serde_json::Value> {
     use std::sync::atomic::Ordering;
     let window = crate::window::Window::create_video_probe()?;
     let pipeline = Pipeline::start_mode(window.clone(), true);
@@ -836,24 +873,36 @@ pub fn probe() -> anyhow::Result<serde_json::Value> {
     anyhow::ensure!(starts.len() == 8, "synthetic fixture access unit count");
     starts.push(fixture.len());
     let mut inspector = crate::video_stream::Inspector::default();
-    for pair in starts.windows(2) {
-        let bytes = &fixture[pair[0]..pair[1]];
-        let info = inspector
-            .receive(bytes)
-            .ok_or_else(|| anyhow::anyhow!("invalid synthetic Annex B fixture"))?;
-        pipeline.submit(bytes, info);
-        std::thread::sleep(Duration::from_millis(40));
+    let cycles = if sustained { 128 } else { 1 };
+    'feeding: for _ in 0..cycles {
+        for pair in starts.windows(2) {
+            let bytes = &fixture[pair[0]..pair[1]];
+            let info = inspector
+                .receive(bytes)
+                .ok_or_else(|| anyhow::anyhow!("invalid synthetic Annex B fixture"))?;
+            pipeline.submit(bytes, info);
+            std::thread::sleep(if sustained {
+                Duration::from_micros(8333)
+            } else {
+                Duration::from_millis(40)
+            });
+            if pipeline.snapshot().failure_stage.is_some() {
+                break 'feeding;
+            }
+        }
     }
     let framing = inspector.snapshot();
     anyhow::ensure!(
-        framing.idr_messages == 1 && framing.sps_profile_idc == Some(100),
+        framing.idr_messages > 0 && framing.sps_profile_idc == Some(100),
         "synthetic high-profile reference-picture fixture"
     );
     let until = Instant::now() + Duration::from_secs(12);
     while Instant::now() < until {
         let report = pipeline.snapshot();
         if report.failure_stage.is_some()
-            || (report.frames_presented == 8 && report.synthetic_pixel_variation_verified)
+            || (report.frames_decoded == cycles * 8
+                && report.frames_presented > 0
+                && report.synthetic_pixel_variation_verified)
         {
             break;
         }
@@ -875,7 +924,30 @@ pub fn probe() -> anyhow::Result<serde_json::Value> {
     }
     Ok(
         serde_json::json!({"scope":"synthetic-native-h264-d3d11", "external_requests_enabled":false,"real_account_used":false,
-        "cpu_readback_live_enabled":false,"synthetic_fixture_frames":8,"synthetic_fixture_idr_frames":framing.idr_messages,"video":report,
+        "cpu_readback_live_enabled":false,"sustained":sustained,"synthetic_fixture_frames":cycles*8,"synthetic_fixture_idr_frames":framing.idr_messages,"video":report,
         "native_window_released":window.handle().is_null(),"gpu_resources_released":released}),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn busy_or_occluded_presentation_is_not_a_decoder_failure() {
+        assert_eq!(
+            presentation_status(windows::core::HRESULT(0)).unwrap(),
+            Presentation::Presented
+        );
+        assert_eq!(
+            presentation_status(DXGI_ERROR_WAS_STILL_DRAWING).unwrap(),
+            Presentation::Busy
+        );
+        assert_eq!(
+            presentation_status(DXGI_STATUS_OCCLUDED).unwrap(),
+            Presentation::NotVisible
+        );
+        let error = presentation_status(DXGI_ERROR_DEVICE_REMOVED).unwrap_err();
+        assert_eq!(error.stage, "video-present");
+        assert!(error.hresult.is_some());
+    }
 }
