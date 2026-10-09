@@ -414,8 +414,13 @@ impl Attempt {
         state.events.clear();
         state.messages.clear();
         state.message_bytes = 0;
-        if let Some(queue) = &mut state.media_queue {
-            queue.clear(&mut state.media_ingress);
+        let Completion {
+            media_queue,
+            media_ingress,
+            ..
+        } = &mut *state;
+        if let Some(queue) = media_queue {
+            queue.clear(media_ingress);
         }
         if let Some(output) = state.output.take() {
             if output.finish(None).is_err() {
