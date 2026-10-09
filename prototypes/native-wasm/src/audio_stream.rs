@@ -184,4 +184,28 @@ mod tests {
         assert!(decoder.decode(&[]).is_err());
         assert!(decoder.decode(&[3]).is_err());
     }
+    #[test]
+    fn decoded_audio_is_retained_until_a_valid_guest_copy_and_released_on_stop() {
+        let mut config = wasmtime::Config::new();
+        config.wasm_threads(true);
+        let engine = wasmtime::Engine::new(&config).unwrap();
+        let memory = crate::memory::GuestMemory(
+            wasmtime::SharedMemory::new(&engine, wasmtime::MemoryType::shared(1, 1)).unwrap(),
+        );
+        let mut pipeline = Pipeline::start();
+        assert!(pipeline.submit(&[0xf8, 0xff, 0xfe]));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while pipeline.snapshot().packets_decoded == 0 && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(pipeline.snapshot().queued_samples, 1920);
+        assert!(pipeline.poll(&memory, 0, 1919).is_err());
+        assert!(pipeline.poll(&memory, u32::MAX, 1920).is_err());
+        assert_eq!(pipeline.snapshot().queued_samples, 1920);
+        assert_eq!(pipeline.poll(&memory, 0, 1920).unwrap(), 960);
+        assert_eq!(pipeline.poll(&memory, 0, 1920).unwrap(), 0);
+        pipeline.stop();
+        assert!(pipeline.snapshot().worker_finished);
+        assert_eq!(pipeline.snapshot().queued_samples, 0);
+    }
 }

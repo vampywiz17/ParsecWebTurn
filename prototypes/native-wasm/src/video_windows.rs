@@ -665,6 +665,13 @@ impl Renderer {
             context.Map(&staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped)),
         )?;
         let valid = !mapped.pData.is_null() && mapped.RowPitch >= size.0 * 4;
+        let overlay_verified = if valid {
+            let p = (mapped.pData as *const u8)
+                .add(((size.1 / 16) * mapped.RowPitch + (size.0 / 16) * 4) as usize);
+            *p < 4 && *p.add(1) < 4 && *p.add(2) > 250
+        } else {
+            false
+        };
         let mut colors = std::collections::BTreeSet::new();
         if valid {
             for row in 1..8u32 {
@@ -677,7 +684,7 @@ impl Renderer {
             }
         }
         context.Unmap(&staging, 0);
-        Ok(valid && colors.len() > 8)
+        Ok(valid && colors.len() > 8 && overlay_verified)
     }
 
     unsafe fn present(
@@ -850,9 +857,6 @@ impl Renderer {
         );
         ManuallyDrop::drop(&mut stream.pInputSurface);
         api("video-processor-blt", result)?;
-        if self.verify_synthetic_pixels && !self.synthetic_pixels_verified {
-            self.synthetic_pixels_verified = self.verify_pixels(&back, size)?;
-        }
         if !self.overlay_failed {
             let frame = {
                 window
@@ -881,6 +885,9 @@ impl Renderer {
                 }
             }
         }
+        if self.verify_synthetic_pixels && !self.synthetic_pixels_verified {
+            self.synthetic_pixels_verified = self.verify_pixels(&back, size)?;
+        }
         // Never pace reference-picture decoding against display refresh. A busy
         // swap chain skips only this display submission, not encoded pictures.
         let started = Instant::now();
@@ -898,6 +905,39 @@ impl Renderer {
 pub fn probe(sustained: bool) -> anyhow::Result<serde_json::Value> {
     use std::sync::atomic::Ordering;
     let window = crate::window::Window::create_video_probe()?;
+    // Test a real alpha-blended D3D11 GUI pass over GPU-decoded video.
+    let texture = Arc::new(crate::overlay::Texture {
+        version: 1,
+        width: 1,
+        height: 1,
+        rgba: vec![255; 4],
+    });
+    let mut vertices = Vec::new();
+    for (x, y) in [
+        (-1.0f32, 1.0f32),
+        (-0.75, 1.0),
+        (-0.75, 0.75),
+        (-1.0, 1.0),
+        (-0.75, 0.75),
+        (-1.0, 0.75),
+    ] {
+        vertices.extend_from_slice(&x.to_le_bytes());
+        vertices.extend_from_slice(&y.to_le_bytes());
+        vertices.extend_from_slice(&[0; 8]);
+        vertices.extend_from_slice(&[255, 0, 0, 255]);
+    }
+    window
+        .overlay
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .frame = Arc::new(crate::overlay::Frame {
+        size: (1024, 720),
+        batches: vec![crate::overlay::Batch {
+            vertices,
+            texture,
+            clip: [0, 0, 1024, 720],
+        }],
+    });
     let pipeline = Pipeline::start_mode(window.clone(), true);
     let fixture = include_bytes!("../fixtures/synthetic-1920x1080.h264");
     let mut starts = Vec::new();
@@ -960,7 +1000,7 @@ pub fn probe(sustained: bool) -> anyhow::Result<serde_json::Value> {
     }
     Ok(
         serde_json::json!({"scope":"synthetic-native-h264-d3d11", "external_requests_enabled":false,"real_account_used":false,
-        "cpu_readback_live_enabled":false,"sustained":sustained,"synthetic_fixture_frames":cycles*8,"synthetic_fixture_idr_frames":framing.idr_messages,"video":report,
+        "cpu_readback_live_enabled":false,"synthetic_overlay":window.overlay.lock().unwrap_or_else(|e|e.into_inner()).report.clone(),"sustained":sustained,"synthetic_fixture_frames":cycles*8,"synthetic_fixture_idr_frames":framing.idr_messages,"video":report,
         "native_window_released":window.handle().is_null(),"gpu_resources_released":released}),
     )
 }

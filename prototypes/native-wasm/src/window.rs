@@ -254,7 +254,7 @@ impl Window {
                 return;
             }
             SetCursor(std::ptr::null_mut());
-        } else {
+        } else if self.relative_mouse.load(Ordering::Acquire) {
             ClipCursor(std::ptr::null());
         }
         if self.relative_mouse.swap(acquired, Ordering::AcqRel) != acquired {
@@ -462,7 +462,11 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
                         && point.y >= rect.top
                         && point.y < rect.bottom
                     {
-                        cursor.select();
+                        if s.relative_mouse.load(Ordering::Acquire) {
+                            SetCursor(std::ptr::null_mut());
+                        } else {
+                            cursor.select();
+                        }
                     }
                 }
                 return 0;
@@ -605,7 +609,11 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
                     );
                 }
                 s.push(Event::Size(w, h));
+                if s.relative_mouse.load(Ordering::Acquire) {
+                    s.apply_relative_mouse(w > 0 && h > 0);
+                }
             }
+            WM_MOVE if s.relative_mouse.load(Ordering::Acquire) => s.apply_relative_mouse(true),
             WM_SETFOCUS => s.push(Event::Focus(true)),
             WM_KILLFOCUS => {
                 s.apply_relative_mouse(false);

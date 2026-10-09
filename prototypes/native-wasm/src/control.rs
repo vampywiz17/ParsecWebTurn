@@ -189,6 +189,23 @@ pub fn input_with_viewport(
             int(value, "id")?,
         ),
         7 => header(6, 0, 0, int(value, "id")?),
+        8 => {
+            let mut bytes = header(23, int(value, "id")?, 0, 0).to_vec();
+            bytes.resize(28, 0);
+            bytes[16..18].copy_from_slice(&u16::try_from(int(value, "buttons")?)?.to_be_bytes());
+            for (offset, name) in [
+                (18, "thumbLX"),
+                (20, "thumbLY"),
+                (22, "thumbRX"),
+                (24, "thumbRY"),
+            ] {
+                bytes[offset..offset + 2]
+                    .copy_from_slice(&i16::try_from(int(value, name)?)?.to_be_bytes());
+            }
+            bytes[26] = u8::try_from(int(value, "leftTrigger")?)?;
+            bytes[27] = u8::try_from(int(value, "rightTrigger")?)?;
+            Bytes::from(bytes)
+        }
         9 => header(24, 0, 0, 0),
         _ => bail!("input event is not supported by the native control adapter"),
     })
@@ -197,6 +214,28 @@ pub fn input_with_viewport(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn absolute_motion_requires_a_real_viewport_and_preserves_control_framing() {
+        let event = json!({"type":4,"relative":false,"x":512,"y":384});
+        assert_eq!(
+            input_with_viewport(
+                &event,
+                Some(crate::viewport::Viewport {
+                    source: (1920, 1080),
+                    client: (1024, 768)
+                })
+            )
+            .unwrap(),
+            header(3, 0, 960, 540)
+        );
+        let state = json!({"type":8,"id":7,"buttons":65535,"thumbLX":-32768,"thumbLY":32767,"thumbRX":0,"thumbRY":-1,"leftTrigger":0,"rightTrigger":255});
+        let bytes = input(&state).unwrap();
+        assert_eq!(
+            &bytes[16..],
+            &[255, 255, 128, 0, 127, 255, 0, 0, 255, 255, 0, 255]
+        );
+        assert_eq!(bytes[12], 23);
+    }
     #[test]
     fn headers_use_big_endian_and_text_uses_utf8_byte_lengths() {
         assert_eq!(

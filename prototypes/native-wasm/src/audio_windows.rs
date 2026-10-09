@@ -285,3 +285,26 @@ unsafe fn render(
     }
     Ok(())
 }
+
+/// Quiet local device smoke test: no account/network and no audible test tone.
+pub fn probe() -> Result<serde_json::Value> {
+    let window = crate::window::Window::create_video_probe()?;
+    let mut snapshot = None;
+    if let Ok(output) = Playback::create(window.clone(), 0, 9600) {
+        for _ in 0..10 {
+            output.queue(&[0; 1920]);
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        output.reset();
+        output.stop();
+        snapshot = Some(output.snapshot());
+    }
+    window.close();
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    while !window.handle().is_null() && std::time::Instant::now() < until {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    Ok(
+        serde_json::json!({"scope":"synthetic-silent-wasapi-output","audio":snapshot,"real_account_used":false,"external_requests_enabled":false,"native_window_released":window.handle().is_null()}),
+    )
+}

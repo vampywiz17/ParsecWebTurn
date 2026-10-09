@@ -65,6 +65,7 @@ pub struct Capture {
 impl Capture {
     pub fn publish(&mut self, shared: &mut Shared) {
         if self.failed {
+            shared.frame = Arc::default();
             shared.report.failure = Some("unsupported-or-invalid-pinned-gui-command");
             return;
         }
@@ -279,9 +280,18 @@ impl Capture {
             .get(offset..end)
             .context("UI indices out of bounds")?;
         let attrs = [
-            self.attributes[&semantics["pos"]],
-            self.attributes[&semantics["uv"]],
-            self.attributes[&semantics["col"]],
+            *self
+                .attributes
+                .get(&semantics["pos"])
+                .context("UI position attribute missing")?,
+            *self
+                .attributes
+                .get(&semantics["uv"])
+                .context("UI UV attribute missing")?,
+            *self
+                .attributes
+                .get(&semantics["col"])
+                .context("UI color attribute missing")?,
         ];
         for (n, a) in attrs.iter().enumerate() {
             if a.stride == 0
@@ -356,5 +366,108 @@ impl Capture {
             clip: [x, vh - y - h, x + w, vh - y],
         });
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn triangle() -> Capture {
+        let mut capture = Capture::default();
+        capture.program = 1;
+        capture.elements = 2;
+        capture.texture = 3;
+        capture.viewport = [0, 0, 100, 100];
+        capture.scissor = Some([20, 30, 40, 50]);
+        let mut vertices = Vec::new();
+        for (x, y) in [(0.0f32, 0.0f32), (1., 0.), (0., 1.)] {
+            vertices.extend_from_slice(&x.to_le_bytes());
+            vertices.extend_from_slice(&y.to_le_bytes());
+            vertices.extend_from_slice(&[0; 8]);
+            vertices.extend_from_slice(&[255, 255, 255, 255]);
+        }
+        capture.buffers.insert(1, vertices);
+        capture.buffers.insert(2, vec![0, 0, 1, 0, 2, 0]);
+        capture.semantics.insert(
+            1,
+            BTreeMap::from([("pos".into(), 0), ("uv".into(), 1), ("col".into(), 2)]),
+        );
+        for (location, offset) in [(0, 0), (1, 8), (2, 16)] {
+            capture.attributes.insert(
+                location,
+                Attribute {
+                    buffer: 1,
+                    size: if location == 2 { 4 } else { 2 },
+                    kind: if location == 2 {
+                        glow::UNSIGNED_BYTE
+                    } else {
+                        glow::FLOAT
+                    },
+                    normalized: location == 2,
+                    stride: 20,
+                    offset,
+                },
+            );
+        }
+        capture.projections.insert(
+            1,
+            [
+                1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
+            ],
+        );
+        capture.textures.insert(
+            3,
+            Arc::new(Texture {
+                version: 1,
+                width: 1,
+                height: 1,
+                rgba: vec![255; 4],
+            }),
+        );
+        capture
+    }
+    #[test]
+    fn gui_transform_scissor_and_empty_frame_publication_preserve_layering() {
+        let mut capture = triangle();
+        capture
+            .draw(glow::TRIANGLES, 3, glow::UNSIGNED_SHORT, 0)
+            .unwrap();
+        assert_eq!(capture.frame.batches[0].clip, [20, 20, 60, 70]);
+        assert_eq!(capture.frame.batches[0].vertices.len(), 60);
+        assert_eq!(
+            &capture.frame.batches[0].vertices[20..24],
+            &1.0f32.to_le_bytes()
+        );
+        let mut shared = Shared::default();
+        capture.publish(&mut shared);
+        assert_eq!(shared.frame.batches.len(), 1);
+        capture.publish(&mut shared);
+        assert!(shared.frame.batches.is_empty());
+    }
+    #[test]
+    fn bad_indices_and_missing_layout_fail_without_panics_or_stale_overlay() {
+        let mut capture = triangle();
+        assert!(capture
+            .draw(glow::TRIANGLES, 4, glow::UNSIGNED_SHORT, 0)
+            .is_err());
+        capture.attributes.remove(&0);
+        assert!(capture
+            .draw(glow::TRIANGLES, 3, glow::UNSIGNED_SHORT, 0)
+            .is_err());
+        let mut shared = Shared {
+            frame: Arc::new(Frame {
+                size: (100, 100),
+                batches: vec![Batch {
+                    vertices: vec![0; 60],
+                    texture: capture.textures[&3].clone(),
+                    clip: [0; 4],
+                }],
+            }),
+            ..Default::default()
+        };
+        capture.failed = true;
+        capture.publish(&mut shared);
+        assert!(shared.frame.batches.is_empty());
+        assert!(shared.report.failure.is_some());
     }
 }

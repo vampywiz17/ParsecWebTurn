@@ -878,7 +878,7 @@ fn backend_call(
                 }
                 "parsec_web_poll_audio" => {
                     let capacity = usize::try_from(int(args, 1)?)?;
-                    if capacity > 5760 * 2 {
+                    if capacity > 1024 * 1024 {
                         bail!("audio poll capacity exceeds limit");
                     }
                     let frames = match &b.native_attempt {

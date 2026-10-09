@@ -243,6 +243,7 @@ fn run() -> Result<()> {
             | "guest-audit-probe"
             | "guest-thread-probe"
             | "guest-audio-unavailable-probe"
+            | "native-audio-probe"
             | "guest-platform-probe"
             | "guest-window-probe"
             | "guest-wake-lock-probe"
@@ -271,6 +272,15 @@ fn run() -> Result<()> {
             #[cfg(not(windows))]
             {
                 bail!("native window probe requires Windows");
+            }
+        } else if mode == "native-audio-probe" {
+            #[cfg(windows)]
+            {
+                audio_windows::probe()?
+            }
+            #[cfg(not(windows))]
+            {
+                bail!("native audio probe requires Windows");
             }
         } else if mode == "guest-audio-unavailable-probe" {
             audio::probe()?
