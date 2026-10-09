@@ -36,3 +36,16 @@ User retest: extract the new package, run `START-NETWORK-DIAGNOSTIC.cmd`, log in
 select Connect once, then close normally and preserve `account-network-report.json`.
 The connection may still fail; the app should remain open for this handled path.
 Both account modes include the v2 signaling fix; origin reporting stays opt-in.
+
+## Verified build
+
+Source: `97c6eb032fce5b033b2a7c216b763140697ef86e`.
+[Windows CI 37903372095](https://github.com/vampywiz17/ParsecWebTurn/actions/runs/37903372095)
+passed all 71 tests, formatting, strict Clippy, release compilation and the
+original-core/native bridge probes. Both targeted failure regressions passed.
+The downloaded release EXE completed all nine offline original-login fixture
+steps and presented 15 GPU UI frames on the AMD Radeon 780M. Its window was
+released without a guest error or rejected worker spawn; default reporting
+omitted origins and fixture credentials. No real account or external host was
+used in these automated/local checks. The user's failing connection still needs
+to be retested; these results verify containment of the tested error paths.
