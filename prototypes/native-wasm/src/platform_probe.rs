@@ -95,7 +95,7 @@ pub fn probe() -> Result<serde_json::Value> {
     }
     store.data_mut().platform = Default::default();
     let empty = read.call(&mut store, ())? as u32;
-    if empty == 0 || memory.string(empty, 1)? != "" || store.data().boundary.is_some() {
+    if empty == 0 || !memory.string(empty, 1)?.is_empty() || store.data().boundary.is_some() {
         bail!("Disabled clipboard did not return guest-owned empty text");
     }
     let report = serde_json::json!({
