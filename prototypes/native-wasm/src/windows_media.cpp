@@ -5,6 +5,7 @@
 #include <d3d10_1.h>
 #include <d3d11.h>
 #include <dxgi.h>
+#include <dxgi1_2.h>
 #include <mfapi.h>
 #include <mferror.h>
 #include <mfidl.h>
@@ -86,10 +87,12 @@ HRESULT ProbeVideo(ParsecNativeMediaProbe *report) {
 
   ComPtr<IDXGIDevice> dxgi_device;
   ComPtr<IDXGIAdapter> adapter;
-  DXGI_ADAPTER_DESC adapter_desc{};
+  ComPtr<IDXGIAdapter1> adapter1;
+  DXGI_ADAPTER_DESC1 adapter_desc{};
   if (SUCCEEDED(device.As(&dxgi_device)) &&
       SUCCEEDED(dxgi_device->GetAdapter(&adapter)) &&
-      SUCCEEDED(adapter->GetDesc(&adapter_desc))) {
+      SUCCEEDED(adapter.As(&adapter1)) &&
+      SUCCEEDED(adapter1->GetDesc1(&adapter_desc))) {
     if ((adapter_desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0)
       return DXGI_ERROR_UNSUPPORTED;
     CopyWide(report->adapter, std::size(report->adapter),
