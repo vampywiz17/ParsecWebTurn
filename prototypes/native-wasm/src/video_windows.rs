@@ -943,7 +943,7 @@ mod tests {
             Presentation::Busy
         );
         assert_eq!(
-            presentation_status(DXGI_STATUS_OCCLUDED).unwrap(),
+            presentation_status(windows::Win32::Foundation::DXGI_STATUS_OCCLUDED).unwrap(),
             Presentation::NotVisible
         );
         let error = presentation_status(DXGI_ERROR_DEVICE_REMOVED).unwrap_err();
