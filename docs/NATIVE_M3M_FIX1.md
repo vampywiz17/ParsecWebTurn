@@ -54,3 +54,15 @@ local run, not real-host sustained-playback or decode-engine utilization claims.
 No new decoded-frame copy or live readback was introduced by this fix.
 The GPU-copy requirement, including permission for necessary implementation
 copies, is recorded in AGENTS.md for future work.
+
+Real-host validation (user report, 2026-10-09): the user confirmed visible video
+with no stall on 0.16.1. The final native output snapshot reported 4,532 pictures
+submitted/decoded, 4,413 accepted presentations, 119 busy display submissions,
+1920x1080 GPU-backed NV12 output, queue peak 9/32 and no video failure/HRESULT.
+The three queued pictures remaining at shutdown were cleared (4,535 queued minus
+4,532 submitted); the earlier live ingress snapshot had zero picture drops.
+The worker finished, GPU resources were released and the native window closed
+without a guest execution error. This validates sustained playback for this
+observed session on AMD Radeon 780M, not all drivers, displays or future runs.
+The raw report and media are not committed. Hardware-decode engine utilization
+remains unknown; busy display skips are not network packet-loss measurements.
