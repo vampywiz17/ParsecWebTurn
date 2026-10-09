@@ -28,6 +28,7 @@ mod media_ingress;
 mod memory;
 mod network_audit;
 mod network_policy;
+mod native_media;
 mod platform;
 mod platform_probe;
 #[cfg(windows)]
@@ -201,6 +202,18 @@ fn run() -> Result<()> {
     let window_mode =
         live_mode || matches!(mode.as_str(), "window" | "window-audit" | "login-audit");
     let audit_mode = live_mode || matches!(mode.as_str(), "window-audit" | "login-audit");
+    if mode == "media-probe" {
+        let path = args.next().map(PathBuf::from);
+        if args.next().is_some() {
+            bail!("too many arguments");
+        }
+        let json = serde_json::to_string_pretty(&native_media::probe()?)?;
+        if let Some(path) = path {
+            fs::write(path, &json)?;
+        }
+        println!("{json}");
+        return Ok(());
+    }
     if matches!(
         mode.as_str(),
         "guest-offer-probe"
@@ -302,6 +315,7 @@ fn run() -> Result<()> {
                   parsec-native-wasm window <parsecd.wasm> [report.json]\n\
                   parsec-native-wasm transport-probe [report.json]\n\
                   parsec-native-wasm signaling-probe [report.json]\n\
+                  parsec-native-wasm media-probe [report.json]\n\
                   parsec-native-wasm guest-offer-probe [report.json]\n\
                   parsec-native-wasm guest-window-probe [report.json]\n\
                   parsec-native-wasm guest-session-probe [report.json]\n\

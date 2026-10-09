@@ -54,6 +54,10 @@ jobs:
           New-Item -ItemType Directory -Path $artifact -Force | Out-Null
           $exe = 'prototypes/native-wasm/target/release/parsec-native-wasm.exe'
           $core = 'prototypes/native-wasm/vendor/parsecd.wasm'
+          & $exe media-probe "$artifact/media.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Native media capability probe failed' }
+          $media = Get-Content "$artifact/media.json" -Raw | ConvertFrom-Json
+          if ($media.video_codec -ne 'H.264 Annex-B' -or $media.audio_codec -ne 'Opus 48 kHz stereo') { throw 'Incorrect native media contract' }
           foreach ($mode in @('inspect', 'allocator', 'boot')) {
             & $exe $mode $core "$artifact/$mode.json" | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "WASM $mode failed" }
