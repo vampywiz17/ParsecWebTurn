@@ -1,5 +1,7 @@
 //! Native, modeless settings page inside the existing client window.
 //! All HWND/GDI ownership and control access stay on the window's UI thread.
+#[path = "settings_controls.rs"]
+mod controls;
 use crate::connection_settings::{Manager, Settings};
 use std::{
     ptr::{null, null_mut},
@@ -64,6 +66,7 @@ struct Page {
     small: HFONT,
     items: Vec<Item>,
     scroll: i32,
+    reflowing: bool,
 }
 impl Drop for Page {
     fn drop(&mut self) {
@@ -127,6 +130,7 @@ pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
         small: font(13, 400),
         items: Vec::new(),
         scroll: 0,
+        reflowing: false,
     });
     // Failed CreateWindowEx may send WM_NCDESTROY. Transfer ownership only on success.
     let pointer = (&mut *page) as *mut Page;
@@ -148,7 +152,8 @@ pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
         WS_EX_CONTROLPARENT,
         name.as_ptr(),
         wide("Settings").as_ptr(),
-        WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_VSCROLL,
+        // Build the entire page offscreen before making any control visible.
+        WS_CHILD | WS_CLIPCHILDREN | WS_VSCROLL,
         0,
         0,
         rect.right,
@@ -210,7 +215,7 @@ pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
     );
     row(hwnd, page, "STUN servers",
         "Discover a direct route. One stun: URL per line.\nLeave blank to use the default discovery server.",
-        STUN, &s.stun_urls.join("\r\n"), 242, 76, 0, ES_MULTILINE as u32 | ES_AUTOVSCROLL as u32 | WS_VSCROLL);
+        STUN, &s.stun_urls.join("\r\n"), 242, 76, 0, ES_MULTILINE as u32 | ES_AUTOVSCROLL as u32 | WS_CLIPCHILDREN);
     row_label(
         hwnd,
         page,
@@ -256,6 +261,7 @@ pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
         0,
         page.font,
     );
+    controls::combo(provider);
     for name in ["Custom servers", "Cloudflare TURN"] {
         SendMessageW(provider, CB_ADDSTRING, 0, wide(name).as_ptr() as isize);
     }
@@ -268,7 +274,7 @@ pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
     row(hwnd, page, "TURN servers",
         "coturn, eturnal, ExpressTURN and other providers.\nUDP, TCP or TLS; e.g. turns:host:443. One URL per line.",
         TURN, &s.turn_urls.join("\r\n"), 502, 76, CUSTOM,
-        ES_MULTILINE as u32 | ES_AUTOVSCROLL as u32 | WS_VSCROLL);
+        ES_MULTILINE as u32 | ES_AUTOVSCROLL as u32 | WS_CLIPCHILDREN);
     row(
         hwnd,
         page,
@@ -412,6 +418,13 @@ pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
         page.font,
     );
     update_enabled(hwnd);
+    ShowWindow(hwnd, SW_SHOW);
+    RedrawWindow(
+        hwnd,
+        null(),
+        null_mut(),
+        RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN | RDW_UPDATENOW,
+    );
     SetFocus(GetDlgItem(hwnd, STUN as i32));
     hwnd
 }
@@ -498,6 +511,9 @@ unsafe fn row(
         group,
         page.font,
     );
+    if style & ES_MULTILINE as u32 != 0 {
+        controls::multiline(GetDlgItem(hwnd, id as i32));
+    }
 }
 /// Reflow on resize/provider changes. Hidden controls retain unsaved values.
 unsafe fn layout(hwnd: HWND) {
@@ -506,6 +522,10 @@ unsafe fn layout(hwnd: HWND) {
         return;
     }
     let page = &mut *pointer;
+    if page.items.is_empty() || page.reflowing {
+        return;
+    }
+    page.reflowing = true;
     let mut client = std::mem::zeroed();
     GetClientRect(hwnd, &mut client);
     let cloudflare = SendMessageW(GetDlgItem(hwnd, PROVIDER as i32), CB_GETCURSEL, 0, 0) == 1;
@@ -522,25 +542,59 @@ unsafe fn layout(hwnd: HWND) {
         nTrackPos: 0,
     };
     SetScrollInfo(hwnd, SB_VERT, &info, 1);
+    // Showing/hiding the scrollbar can synchronously send WM_SIZE. Reflow once,
+    // using the final client width instead of recursively moving every control.
+    GetClientRect(hwnd, &mut client);
     let x = ((client.right - 820) / 2).max(24);
     for item in &page.items {
         let visible = item.group == 0 || item.group == if cloudflare { CLOUDFLARE } else { CUSTOM };
-        ShowWindow(item.hwnd, if visible { SW_SHOW } else { SW_HIDE });
-        if visible {
-            let r = item.rect;
-            let dy = if r.top >= 816 { shift } else { 0 };
-            SetWindowPos(
-                item.hwnd,
-                null_mut(),
-                x + r.left,
-                r.top - page.scroll - dy,
-                r.right - r.left,
-                r.bottom - r.top,
-                SWP_NOZORDER | SWP_NOACTIVATE,
-            );
-        }
+        let r = item.rect;
+        let dy = if r.top >= 816 { shift } else { 0 };
+        // Moving overlapping child windows individually must not preserve old
+        // pixels or paint halfway through reflow. A parent-only invalidation
+        // excludes children (WS_CLIPCHILDREN), leaving clipped text/buttons.
+        SetWindowPos(
+            item.hwnd,
+            null_mut(),
+            x + r.left,
+            r.top - page.scroll - dy,
+            r.right - r.left,
+            r.bottom - r.top,
+            SWP_NOZORDER
+                | SWP_NOACTIVATE
+                | SWP_NOCOPYBITS
+                | SWP_NOREDRAW
+                | if visible {
+                    SWP_SHOWWINDOW
+                } else {
+                    SWP_HIDEWINDOW
+                },
+        );
     }
-    InvalidateRect(hwnd, null(), 1);
+    page.reflowing = false;
+    RedrawWindow(
+        hwnd,
+        null(),
+        null_mut(),
+        RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN | RDW_UPDATENOW,
+    );
+}
+
+unsafe fn paint_page(hwnd: HWND, dc: HDC, page: &Page) {
+    let mut rect: RECT = std::mem::zeroed();
+    GetClientRect(hwnd, &mut rect);
+    // Paint is self-contained even when Windows supplies a paint region without
+    // requesting a separate background erase (e.g. after an exposed child).
+    FillRect(dc, &rect, page.background);
+    let x = ((rect.right - 820) / 2).max(24);
+    let line = RECT {
+        left: x,
+        top: 127 - page.scroll,
+        right: x + 820,
+        bottom: 129 - page.scroll,
+    };
+    SetDCBrushColor(dc, 0x003b3b3b);
+    FillRect(dc, &line, GetStockObject(DC_BRUSH) as HBRUSH);
 }
 #[allow(clippy::too_many_arguments)] // Flat Win32 control descriptor, UI-thread only.
 unsafe fn control(
@@ -789,6 +843,8 @@ unsafe extern "system" fn page_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: LP
                     page.scroll += rect.top - 8;
                 } else if rect.bottom > client.bottom - 8 {
                     page.scroll += rect.bottom - client.bottom + 8;
+                } else {
+                    return 0;
                 }
                 layout(hwnd);
                 return 0;
@@ -844,18 +900,12 @@ unsafe extern "system" fn page_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: LP
             WM_PAINT => {
                 let mut paint = std::mem::zeroed();
                 let dc = BeginPaint(hwnd, &mut paint);
-                let mut rect: RECT = std::mem::zeroed();
-                GetClientRect(hwnd, &mut rect);
-                let x = ((rect.right - 820) / 2).max(24);
-                let line = RECT {
-                    left: x,
-                    top: 127 - page.scroll,
-                    right: x + 820,
-                    bottom: 129 - page.scroll,
-                };
-                SetDCBrushColor(dc, 0x003b3b3b);
-                FillRect(dc, &line, GetStockObject(DC_BRUSH) as HBRUSH);
+                paint_page(hwnd, dc, page);
                 EndPaint(hwnd, &paint);
+                return 0;
+            }
+            WM_PRINTCLIENT => {
+                paint_page(hwnd, wp as HDC, page);
                 return 0;
             }
             WM_NCDESTROY => {
@@ -911,6 +961,7 @@ mod tests {
             );
             assert_no_overlaps(page);
             capture(page, "custom");
+            controls::verify_multiline(GetDlgItem(page, STUN as i32));
             SetWindowTextW(
                 GetDlgItem(page, USERNAME as i32),
                 wide("unsaved-user").as_ptr(),
@@ -927,6 +978,7 @@ mod tests {
             );
             assert_no_overlaps(page);
             capture(page, "cloudflare");
+            paint_regression(page);
             // The last control remains reachable at a small window size and
             // keyboard focus scrolls it into view without touching real data.
             SendMessageW(
@@ -997,6 +1049,69 @@ mod tests {
         }
     }
 
+    // Compare the actual incremental window painting against a clean repaint.
+    // WM_PRINT alone cannot catch stale on-screen pixels: it always paints fresh.
+    unsafe fn paint_regression(hwnd: HWND) {
+        let parent = GetParent(hwnd);
+        SetFocus(parent); // Suppress edit carets so both snapshots are deterministic.
+        SetWindowPos(
+            parent,
+            HWND_TOPMOST,
+            0,
+            0,
+            920,
+            750,
+            SWP_NOACTIVATE | SWP_SHOWWINDOW,
+        );
+        for (width, height) in [(920, 600), (1000, 740), (920, 750)] {
+            SetWindowPos(
+                parent,
+                null_mut(),
+                0,
+                0,
+                width,
+                height,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+            let mut client: RECT = std::mem::zeroed();
+            GetClientRect(parent, &mut client);
+            SetWindowPos(
+                hwnd,
+                null_mut(),
+                0,
+                0,
+                client.right,
+                client.bottom,
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+            for direction in [SB_LINEDOWN, SB_LINEUP] {
+                for _ in 0..6 {
+                    SendMessageW(hwnd, WM_VSCROLL, direction as usize, 0);
+                    assert_no_overlaps(hwnd);
+                    let actual = snapshot(hwnd, true);
+                    RedrawWindow(
+                        hwnd,
+                        null(),
+                        null_mut(),
+                        RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN | RDW_UPDATENOW,
+                    );
+                    let clean = snapshot(hwnd, true);
+                    let changed = actual
+                        .2
+                        .iter()
+                        .zip(&clean.2)
+                        .filter(|(a, b)| a != b)
+                        .count();
+                    assert_eq!(
+                        changed, 0,
+                        "Stale pixels after scroll/resize at {width}x{height}"
+                    );
+                }
+            }
+        }
+        capture(hwnd, "cloudflare-after-scroll-resize");
+    }
+
     // Optional CI-only visual fixtures. This cannot capture an account, stream
     // or production profile: the fixture above owns only synthetic controls.
     unsafe fn capture(hwnd: HWND, name: &str) {
@@ -1005,8 +1120,6 @@ mod tests {
         };
         let directory = std::path::PathBuf::from(directory);
         std::fs::create_dir_all(&directory).unwrap();
-        // Some standard controls skip painting while an ancestor is hidden.
-        // Show only this isolated fixture, without activating another account UI.
         ShowWindow(GetParent(hwnd), SW_SHOWNOACTIVATE);
         RedrawWindow(
             GetParent(hwnd),
@@ -1014,6 +1127,18 @@ mod tests {
             null_mut(),
             RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW,
         );
+        let (width, height, rgba) = snapshot(hwnd, false);
+        image::save_buffer(
+            directory.join(format!("{name}.png")),
+            &rgba,
+            width,
+            height,
+            image::ColorType::Rgba8,
+        )
+        .unwrap();
+    }
+
+    unsafe fn snapshot(hwnd: HWND, live: bool) -> (u32, u32, Vec<u8>) {
         let mut rect: RECT = std::mem::zeroed();
         GetClientRect(hwnd, &mut rect);
         let dc = CreateCompatibleDC(null_mut());
@@ -1028,12 +1153,20 @@ mod tests {
         let bitmap = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &mut pixels, null_mut(), 0);
         assert!(!bitmap.is_null() && !dc.is_null() && !pixels.is_null());
         let previous = SelectObject(dc, bitmap);
-        SendMessageW(
-            hwnd,
-            WM_PRINT,
-            dc as usize,
-            (PRF_CLIENT | PRF_NONCLIENT | PRF_CHILDREN | PRF_ERASEBKGND) as isize,
-        );
+        if live {
+            let source = GetDC(hwnd);
+            assert!(!source.is_null());
+            let copied = BitBlt(dc, 0, 0, rect.right, rect.bottom, source, 0, 0, SRCCOPY);
+            ReleaseDC(hwnd, source);
+            assert_ne!(copied, 0);
+        } else {
+            SendMessageW(
+                hwnd,
+                WM_PRINT,
+                dc as usize,
+                (PRF_CLIENT | PRF_NONCLIENT | PRF_CHILDREN | PRF_ERASEBKGND) as isize,
+            );
+        }
         GdiFlush();
         let mut rgba = std::slice::from_raw_parts(
             pixels.cast::<u8>(),
@@ -1047,13 +1180,6 @@ mod tests {
         SelectObject(dc, previous);
         DeleteObject(bitmap);
         DeleteDC(dc);
-        image::save_buffer(
-            directory.join(format!("{name}.png")),
-            &rgba,
-            rect.right as u32,
-            rect.bottom as u32,
-            image::ColorType::Rgba8,
-        )
-        .unwrap();
+        (rect.right as u32, rect.bottom as u32, rgba)
     }
 }
