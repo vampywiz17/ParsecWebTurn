@@ -9,7 +9,7 @@ use windows_sys::Win32::{
     Foundation::*,
     Graphics::Gdi::*,
     System::LibraryLoader::*,
-    UI::{Input::KeyboardAndMouse::*, WindowsAndMessaging::*},
+    UI::{Controls::EM_SETLIMITTEXT, Input::KeyboardAndMouse::*, WindowsAndMessaging::*},
 };
 
 pub const OPEN: usize = 4100;
