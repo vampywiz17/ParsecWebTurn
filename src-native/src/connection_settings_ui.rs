@@ -439,9 +439,18 @@ pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
         wide("Automatic (Windows default)").as_ptr() as isize,
     );
     if let Ok(adapters) = crate::gpu_windows::enumerate() {
-        for adapter in adapters {
-            let p = adapter.preference;
-            let label = format!("{} [{:08x}]", p.name, p.luid as u32);
+        for (index, adapter) in adapters.iter().enumerate() {
+            let p = adapter.preference.clone();
+            let label = if adapters
+                .iter()
+                .filter(|a| a.preference.name == p.name)
+                .count()
+                > 1
+            {
+                format!("{} (GPU {})", p.name, index + 1)
+            } else {
+                p.name.clone()
+            };
             SendMessageW(gpu, CB_ADDSTRING, 0, wide(&label).as_ptr() as isize);
             page.gpu_choices.push(Some(p));
         }

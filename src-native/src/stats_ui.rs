@@ -204,6 +204,20 @@ fn rows(
             .and_then(|x| x.adapter.clone())
             .unwrap_or_else(|| "Not reported".into()),
     );
+    if let Some(stage) = video.and_then(|x| x.failure_stage) {
+        row(
+            "Video status",
+            match stage {
+                "video-selected-gpu-unavailable-select-automatic-in-settings" => {
+                    "Selected GPU unavailable; reselect in Settings.".into()
+                }
+                "video-d3d11-device" | "video-decoder-not-d3d11-aware" => {
+                    "Video GPU unavailable or unsupported; try another GPU.".into()
+                }
+                _ => format!("Video stopped: {stage}"),
+            },
+        );
+    }
     row(
         "Hardware decode",
         video
