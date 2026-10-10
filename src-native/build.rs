@@ -1,7 +1,32 @@
 use std::{env, fs, path::PathBuf, process::Command};
+#[path = "src/core_config.rs"]
+mod core_config;
 fn main() {
     println!("cargo:rerun-if-changed=../assets/parsec.ico");
     println!("cargo:rerun-if-changed=vendor/parsecd.wasm");
+    println!("cargo:rerun-if-changed=src/core_config.rs");
+    // Comparison artifact only. The normal client's loading path is unchanged
+    // until the isolated measurements establish a useful improvement.
+    if env::var_os("CARGO_FEATURE_DIAGNOSTICS").is_some() {
+        use sha2::{Digest, Sha256};
+        let bytes = fs::read("vendor/parsecd.wasm").expect("Fetch the pinned core first");
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&bytes)),
+            "d663dd96df477c65479fb93eb88756c7fcafff581cc93be563625cd195a4b4a6",
+            "Refusing to precompile an unaudited core"
+        );
+        let mut config = core_config::config();
+        config.target(&env::var("TARGET").unwrap()).unwrap();
+        let engine = wasmtime::Engine::new(&config).unwrap();
+        let compiled = engine
+            .precompile_module(&bytes)
+            .expect("Core AOT compilation failed");
+        fs::write(
+            PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("parsecd.cwasm"),
+            compiled,
+        )
+        .unwrap();
+    }
     if !env::var("TARGET")
         .unwrap_or_default()
         .contains("windows-msvc")

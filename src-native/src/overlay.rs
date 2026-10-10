@@ -72,7 +72,34 @@ pub struct Capture {
     failure_call: Option<String>,
     failure_detail: Option<String>,
 }
+#[cfg(any(test, feature = "diagnostics"))]
+#[derive(Clone, Default, serde::Serialize)]
+pub struct MemoryUsage {
+    pub texture_count: usize,
+    pub texture_bytes: usize,
+    pub buffer_bytes: usize,
+    pub frame_vertex_bytes: usize,
+}
 impl Capture {
+    #[cfg(any(test, feature = "diagnostics"))]
+    pub fn memory_usage(&self, frame: &Frame) -> MemoryUsage {
+        // Arc references are not copies. Count each retained texture version
+        // once, including a frame still referencing a replaced atlas version.
+        let mut textures: BTreeMap<_, _> = self
+            .textures
+            .values()
+            .map(|texture| (texture.version, texture.rgba.len()))
+            .collect();
+        for batch in &frame.batches {
+            textures.insert(batch.texture.version, batch.texture.rgba.len());
+        }
+        MemoryUsage {
+            texture_count: textures.len(),
+            texture_bytes: textures.values().sum(),
+            buffer_bytes: self.buffers.values().map(Vec::len).sum(),
+            frame_vertex_bytes: frame.batches.iter().map(|batch| batch.vertices.len()).sum(),
+        }
+    }
     pub fn publish(&mut self, shared: &mut Shared) {
         if self.failed {
             shared.frame = Arc::default();
@@ -528,6 +555,29 @@ fn apply_internal_format(pixels: &mut [u8], format: u32) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn memory_accounting_does_not_count_arc_references_as_texture_copies() {
+        let mut capture = triangle();
+        capture
+            .draw(glow::TRIANGLES, 3, glow::UNSIGNED_SHORT, 0)
+            .unwrap();
+        let mut frame = capture.frame.clone();
+        frame.batches.push(frame.batches[0].clone());
+        let usage = capture.memory_usage(&frame);
+        assert_eq!(usage.texture_count, 1);
+        assert_eq!(usage.texture_bytes, 4);
+        assert_eq!(usage.frame_vertex_bytes, 120);
+        let new_texture = Arc::new(super::Texture {
+            version: 2,
+            width: 2,
+            height: 1,
+            rgba: vec![255; 8],
+        });
+        capture.textures.insert(3, new_texture);
+        assert_eq!(capture.memory_usage(&frame).texture_bytes, 12);
+        frame.batches.clear();
+        assert_eq!(capture.memory_usage(&frame).texture_bytes, 8);
+    }
     use super::*;
     fn triangle() -> Capture {
         let mut capture = Capture {

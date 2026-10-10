@@ -115,6 +115,14 @@ jobs:
           New-Item -ItemType Directory -Path $artifact -Force | Out-Null
           $exe = 'src-native/target/x86_64-pc-windows-msvc/release/parsec-web-turn.exe'
           $core = 'src-native/vendor/parsecd.wasm'
+          Copy-Item $exe "$artifact/parsec-native-memory-diagnostics.exe"
+          foreach ($mode in @('window-memory-jit', 'window-memory-aot')) {
+            & $exe $mode $core "$artifact/$mode.json" | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Offline memory comparison $mode failed" }
+            $memory = Get-Content "$artifact/$mode.json" -Raw | ConvertFrom-Json
+            if (!$memory.instantiated -or !$memory.allocator_roundtrip -or !$memory.native_window_released -or $memory.network_enabled -or $memory.live_session -or $memory.start_error -or $memory.graphics.frames_presented -lt 2 -or !$memory.memory_profile.after_load -or $memory.graphics.memory_samples.Count -lt 2) { throw "Incomplete offline memory comparison $mode" }
+            if ($memory.memory_profile.ahead_of_time -ne ($mode -eq 'window-memory-aot')) { throw 'Incorrect core loading path' }
+          }
           foreach ($mode in @('inspect', 'allocator', 'boot')) {
             & $exe $mode $core "$artifact/$mode.json" | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "WASM $mode failed" }

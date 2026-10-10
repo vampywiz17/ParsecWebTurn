@@ -19,6 +19,8 @@ mod buffers;
 mod connection_settings;
 mod connection_settings_ui;
 mod control;
+#[cfg(feature = "diagnostics")]
+mod core_config;
 #[cfg(test)]
 mod crypto_policy_tests;
 #[cfg(windows)]
@@ -46,6 +48,8 @@ mod media_ingress;
 #[cfg(windows)]
 mod media_scheduling;
 mod memory;
+#[cfg(all(windows, feature = "diagnostics"))]
+mod memory_probe;
 mod network_audit;
 mod network_policy;
 #[cfg(windows)]

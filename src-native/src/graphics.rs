@@ -13,6 +13,10 @@ use windows_sys::Win32::{
 
 #[derive(Clone, Default, Serialize)]
 pub struct GraphicsReport {
+    #[cfg(feature = "diagnostics")]
+    pub ui_cpu_memory: crate::overlay::MemoryUsage,
+    #[cfg(feature = "diagnostics")]
+    pub memory_samples: Vec<crate::memory_probe::Snapshot>,
     pub api: String,
     pub vendor: String,
     pub renderer: String,
@@ -248,6 +252,24 @@ impl Graphics {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner()),
         );
+        #[cfg(feature = "diagnostics")]
+        {
+            let shared = self
+                .window
+                .overlay
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            self.report.ui_cpu_memory = self.overlay.memory_usage(&shared.frame);
+            // Bounded, numeric process samples only. No framebuffer readback,
+            // heap contents, real profile or external network access required.
+            if self.report.frames_presented.is_multiple_of(60)
+                && self.report.memory_samples.len() < 16
+            {
+                if let Some(sample) = crate::memory_probe::snapshot() {
+                    self.report.memory_samples.push(sample);
+                }
+            }
+        }
         // Explicit optional test artifact only: one readback, never the normal
         // presentation path. Capture the rendered backbuffer before swapping.
         #[cfg(any(test, feature = "diagnostics"))]
