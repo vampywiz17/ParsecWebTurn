@@ -184,6 +184,7 @@ pub fn probe() -> Result<serde_json::Value> {
         serde_json::json!({"schema":1,"scope":"isolated-native-fullscreen-and-guest-import", "fullscreen_roundtrips":5,"native_geometry_restored":true,"native_style_restored":true,"idempotent_requests_verified":true,"guest_import_verified":true,"window_event_feedback_verified":false,"real_account_used":false,"parsec_host_connected":false}),
     )
 }
+#[cfg(any(test, feature = "diagnostics"))]
 fn guest_probe() -> Result<()> {
     let mut config = wasmtime::Config::new();
     config

@@ -470,6 +470,7 @@ impl Network {
             socket.stop();
         }
     }
+    #[cfg(any(test, feature = "diagnostics"))]
     pub fn active_handles(&self) -> usize {
         self.registry
             .lock()

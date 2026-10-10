@@ -6,6 +6,8 @@ try {
     ./src-native/fetch-core.ps1
     & cargo fmt --manifest-path src-native/Cargo.toml -- --check
     if ($LASTEXITCODE -ne 0) { throw 'Formatting failed' }
+    & cargo test --locked --manifest-path src-native/Cargo.toml
+    if ($LASTEXITCODE -ne 0) { throw 'Normal-build tests failed' }
     & cargo test --locked --manifest-path src-native/Cargo.toml --features diagnostics
     if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
     & cargo clippy --locked --manifest-path src-native/Cargo.toml --bin parsec-web-turn -- -D warnings

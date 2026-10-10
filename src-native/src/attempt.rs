@@ -176,7 +176,9 @@ struct Progress {
     transport_states: serde_json::Value,
     transport_states_before_close: serde_json::Value,
     transport_states_at_failure: serde_json::Value,
+    #[cfg(any(test, feature = "diagnostics"))]
     stun_provider: StunProvider,
+    #[cfg(any(test, feature = "diagnostics"))]
     legacy_rsa_1024: bool,
 }
 
@@ -379,7 +381,9 @@ impl Attempt {
             closing: false,
             output: Some(output),
             progress: Progress {
+                #[cfg(any(test, feature = "diagnostics"))]
                 stun_provider,
+                #[cfg(any(test, feature = "diagnostics"))]
                 legacy_rsa_1024,
                 ..Default::default()
             },
@@ -602,6 +606,7 @@ impl Attempt {
             .events
             .pop_front()
     }
+    #[cfg(any(test, feature = "diagnostics"))]
     pub fn receive_binary(&self, duration: Duration) -> Result<(u16, bool, Bytes)> {
         let state = self
             .completion
@@ -620,6 +625,7 @@ impl Attempt {
         state.message_bytes -= message.2.len();
         Ok(message)
     }
+    #[cfg(any(test, feature = "diagnostics"))]
     pub fn wait_transport(&self, duration: Duration) -> Result<()> {
         let state = self
             .completion

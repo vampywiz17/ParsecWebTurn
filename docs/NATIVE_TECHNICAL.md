@@ -76,6 +76,7 @@ and CMake (for the bundled Opus reference decoder), then run from the repository
 
 ```powershell
 ./src-native/fetch-core.ps1
+cargo test --locked --manifest-path src-native/Cargo.toml
 cargo test --locked --manifest-path src-native/Cargo.toml --features diagnostics
 cargo build --locked --release --manifest-path src-native/Cargo.toml
 ./scripts/package-native.ps1
@@ -94,6 +95,13 @@ is never packaged as `ParsecWebTurn.exe`. CI checks the normal and diagnostic
 builds separately. `scripts/smoke-native.ps1` exercises the actual normal executable
 with a fresh isolated profile, closes it and starts it again; run it on a Windows
 machine with supported graphics. It does not log in or access a real profile.
+Detailed WASM call tracing, filesystem request traces, network audit records and
+connection diagnostic history are also limited to tests and diagnostic builds.
+Diagnostic-only direct dependencies are optional under `diagnostics` and listed
+as dev-dependencies for ordinary unit tests. Wasmtime's text-format (`wat`)
+parser is enabled only for those builds. Shared networking libraries may still
+require some of these packages transitively in the normal client.
+Unused-code warnings are enabled; both build variants must pass strict Clippy.
 Historical implementation evidence is under `docs/NATIVE_*.md`.
 
 ParsecWebTurn is an independent project. Parsec and its core belong to their
