@@ -1005,6 +1005,15 @@ mod tests {
         };
         let directory = std::path::PathBuf::from(directory);
         std::fs::create_dir_all(&directory).unwrap();
+        // Some standard controls skip painting while an ancestor is hidden.
+        // Show only this isolated fixture, without activating another account UI.
+        ShowWindow(GetParent(hwnd), SW_SHOWNOACTIVATE);
+        RedrawWindow(
+            GetParent(hwnd),
+            null(),
+            null_mut(),
+            RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW,
+        );
         let mut rect: RECT = std::mem::zeroed();
         GetClientRect(hwnd, &mut rect);
         let dc = CreateCompatibleDC(null_mut());
@@ -1023,7 +1032,7 @@ mod tests {
             hwnd,
             WM_PRINT,
             dc as usize,
-            (PRF_CLIENT | PRF_CHILDREN | PRF_ERASEBKGND) as isize,
+            (PRF_CLIENT | PRF_NONCLIENT | PRF_CHILDREN | PRF_ERASEBKGND) as isize,
         );
         GdiFlush();
         let mut rgba = std::slice::from_raw_parts(
