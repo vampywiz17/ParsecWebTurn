@@ -101,7 +101,8 @@ Diagnostic-only direct dependencies are optional under `diagnostics` and listed
 as dev-dependencies for ordinary unit tests. Wasmtime's text-format (`wat`)
 parser is enabled only for those builds. Shared networking libraries may still
 require some of these packages transitively in the normal client.
-Unused-code warnings are enabled; both build variants must pass strict Clippy.
+Unused-code and unused-direct-dependency warnings are enabled; both build
+variants, including unit-test targets, must pass strict Clippy.
 Historical implementation evidence is under `docs/NATIVE_*.md`.
 
 ParsecWebTurn is an independent project. Parsec and its core belong to their

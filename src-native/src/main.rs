@@ -2,6 +2,7 @@
     all(windows, not(feature = "diagnostics")),
     windows_subsystem = "windows"
 )]
+#![warn(unused_crate_dependencies)]
 mod attempt;
 const APP_TITLE: &str = "ParsecWebTurn";
 #[cfg(any(test, feature = "diagnostics"))]
