@@ -35,6 +35,7 @@ impl Services {
         }
     }
 
+    #[cfg(any(test, feature = "diagnostics"))]
     pub fn snapshot(&self) -> Snapshot {
         self.stats.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }

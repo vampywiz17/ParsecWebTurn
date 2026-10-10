@@ -18,6 +18,7 @@ const KEEPALIVE: Duration = Duration::from_secs(60);
 
 struct ConnectionOptions {
     heartbeat: Duration,
+    #[cfg(any(test, feature = "diagnostics"))]
     tls: Option<Arc<rustls::ClientConfig>>,
 }
 
@@ -96,7 +97,7 @@ impl Socket {
         url: String,
         timeout: Duration,
         heartbeat: Duration,
-        tls: Option<Arc<rustls::ClientConfig>>,
+        #[cfg(any(test, feature = "diagnostics"))] tls: Option<Arc<rustls::ClientConfig>>,
     ) -> std::result::Result<Arc<Self>, u16> {
         let shared = Arc::new(Shared::new());
         let state = shared.clone();
@@ -114,7 +115,11 @@ impl Socket {
                     Ok(runtime) => runtime.block_on(run(
                         url,
                         timeout,
-                        ConnectionOptions { heartbeat, tls },
+                        ConnectionOptions {
+                            heartbeat,
+                            #[cfg(any(test, feature = "diagnostics"))]
+                            tls,
+                        },
                         state.clone(),
                         incoming,
                         cancellation,
@@ -242,7 +247,10 @@ async fn run(
         .max_write_buffer_size(MAX_MESSAGE * 2);
     let connect = async {
         let request = url.into_client_request()?;
+        #[cfg(any(test, feature = "diagnostics"))]
         let connector = options.tls.map(tokio_tungstenite::Connector::Rustls);
+        #[cfg(not(any(test, feature = "diagnostics")))]
+        let connector = None;
         tokio_tungstenite::connect_async_tls_with_config(request, Some(config), false, connector)
             .await
     };
@@ -332,6 +340,7 @@ pub struct Network {
     closed: std::sync::atomic::AtomicBool,
     pub audit: Arc<crate::network_audit::Audit>,
     policy: crate::network_policy::Policy,
+    #[cfg(any(test, feature = "diagnostics"))]
     tls: Option<Arc<rustls::ClientConfig>>,
     heartbeat: Duration,
     registry: Mutex<Registry>,
@@ -366,6 +375,7 @@ impl Network {
             closed: Default::default(),
             policy: Default::default(),
             audit,
+            #[cfg(any(test, feature = "diagnostics"))]
             tls: None,
             heartbeat: KEEPALIVE,
             registry: Mutex::new(Registry {
@@ -431,7 +441,13 @@ impl Network {
         }
         let id = registry.next;
         registry.next += 1;
-        let socket = Socket::start(url.to_string(), timeout, self.heartbeat, self.tls.clone())?;
+        let socket = Socket::start(
+            url.to_string(),
+            timeout,
+            self.heartbeat,
+            #[cfg(any(test, feature = "diagnostics"))]
+            self.tls.clone(),
+        )?;
         registry.sockets.insert(id, socket);
         Ok(id)
     }

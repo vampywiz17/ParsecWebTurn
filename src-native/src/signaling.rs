@@ -103,6 +103,7 @@ impl Credentials {
     }
 
     /// Shapes and fixed categories only, never credential bytes or hashes.
+    #[cfg(any(test, feature = "diagnostics"))]
     pub fn diagnostic(&self) -> serde_json::Value {
         serde_json::json!({
             "ufrag_bytes":self.ufrag.len(), "password_bytes":self.password.len(),

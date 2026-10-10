@@ -10,8 +10,11 @@ use wasmtime::{Caller, Val};
 #[derive(Serialize)]
 pub struct HostState {
     pub audio_output: crate::audio::Output,
+    #[cfg(any(test, feature = "diagnostics"))]
     pub execution_stage: Option<&'static str>,
+    #[cfg(any(test, feature = "diagnostics"))]
     pub execution_failure: Option<crate::execution_diagnostics::Failure>,
+    #[cfg(any(test, feature = "diagnostics"))]
     pub last_host_call: Option<String>,
     #[serde(skip)]
     pub memory: GuestMemory,
@@ -31,12 +34,14 @@ pub struct HostState {
     pub platform: std::sync::Arc<crate::platform::Services>,
     #[serde(skip)]
     pub started: Instant,
+    #[cfg(any(test, feature = "diagnostics"))]
     pub calls: BTreeMap<String, u64>,
     pub boundary: Option<String>,
     pub stdout_bytes: u64,
     pub guest_exit_code: Option<u32>,
     pub title: Option<String>,
     pub app_pointer: Option<u32>,
+    #[cfg(any(test, feature = "diagnostics"))]
     pub filesystem_requests: Vec<(String, String, i32)>,
     #[serde(skip)]
     pub keys: BTreeMap<i32, String>,
@@ -55,8 +60,11 @@ impl HostState {
     pub fn new(memory: GuestMemory) -> Self {
         Self {
             audio_output: Default::default(),
+            #[cfg(any(test, feature = "diagnostics"))]
             execution_stage: None,
+            #[cfg(any(test, feature = "diagnostics"))]
             execution_failure: None,
+            #[cfg(any(test, feature = "diagnostics"))]
             last_host_call: None,
             memory,
             threads: None,
@@ -67,12 +75,14 @@ impl HostState {
             websocket: Default::default(),
             platform: Default::default(),
             started: Instant::now(),
+            #[cfg(any(test, feature = "diagnostics"))]
             calls: BTreeMap::new(),
             boundary: None,
             stdout_bytes: 0,
             guest_exit_code: None,
             title: None,
             app_pointer: None,
+            #[cfg(any(test, feature = "diagnostics"))]
             filesystem_requests: Vec::new(),
             keys: BTreeMap::new(),
             key_codes: BTreeMap::new(),
@@ -216,9 +226,12 @@ pub fn dispatch(
     if let Some(window) = caller.data().window.clone().filter(|window| window.live) {
         crate::lifecycle::renew_fuel(&mut caller, &window.stop)?;
     }
-    let id = format!("{module}::{name}");
-    *caller.data_mut().calls.entry(id.clone()).or_default() += 1;
-    caller.data_mut().last_host_call = Some(id.clone());
+    #[cfg(any(test, feature = "diagnostics"))]
+    {
+        let id = format!("{module}::{name}");
+        *caller.data_mut().calls.entry(id.clone()).or_default() += 1;
+        caller.data_mut().last_host_call = Some(id);
+    }
     #[cfg(windows)]
     if module == "env" && name == "web_set_pointer_lock" {
         if let Some(window) = &caller.data().window {
@@ -266,20 +279,20 @@ pub fn dispatch(
     if module == "env" && caller.data().window.is_some() && crate::desktop::handles(name) {
         let outcome = crate::desktop::dispatch(&mut caller, name, args, results);
         if outcome.is_err() && name != "web_run_and_yield" {
-            caller.data_mut().boundary = Some(id);
+            caller.data_mut().boundary = Some(format!("{module}::{name}"));
         }
         return outcome;
     }
     if module == "env" && crate::audio::handles(name) {
         let outcome = crate::audio::dispatch(&mut caller, name, args, results);
         if outcome.is_err() {
-            caller.data_mut().boundary = Some(id);
+            caller.data_mut().boundary = Some(format!("{module}::{name}"));
         }
         return outcome;
     }
     if !implemented(module, name) {
-        caller.data_mut().boundary = Some(id.clone());
-        bail!("native bridge not implemented: {id}");
+        caller.data_mut().boundary = Some(format!("{module}::{name}"));
+        bail!("native bridge not implemented: {module}::{name}");
     }
     let m = caller.data().memory.clone();
     if module == "env" && name.starts_with("MTY_WebSocket") {
@@ -481,6 +494,7 @@ pub fn dispatch(
                 fs.flush()?;
             }
             drop(fs);
+            #[cfg(any(test, feature = "diagnostics"))]
             if name.starts_with("path_") && caller.data().filesystem_requests.len() < 32 {
                 let index = if matches!(
                     name,
@@ -702,12 +716,16 @@ fn backend_call(
                         password: m.string(ptr(args, 3)?, 258)?,
                         fingerprint: m.string(ptr(args, 4)?, 258)?,
                     };
+                    #[cfg(any(test, feature = "diagnostics"))]
                     let raw_shape = remote.diagnostic();
                     let remote = remote.normalize_compact();
-                    b.remote_begin_diagnostic = Some(serde_json::json!({
-                        "raw":raw_shape,"normalized":remote.diagnostic(),
-                        "attempt_matches":id == b.attempt_id
-                    }));
+                    #[cfg(any(test, feature = "diagnostics"))]
+                    {
+                        b.remote_begin_diagnostic = Some(serde_json::json!({
+                            "raw":raw_shape,"normalized":remote.diagnostic(),
+                            "attempt_matches":id == b.attempt_id
+                        }));
+                    }
                     if let Some(attempt) = &b.native_attempt {
                         if let Err(error) = attempt.begin(&id, remote) {
                             let stage = error

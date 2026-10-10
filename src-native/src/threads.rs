@@ -55,15 +55,19 @@ impl Records {
             error: None,
             boundary: None,
             audio_output: None,
+            #[cfg(any(test, feature = "diagnostics"))]
             execution_failure: None,
+            #[cfg(any(test, feature = "diagnostics"))]
             last_host_call: None,
             exit_code: None,
+            #[cfg(any(test, feature = "diagnostics"))]
             calls: Default::default(),
         });
         Some(id)
     }
 }
 
+#[cfg(any(test, feature = "diagnostics"))]
 #[derive(Serialize)]
 pub struct ThreadSummary {
     pub active: usize,
@@ -100,12 +104,15 @@ pub struct ThreadRecord {
     pub finished: bool,
     pub cancelled: bool,
     pub error: Option<String>,
+    #[cfg(any(test, feature = "diagnostics"))]
     pub execution_failure: Option<crate::execution_diagnostics::Failure>,
+    #[cfg(any(test, feature = "diagnostics"))]
     pub last_host_call: Option<String>,
     pub boundary: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub audio_output: Option<crate::audio::Output>,
     pub exit_code: Option<u32>,
+    #[cfg(any(test, feature = "diagnostics"))]
     pub calls: std::collections::BTreeMap<String, u64>,
 }
 
@@ -132,6 +139,7 @@ impl ThreadRuntime {
         }
     }
 
+    #[cfg(any(test, feature = "diagnostics"))]
     pub fn snapshot(&self) -> Vec<ThreadRecord> {
         self.records
             .lock()
@@ -140,6 +148,7 @@ impl ThreadRuntime {
             .clone()
     }
 
+    #[cfg(any(test, feature = "diagnostics"))]
     pub fn summary(&self) -> ThreadSummary {
         let records = self.records.lock().unwrap_or_else(|e| e.into_inner());
         ThreadSummary {
@@ -170,7 +179,10 @@ impl ThreadRuntime {
                     let entry = instance
                         .get_typed_func::<(i32, i32), ()>(&mut store, "wasi_thread_start")
                         .context("WASI thread entry export missing")?;
-                    store.data_mut().execution_stage = Some("guest-thread-start");
+                    #[cfg(any(test, feature = "diagnostics"))]
+                    {
+                        store.data_mut().execution_stage = Some("guest-thread-start");
+                    }
                     let result = entry.call(&mut store, (id, argument as i32));
                     #[cfg(windows)]
                     let result =
@@ -179,6 +191,7 @@ impl ThreadRuntime {
                         } else {
                             result
                         };
+                    #[cfg(any(test, feature = "diagnostics"))]
                     if let Err(error) = &result {
                         store.data_mut().execution_failure =
                             Some(crate::execution_diagnostics::Failure::capture(
@@ -229,10 +242,13 @@ impl ThreadRuntime {
                 if host.audio_output.create_requests > 0 || host.audio_output.destroy_requests > 0 {
                     record.audio_output = Some(host.audio_output);
                 }
-                record.execution_failure = host.execution_failure;
-                record.last_host_call = host.last_host_call;
+                #[cfg(any(test, feature = "diagnostics"))]
+                {
+                    record.execution_failure = host.execution_failure;
+                    record.last_host_call = host.last_host_call;
+                    record.calls = host.calls;
+                }
                 record.boundary = host.boundary;
-                record.calls = host.calls;
                 record.exit_code = host.guest_exit_code;
             }
             records.completed = records.completed.saturating_add(1);

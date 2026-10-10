@@ -2,8 +2,6 @@
     all(windows, not(feature = "diagnostics")),
     windows_subsystem = "windows"
 )]
-// Optional ABI/telemetry helpers are retained in source; LTO removes unreachable code.
-#![cfg_attr(not(any(test, feature = "diagnostics")), allow(dead_code))]
 mod attempt;
 const APP_TITLE: &str = "ParsecWebTurn";
 #[cfg(any(test, feature = "diagnostics"))]
@@ -25,6 +23,7 @@ mod cursor;
 mod data_only_policy_tests;
 #[cfg(windows)]
 mod desktop;
+#[cfg(any(test, feature = "diagnostics"))]
 mod execution_diagnostics;
 mod filesystem;
 #[cfg(windows)]
@@ -62,6 +61,7 @@ mod threads;
 #[cfg(any(test, feature = "diagnostics"))]
 mod tls_probe;
 mod transport;
+#[cfg(any(test, feature = "diagnostics"))]
 mod transport_diagnostic_errors;
 #[cfg(any(test, feature = "diagnostics"))]
 mod transport_diagnostics;
@@ -106,6 +106,7 @@ fn main() {
     #[cfg(all(windows, not(feature = "diagnostics")))]
     client::main();
 }
+#[cfg(any(test, feature = "diagnostics"))]
 fn instantiate(engine: &Engine, module: &Module) -> Result<(Store<HostState>, Instance)> {
     #[cfg(windows)]
     {
@@ -151,6 +152,7 @@ fn instantiate_base_with_window(
             runtime.platform = Arc::new(platform_probe::offline_login_fixture());
         }
         if runtime.window.as_ref().is_some_and(|w| w.online) {
+            #[cfg(any(test, feature = "diagnostics"))]
             if runtime
                 .window
                 .as_ref()

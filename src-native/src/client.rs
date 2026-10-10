@@ -74,7 +74,10 @@ fn run() -> Result<()> {
         backend.stun_provider = attempt::StunProvider::Parsec;
     }
     let outcome = (|| -> Result<()> {
-        store.data_mut().execution_stage = Some("guest-start");
+        #[cfg(test)]
+        {
+            store.data_mut().execution_stage = Some("guest-start");
+        }
         let start = instance.get_typed_func::<(), ()>(&mut store, "_start")?;
         let result = start.call(&mut store, ());
         if store.data().event_loop.is_some() {

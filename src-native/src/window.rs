@@ -40,12 +40,16 @@ pub struct Window {
     video_create_failed: AtomicBool,
     video_ready: AtomicBool,
     video_visible: AtomicBool,
+    #[cfg(any(test, feature = "diagnostics"))]
     pub capture: Mutex<Option<std::path::PathBuf>>,
+    #[cfg(any(test, feature = "diagnostics"))]
     pub synthetic_login: bool,
+    #[cfg(any(test, feature = "diagnostics"))]
     pub script_steps: AtomicUsize,
     pub run_seconds: u64,
     pub live: bool,
     pub online: bool,
+    #[cfg(any(test, feature = "diagnostics"))]
     pub network_origin_audit: bool,
     pub stop: Arc<crate::lifecycle::StopSignal>,
     relative_mouse: AtomicBool,
@@ -83,7 +87,7 @@ impl Window {
         synthetic_login: bool,
         live: bool,
         online: bool,
-        network_origin_audit: bool,
+        _network_origin_audit: bool,
         opengl_required: bool,
     ) -> Result<Arc<Self>> {
         let state = Arc::new(Self {
@@ -100,13 +104,17 @@ impl Window {
             video_create_failed: AtomicBool::new(false),
             video_ready: AtomicBool::new(false),
             video_visible: AtomicBool::new(true),
+            #[cfg(any(test, feature = "diagnostics"))]
             capture: Default::default(),
+            #[cfg(any(test, feature = "diagnostics"))]
             synthetic_login,
+            #[cfg(any(test, feature = "diagnostics"))]
             script_steps: AtomicUsize::new(0),
             run_seconds: if synthetic_login { 20 } else { 8 },
             live,
             online,
-            network_origin_audit,
+            #[cfg(any(test, feature = "diagnostics"))]
+            network_origin_audit: _network_origin_audit,
             stop: Default::default(),
             relative_mouse: AtomicBool::new(false),
             relative_pending: AtomicUsize::new(0),

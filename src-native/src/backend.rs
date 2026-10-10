@@ -20,9 +20,13 @@ pub struct Backend {
     pub media_ingress: crate::media_ingress::Ingress,
     pub input_availability: InputAvailability,
     pub attempt_failure: Option<crate::attempt::FailureStage>,
+    #[cfg(any(test, feature = "diagnostics"))]
     pub attempt_diagnostic: Option<Value>,
+    #[cfg(any(test, feature = "diagnostics"))]
     pub remote_begin_diagnostic: Option<Value>,
+    #[cfg(any(test, feature = "diagnostics"))]
     pub previous_attempt_diagnostics: VecDeque<Value>,
+    #[cfg(any(test, feature = "diagnostics"))]
     pub previous_attempts_omitted: u64,
     #[serde(skip)]
     pub guests: Vec<Value>,
@@ -91,6 +95,7 @@ impl Backend {
     }
 
     pub fn prepare_attempt(&mut self) {
+        #[cfg(any(test, feature = "diagnostics"))]
         if self.attempt_diagnostic.is_some()
             || self.remote_begin_diagnostic.is_some()
             || self.attempt_failure.is_some()
@@ -106,8 +111,11 @@ impl Backend {
             }));
         }
         self.attempt_failure = None;
-        self.attempt_diagnostic = None;
-        self.remote_begin_diagnostic = None;
+        #[cfg(any(test, feature = "diagnostics"))]
+        {
+            self.attempt_diagnostic = None;
+            self.remote_begin_diagnostic = None;
+        }
         self.events.clear();
         self.buffers.clear();
         self.guests.clear();
@@ -120,6 +128,7 @@ impl Backend {
     }
 
     /// Include a live attempt without consuming, cancelling or pumping it.
+    #[cfg(any(test, feature = "diagnostics"))]
     pub fn diagnostic(&self) -> Result<Value> {
         let mut value = serde_json::to_value(self)?;
         value["active_attempt_diagnostic"] = self
@@ -245,7 +254,10 @@ impl Backend {
                 attempt.disconnect();
             }
             self.media_ingress = attempt.media_ingress();
-            self.attempt_diagnostic = Some(attempt.snapshot());
+            #[cfg(any(test, feature = "diagnostics"))]
+            {
+                self.attempt_diagnostic = Some(attempt.snapshot());
+            }
         }
     }
 
