@@ -665,3 +665,60 @@ unsafe extern "system" fn page_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: LP
     }
     DefWindowProcW(hwnd, message, wp, lp)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn native_controls_save_and_reopen_without_guest_or_real_profile() {
+        let mut nonce = [0; 16];
+        getrandom::fill(&mut nonce).unwrap();
+        let suffix: String = nonce.iter().map(|b| format!("{b:02x}")).collect();
+        let directory = std::env::temp_dir().join(format!("parsec-settings-ui-{suffix}"));
+        std::fs::create_dir(&directory).unwrap();
+        let manager = Manager::open(directory.join("settings.json"));
+        unsafe {
+            let parent = CreateWindowExW(
+                0,
+                wide("STATIC").as_ptr(),
+                wide("Settings fixture").as_ptr(),
+                WS_OVERLAPPEDWINDOW,
+                0,
+                0,
+                920,
+                750,
+                null_mut(),
+                null_mut(),
+                GetModuleHandleW(null()),
+                null(),
+            );
+            assert!(!parent.is_null());
+            install_menu(parent);
+            assert_eq!(GetMenuItemCount(GetMenu(parent)), 1);
+            let page = open(parent, manager.clone());
+            assert!(!page.is_null());
+            SetWindowTextW(
+                GetDlgItem(page, STUN as i32),
+                wide("stun:stun.example.org:3478").as_ptr(),
+            );
+            check(page, STUN_ONLY, true);
+            update_enabled(page);
+            assert_eq!(IsWindowEnabled(GetDlgItem(page, TURN as i32)), 0);
+            SendMessageW(page, WM_COMMAND, SAVE, 0);
+            assert!(text(page, STATUS).starts_with("Settings saved"));
+            DestroyWindow(page);
+            let page = open(parent, manager.clone());
+            assert_eq!(text(page, STUN), "stun:stun.example.org:3478");
+            assert!(checked(page, STUN_ONLY));
+            DestroyWindow(page);
+            DestroyWindow(parent);
+        }
+        assert!(
+            Manager::open(directory.join("settings.json"))
+                .view()
+                .0
+                .stun_only
+        );
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+}

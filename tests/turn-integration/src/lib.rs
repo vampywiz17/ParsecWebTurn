@@ -5,7 +5,7 @@ mod stream;
 
 #[cfg(test)]
 mod integration {
-    use std::time::Duration;
+    use std::{sync::Arc, time::Duration};
     use tokio::{
         sync::mpsc,
         time::{sleep, timeout},
@@ -24,6 +24,10 @@ mod integration {
         let mut settings = SettingEngine::default();
         settings.set_network_types(vec![NetworkType::Udp4]);
         settings.set_data_channel_only(true);
+        settings.detach_data_channels();
+        settings.set_sctp_max_message_size_can_send(
+            webrtc::api::setting_engine::SctpMaxMessageSize::Bounded(262144),
+        );
         let api = APIBuilder::new().with_setting_engine(settings).build();
         let a = api
             .new_peer_connection(RTCConfiguration {
@@ -56,10 +60,34 @@ mod integration {
             let cb = b.create_data_channel("fixture", config).await.unwrap();
             for (side, channel) in [(0, &ca), (1, &cb)] {
                 let tx = tx.clone();
-                channel.on_message(Box::new(move |message| {
+                let weak = Arc::downgrade(channel);
+                channel.on_open(Box::new(move || {
                     let tx = tx.clone();
+                    let weak = weak.clone();
                     Box::pin(async move {
-                        tx.send((side, id, message.data)).await.unwrap();
+                        let detached = weak.upgrade().unwrap().detach().await.unwrap();
+                        tokio::spawn(async move {
+                            let mut buffer = vec![0; 262144];
+                            while let Ok((length, text)) =
+                                detached.read_data_channel(&mut buffer).await
+                            {
+                                if length == 0 {
+                                    break;
+                                }
+                                assert!(!text);
+                                if tx
+                                    .send((
+                                        side,
+                                        id,
+                                        bytes::Bytes::copy_from_slice(&buffer[..length]),
+                                    ))
+                                    .await
+                                    .is_err()
+                                {
+                                    break;
+                                }
+                            }
+                        });
                     })
                 }));
             }
@@ -124,9 +152,9 @@ mod integration {
     #[tokio::test]
     async fn coturn_udp_tcp_and_tls_carry_real_dtls_sctp_data() {
         for url in [
-            "turn:localhost:3478?transport=udp",
-            "turn:localhost:3478?transport=tcp",
-            "turns:localhost:5349?transport=tcp",
+            "turn:localhost:43478?transport=udp",
+            "turn:localhost:43478?transport=tcp",
+            "turns:localhost:43549?transport=tcp",
         ] {
             timeout(Duration::from_secs(40), exchange(url))
                 .await
@@ -138,6 +166,6 @@ mod integration {
     async fn trusted_tls_certificate_with_wrong_hostname_is_rejected() {
         use webrtc::ice::turn_stream::TurnStream;
         // Fixture CA is trusted; its server certificate has only DNS:localhost.
-        assert!(TurnStream::dial("127.0.0.1", 5349, true).await.is_err());
+        assert!(TurnStream::dial("127.0.0.1", 43549, true).await.is_err());
     }
 }

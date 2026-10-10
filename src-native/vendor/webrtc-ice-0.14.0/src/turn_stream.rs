@@ -21,28 +21,28 @@ pub(crate) struct RelayStream {
 }
 #[async_trait]
 impl Conn for RelayStream {
-    async fn connect(&self, addr: SocketAddr) -> util::error::Result<()> {
+    async fn connect(&self, addr: SocketAddr) -> util::Result<()> {
         self.relay.connect(addr).await
     }
-    async fn recv(&self, buf: &mut [u8]) -> util::error::Result<usize> {
+    async fn recv(&self, buf: &mut [u8]) -> util::Result<usize> {
         self.relay.recv(buf).await
     }
-    async fn recv_from(&self, buf: &mut [u8]) -> util::error::Result<(usize, SocketAddr)> {
+    async fn recv_from(&self, buf: &mut [u8]) -> util::Result<(usize, SocketAddr)> {
         self.relay.recv_from(buf).await
     }
-    async fn send(&self, buf: &[u8]) -> util::error::Result<usize> {
+    async fn send(&self, buf: &[u8]) -> util::Result<usize> {
         self.relay.send(buf).await
     }
-    async fn send_to(&self, buf: &[u8], addr: SocketAddr) -> util::error::Result<usize> {
+    async fn send_to(&self, buf: &[u8], addr: SocketAddr) -> util::Result<usize> {
         self.relay.send_to(buf, addr).await
     }
-    fn local_addr(&self) -> util::error::Result<SocketAddr> {
+    fn local_addr(&self) -> util::Result<SocketAddr> {
         self.relay.local_addr()
     }
     fn remote_addr(&self) -> Option<SocketAddr> {
         self.relay.remote_addr()
     }
-    async fn close(&self) -> util::error::Result<()> {
+    async fn close(&self) -> util::Result<()> {
         let relay = self.relay.close().await;
         let transport = self.transport.close().await;
         relay.and(transport)
@@ -136,13 +136,13 @@ impl TurnStream {
 
 #[async_trait]
 impl Conn for TurnStream {
-    async fn connect(&self, address: SocketAddr) -> util::error::Result<()> {
+    async fn connect(&self, address: SocketAddr) -> util::Result<()> {
         if address != self.remote {
             return Err(invalid().into());
         }
         Ok(())
     }
-    async fn recv(&self, buffer: &mut [u8]) -> util::error::Result<usize> {
+    async fn recv(&self, buffer: &mut [u8]) -> util::Result<usize> {
         let mut closed = self.closed.subscribe();
         if *closed.borrow() {
             return Err(io::Error::new(io::ErrorKind::NotConnected, "TURN stream closed").into());
@@ -173,10 +173,10 @@ impl Conn for TurnStream {
             },
         }
     }
-    async fn recv_from(&self, buffer: &mut [u8]) -> util::error::Result<(usize, SocketAddr)> {
+    async fn recv_from(&self, buffer: &mut [u8]) -> util::Result<(usize, SocketAddr)> {
         Ok((self.recv(buffer).await?, self.remote))
     }
-    async fn send(&self, buffer: &[u8]) -> util::error::Result<usize> {
+    async fn send(&self, buffer: &[u8]) -> util::Result<usize> {
         if buffer.len() < 4 {
             return Err(invalid().into());
         }
@@ -201,17 +201,17 @@ impl Conn for TurnStream {
             } => result.map_err(Into::into),
         }
     }
-    async fn send_to(&self, buffer: &[u8], target: SocketAddr) -> util::error::Result<usize> {
+    async fn send_to(&self, buffer: &[u8], target: SocketAddr) -> util::Result<usize> {
         self.connect(target).await?;
         self.send(buffer).await
     }
-    fn local_addr(&self) -> util::error::Result<SocketAddr> {
+    fn local_addr(&self) -> util::Result<SocketAddr> {
         Ok(self.local)
     }
     fn remote_addr(&self) -> Option<SocketAddr> {
         Some(self.remote)
     }
-    async fn close(&self) -> util::error::Result<()> {
+    async fn close(&self) -> util::Result<()> {
         self.closed.send_replace(true);
         let _ = tokio::time::timeout(Duration::from_secs(1), async {
             self.writer.lock().await.shutdown().await

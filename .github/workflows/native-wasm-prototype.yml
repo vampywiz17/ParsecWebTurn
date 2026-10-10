@@ -6,6 +6,7 @@ on:
     branches: [dev, main]
     paths:
       - 'src-native/**'
+      - 'tests/turn-integration/**'
       - '.github/workflows/native-wasm-prototype.yml'
       - 'scripts/*native.ps1'
       - 'VERSION'
@@ -14,6 +15,7 @@ on:
     branches: [dev, main]
     paths:
       - 'src-native/**'
+      - 'tests/turn-integration/**'
       - '.cargo/config.toml'
       - 'scripts/*native.ps1'
       - '.github/workflows/native-wasm-prototype.yml'
