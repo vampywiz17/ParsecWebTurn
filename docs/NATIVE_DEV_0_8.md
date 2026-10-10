@@ -97,3 +97,33 @@ The previous M3n real-session result was accepted by the user as the promotion
 baseline. This change does not add a new real-host input/audio certification.
 Additional audio formats, menu compatibility, gamepad/keyboard grabbing and
 custom STUN/TURN settings remain follow-up work on `dev`.
+
+## Native STUN/TURN settings and TCP/TLS (2026-10-10)
+
+Implementation and binary: `a07de7d`. Validation:
+[native Windows and isolated coturn CI](https://github.com/vampywiz17/ParsecWebTurn/actions/runs/38047803544).
+
+- Native Connection settings page, accessed from the application menu or Ctrl+,.
+  New installations retain Parsec's default STUN and offer no TURN server.
+- Separate STUN/TURN lists, STUN-only, custom credentials and Cloudflare
+  credential generation. The earlier JSON/DPAPI contract and unknown properties
+  are preserved; generated-credential caching is memory-only.
+- UDP, TCP and TLS connections to TURN, with UDP relay allocations toward the
+  peer. Ordinary ICE `all` remains in production; there is no forced relay,
+  delayed injection or automatic reconnect experiment.
+- RFC 8656 stream framing/padding and RFC 8489 reliable transaction handling.
+  TLS validates hostname and chain using public and OS-trusted roots. Legacy
+  host DTLS compatibility cannot disable TURN TLS verification.
+- Windows normal/diagnostic tests, strict Clippy, optimized builds and original
+  WASM diagnostic probes passed. The separate coturn fixture passed eight tests,
+  including bidirectional 64 KiB DTLS/SCTP messages over all three transports,
+  fragmented/coalesced frames, shutdown, certificate/hostname rejection, no UDP
+  retransmission over TCP, and immediate pending-request failure on EOF.
+- The packaged single EXE contains no diagnostic fixtures. Downloaded EXE/ZIP
+  hashes matched CI; local `--version` exited successfully. EXE SHA-256:
+  `d7a119720fb692a71394e06cd4572b0f4845b31e6f66cdf6f7d369334e56c3c7`.
+
+These are isolated transport and native integration results, not a new real-host
+certification. A session with the user's Parsec host and chosen TURN provider
+still requires testing. IPv4 relay allocation, no `stuns:` discovery and no HTTP
+proxy tunneling are documented in the configuration contract and transport notes.
