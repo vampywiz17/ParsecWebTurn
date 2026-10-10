@@ -46,6 +46,8 @@ The native Windows development build currently supports:
 - A separate Connection stats window with live traffic, RTT, FPS, video/audio details,
   encryption status and this app's CPU/GPU usage. It identifies the active direct or
   TURN route and, when available, the relay server actually in use.
+- Windows media scheduling and device-supported low-latency audio output,
+  with automatic fallback for endpoints that need the standard audio path.
 
 Your remote computer still needs the regular Parsec host. Not every setting in
 the original interface has been integrated or tested yet.

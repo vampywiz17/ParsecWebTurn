@@ -7,7 +7,7 @@ use std::{
     thread::JoinHandle,
 };
 use windows::{
-    core::PCWSTR,
+    core::{Interface, PCWSTR},
     Win32::{
         Foundation::*,
         Media::Audio::*,
@@ -17,6 +17,10 @@ use windows::{
 #[derive(Clone, Default, Serialize)]
 pub struct Snapshot {
     pub device_opened: bool,
+    pub low_latency_shared_mode: bool,
+    pub engine_period_frames: Option<u32>,
+    pub device_buffer_frames: u32,
+    pub mmcss_registered: bool,
     pub frames_queued: u64,
     pub frames_written: u64,
     pub frames_dropped: u64,
@@ -209,9 +213,9 @@ unsafe fn render(
 ) -> windows::core::Result<()> {
     CoInitializeEx(None, COINIT_MULTITHREADED).ok()?;
     let _com = Apartment;
+    let scheduling = crate::media_scheduling::Registration::audio();
     let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
     let device = enumerator.GetDefaultAudioEndpoint(eRender, eConsole)?;
-    let client: IAudioClient = device.Activate(CLSCTX_ALL, None)?;
     let format = WAVEFORMATEX {
         wFormatTag: WAVE_FORMAT_PCM as u16,
         nChannels: 2,
@@ -221,20 +225,18 @@ unsafe fn render(
         wBitsPerSample: 16,
         cbSize: 0,
     };
-    client.Initialize(
-        AUDCLNT_SHAREMODE_SHARED,
-        AUDCLNT_STREAMFLAGS_EVENTCALLBACK
-            | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM
-            | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
-        200_000,
-        0,
-        &format,
-        None,
-    )?;
+    let (client, period) = initialize_client(&device, &format)?;
     let event = Event(CreateEventW(None, false, false, PCWSTR::null())?);
     client.SetEventHandle(event.0)?;
     let render: IAudioRenderClient = client.GetService()?;
     let capacity = client.GetBufferSize()?;
+    {
+        let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
+        state.report.low_latency_shared_mode = period.is_some();
+        state.report.engine_period_frames = period;
+        state.report.device_buffer_frames = capacity;
+        state.report.mmcss_registered = scheduling.is_some();
+    }
     // Prime with silence, without claiming real decoded audio was played.
     let _ = render.GetBuffer(capacity)?;
     render.ReleaseBuffer(capacity, AUDCLNT_BUFFERFLAGS_SILENT.0 as u32)?;
@@ -302,6 +304,66 @@ unsafe fn render(
     Ok(())
 }
 
+/// Query the endpoint's supported period; never assume a fixed 1/2/5 ms quantum.
+unsafe fn initialize_client(
+    device: &IMMDevice,
+    format: &WAVEFORMATEX,
+) -> windows::core::Result<(IAudioClient, Option<u32>)> {
+    let candidate: IAudioClient = device.Activate(CLSCTX_ALL, None)?;
+    if let Ok(client3) = candidate.cast::<IAudioClient3>() {
+        let (mut default, mut fundamental, mut minimum, mut maximum) = (0, 0, 0, 0);
+        if client3
+            .GetSharedModeEnginePeriod(
+                format,
+                &mut default,
+                &mut fundamental,
+                &mut minimum,
+                &mut maximum,
+            )
+            .is_ok()
+        {
+            if let Some(period) = supported_period(fundamental, minimum, maximum) {
+                // IAudioClient3 documents EVENTCALLBACK only. AUTOCONVERTPCM
+                // belongs to the legacy fallback, not this initialization call.
+                if client3
+                    .InitializeSharedAudioStream(
+                        AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                        period,
+                        format,
+                        None,
+                    )
+                    .is_ok()
+                {
+                    return Ok((candidate, Some(period)));
+                }
+            }
+        }
+    }
+    // A rejected format/period or an older endpoint must retain the working
+    // converter path. Use a fresh COM client after any failed initialization.
+    drop(candidate);
+    let client: IAudioClient = device.Activate(CLSCTX_ALL, None)?;
+    client.Initialize(
+        AUDCLNT_SHAREMODE_SHARED,
+        AUDCLNT_STREAMFLAGS_EVENTCALLBACK
+            | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM
+            | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
+        200_000,
+        0,
+        format,
+        None,
+    )?;
+    Ok((client, None))
+}
+
+fn supported_period(fundamental: u32, minimum: u32, maximum: u32) -> Option<u32> {
+    if fundamental == 0 || minimum == 0 || minimum > maximum {
+        return None;
+    }
+    let period = minimum.div_ceil(fundamental).checked_mul(fundamental)?;
+    (period <= maximum).then_some(period)
+}
+
 /// Quiet local device smoke test: no account/network and no audible test tone.
 #[cfg(feature = "diagnostics")]
 pub fn probe() -> Result<serde_json::Value> {
@@ -324,4 +386,20 @@ pub fn probe() -> Result<serde_json::Value> {
     Ok(
         serde_json::json!({"scope":"synthetic-silent-wasapi-output","audio":snapshot,"real_account_used":false,"external_requests_enabled":false,"native_window_released":window.handle().is_null()}),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::supported_period;
+
+    #[test]
+    fn engine_period_respects_device_granularity_bounds_and_overflow() {
+        assert_eq!(supported_period(4, 48, 448), Some(48));
+        assert_eq!(supported_period(48, 100, 480), Some(144));
+        assert_eq!(supported_period(48, 100, 120), None);
+        assert_eq!(supported_period(0, 48, 480), None);
+        assert_eq!(supported_period(48, 0, 480), None);
+        assert_eq!(supported_period(48, 480, 240), None);
+        assert_eq!(supported_period(2, u32::MAX, u32::MAX), None);
+    }
 }

@@ -41,6 +41,8 @@ mod http_probe;
 mod input;
 mod lifecycle;
 mod media_ingress;
+#[cfg(windows)]
+mod media_scheduling;
 mod memory;
 mod network_audit;
 mod network_policy;

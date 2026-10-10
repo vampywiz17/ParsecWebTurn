@@ -12,6 +12,7 @@ pub struct Snapshot {
     pub enabled: bool,
     pub decoder_initialized: bool,
     pub low_latency_request_accepted: bool,
+    pub mmcss_registered: bool,
     pub decoder: Option<&'static str>,
     pub renderer: Option<&'static str>,
     pub adapter: Option<String>,

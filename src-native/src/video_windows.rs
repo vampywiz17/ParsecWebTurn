@@ -149,6 +149,8 @@ fn run(
     window: &Arc<crate::window::Window>,
     verify_synthetic_pixels: bool,
 ) -> Result<()> {
+    let scheduling = crate::media_scheduling::Registration::video();
+    update(shared, |s| s.mmcss_registered = scheduling.is_some());
     let mut session = None;
     loop {
         let frame = {
