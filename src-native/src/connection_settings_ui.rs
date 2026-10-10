@@ -218,6 +218,7 @@ pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
         "For LAN or VPN connections that do not need a relay.",
         344,
         0,
+        40,
     );
     add(
         hwnd,
@@ -238,6 +239,7 @@ pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
         "An optional relay when a direct connection is unavailable.",
         418,
         0,
+        40,
     );
     let provider = add(
         hwnd,
@@ -356,6 +358,7 @@ pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
         "Reuse valid credentials until you close ParsecWebTurn.",
         758,
         CLOUDFLARE,
+        24,
     );
     add(
         hwnd,
@@ -438,7 +441,15 @@ unsafe fn add(
     });
     hwnd
 }
-unsafe fn row_label(hwnd: HWND, page: &mut Page, label: &str, help: &str, y: i32, group: u8) {
+unsafe fn row_label(
+    hwnd: HWND,
+    page: &mut Page,
+    label: &str,
+    help: &str,
+    y: i32,
+    group: u8,
+    help_height: i32,
+) {
     add(
         hwnd,
         page,
@@ -456,7 +467,7 @@ unsafe fn row_label(hwnd: HWND, page: &mut Page, label: &str, help: &str, y: i32
         "STATIC",
         help,
         0,
-        [0, y + 32, 392, 48],
+        [0, y + 32, 392, help_height],
         HELP,
         group,
         page.small,
@@ -475,7 +486,7 @@ unsafe fn row(
     group: u8,
     style: u32,
 ) {
-    row_label(hwnd, page, label, help, y, group);
+    row_label(hwnd, page, label, help, y, group, 48);
     add(
         hwnd,
         page,
@@ -898,6 +909,7 @@ mod tests {
                 GetWindowLongW(GetDlgItem(page, KEY as i32), GWL_STYLE) as u32 & WS_VISIBLE,
                 0
             );
+            assert_no_overlaps(page);
             capture(page, "custom");
             SetWindowTextW(
                 GetDlgItem(page, USERNAME as i32),
@@ -913,6 +925,7 @@ mod tests {
                 GetWindowLongW(GetDlgItem(page, KEY as i32), GWL_STYLE) as u32 & WS_VISIBLE,
                 0
             );
+            assert_no_overlaps(page);
             capture(page, "cloudflare");
             // The last control remains reachable at a small window size and
             // keyboard focus scrolls it into view without touching real data.
@@ -955,6 +968,33 @@ mod tests {
                 .stun_only
         );
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    unsafe fn assert_no_overlaps(hwnd: HWND) {
+        let page = &*(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const Page);
+        let rectangles: Vec<_> = page
+            .items
+            .iter()
+            .filter(|item| GetWindowLongW(item.hwnd, GWL_STYLE) as u32 & WS_VISIBLE != 0)
+            .map(|item| {
+                let mut rect: RECT = std::mem::zeroed();
+                GetWindowRect(item.hwnd, &mut rect);
+                (item.hwnd, rect)
+            })
+            .collect();
+        for (i, (first, a)) in rectangles.iter().enumerate() {
+            for (second, b) in &rectangles[i + 1..] {
+                assert!(
+                    a.left >= b.right
+                        || b.left >= a.right
+                        || a.top >= b.bottom
+                        || b.top >= a.bottom,
+                    "Overlapping settings controls: {:?} and {:?}",
+                    first,
+                    second
+                );
+            }
+        }
     }
 
     // Optional CI-only visual fixtures. This cannot capture an account, stream

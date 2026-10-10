@@ -60,7 +60,7 @@ jobs:
           name: Native-client-debug-win64
           path: src-native/target/x86_64-pc-windows-msvc/debug/parsec-web-turn.exe
           if-no-files-found: error
-      - name: Validate and build independent Rust host
+      - name: Validate independent Rust host
         shell: pwsh
         env:
           PARSEC_SETTINGS_SCREENSHOTS: ${{ github.workspace }}/src-native/artifacts/settings
@@ -76,6 +76,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Clippy failed' }
           cargo clippy --locked --manifest-path src-native/Cargo.toml --features diagnostics --all-targets -- -D warnings
           if ($LASTEXITCODE -ne 0) { throw 'Diagnostic Clippy failed' }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Native-settings-preview-win64
+          path: src-native/artifacts/settings/*.png
+          if-no-files-found: ignore
+      - name: Build and package native client
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
           cargo build --locked --release --manifest-path src-native/Cargo.toml
           if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
           New-Item -ItemType Directory -Path src-native/artifacts -Force | Out-Null
@@ -83,12 +93,6 @@ jobs:
           ./scripts/package-native.ps1
           & ./src-native/artifacts/ParsecWebTurn.exe --version
           if ($LASTEXITCODE -ne 0) { throw "Normal executable failed" }
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: Native-settings-preview-win64
-          path: src-native/artifacts/settings/*.png
-          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: Native-client-release-candidate-win64
