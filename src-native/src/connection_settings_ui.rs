@@ -1092,6 +1092,7 @@ mod tests {
             );
             assert_no_overlaps(page);
             capture(page, "cloudflare");
+            assert_combo_label_visible(page, PROVIDER);
             paint_regression(page);
             // The last control remains reachable at a small window size and
             // keyboard focus scrolls it into view without touching real data.
@@ -1108,6 +1109,7 @@ mod tests {
             GetClientRect(page, &mut client);
             assert!(button.top >= 0 && button.bottom <= client.bottom);
             capture(page, "cloudflare-bottom");
+            assert_combo_label_visible(page, GPU);
             SendMessageW(GetDlgItem(page, PROVIDER as i32), CB_SETCURSEL, 0, 0);
             update_enabled(page);
             assert_eq!(text(page, USERNAME), "unsaved-user");
@@ -1146,6 +1148,25 @@ mod tests {
                 .stun_only
         );
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    unsafe fn assert_combo_label_visible(hwnd: HWND, id: usize) {
+        let mut rect: RECT = std::mem::zeroed();
+        GetWindowRect(GetDlgItem(hwnd, id as i32), &mut rect);
+        MapWindowPoints(null_mut(), hwnd, (&mut rect as *mut RECT).cast(), 2);
+        let (width, height, pixels) = snapshot(hwnd, false);
+        assert!(rect.top >= 0 && rect.bottom <= height as i32);
+        let mut foreground = 0;
+        // Exclude the border and arrow; a blank owner-drawn selection must fail.
+        for y in rect.top + 5..rect.bottom - 5 {
+            for x in rect.left + 10..rect.right - 28 {
+                let offset = (y as usize * width as usize + x as usize) * 4;
+                if pixels[offset..offset + 3].iter().all(|v| *v > 140) {
+                    foreground += 1;
+                }
+            }
+        }
+        assert!(foreground > 20, "Missing selected text in combo {id}");
     }
 
     unsafe fn assert_no_overlaps(hwnd: HWND) {
