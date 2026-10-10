@@ -1,10 +1,35 @@
 # Changelog
 
-## Native dev fixes
+User-facing changes are listed below. Native versions marked **dev** are development
+builds, not published stable releases.
 
-- Fix WASI inherited file rights so the Parsec core can actually save sign-in data and client preferences to the encrypted profile.
-- Send the original client's disconnect notification before closing an established connection, including application-window shutdown.
-- Keep the native window title as ParsecWebTurn when the Parsec core requests a title change.
+## 0.9.0 — More connection options and live stats (dev, 2026-10-10)
+
+### New
+
+- **Choose your own connection servers.** Configure custom STUN servers and TURN relays, including Cloudflare, coturn, eturnal and ExpressTURN. TURN connections support UDP, TCP and encrypted TLS, including servers on port 443.
+- **STUN-only mode for LAN/VPN use.** Discover a direct connection without offering a TURN relay. Leave the STUN field empty to use Parsec's default server.
+- **Keep your previous server settings.** The native client can read the earlier WebView2 client's `settings.json`, including Windows-protected credentials.
+- **A separate Connection stats window.** See connection delay, traffic, video FPS and resolution, audio format, encryption status and app CPU/GPU usage. The window identifies confirmed direct or TURN connections and the relay server when available. Unavailable details are left unknown or omitted.
+- **Client-side decoder details.** See the video decoder, renderer and graphics adapter. Decoder-specific GPU surfaces are shown as evidence of likely hardware decoding, rather than a guarantee.
+- **Help menu with version information.** Check both the ParsecWebTurn version and the embedded Parsec core version.
+
+### Improved
+
+- A clearer, Parsec-inspired **Settings** page with descriptions, provider-specific fields and dark controls.
+- Fixed overlapping text, clipped buttons and scrolling/repainting problems in Settings. Improved the stats window's resizing, scrolling and handling of ended sessions.
+- Sign-in and Parsec preferences now save correctly between launches.
+- Disconnecting from the overlay or closing the app sends a disconnect notification to the host instead of leaving it waiting for a timeout.
+- The window keeps the **ParsecWebTurn** name so it is clearly distinct from the official client.
+- Windows gives the audio and video workers multimedia scheduling priority when available. Audio output requests the shortest device-supported playback period, with automatic fallback to the previous audio path. These changes target local playback delay; the benefit depends on your device and workload.
+- Removed obsolete WebView2 files and kept diagnostic tools out of the normal app.
+
+### Before you use this build
+
+- This is still a Windows native development build. Vulkan, D3D12, Linux and Android support are not included.
+- Audio uses Opus. Selecting RAW in the embedded interface did not produce a RAW stream in testing; RAW playback is not supported.
+- Enabling TURN can result in a relay being selected even when a direct path is possible. Use **STUN only** if you want to exclude relays.
+- Client-to-host clipboard paste remains a known issue in the tested Parsec session; it also reproduced in standalone Edge.
 
 ## 0.8.0 — Native Rust client (dev)
 
@@ -15,11 +40,7 @@
 - Enable legacy RSA-1024 host identity compatibility while retaining signature and certificate fingerprint verification.
 - Remove the prototype's forced Cloudflare STUN setting and exclude diagnostic commands, synthetic fixtures and test-only readback from the normal executable.
 
-This dev client does not yet expose custom STUN/TURN settings or the former Tauri statistics panel. Future STUN/TURN configuration will retain the previous settings schema and DPAPI format. Additional audio formats, menu integration and remote input testing remain follow-up work.
-
-All notable changes to this project will be documented in this file.
-
-## Unreleased
+Custom server settings and native connection statistics were added in 0.9.0 above.
 
 ## [0.7.0] - 2026-10-02
 
