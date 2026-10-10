@@ -11,8 +11,8 @@ use windows_sys::Win32::{
     System::LibraryLoader::*,
     UI::{
         Controls::{
-            DRAWITEMSTRUCT, EM_SETLIMITTEXT, MEASUREITEMSTRUCT, ODS_DISABLED, ODS_FOCUS,
-            ODS_SELECTED,
+            SetScrollInfo, DRAWITEMSTRUCT, EM_SETLIMITTEXT, MEASUREITEMSTRUCT, ODS_DISABLED,
+            ODS_FOCUS, ODS_SELECTED,
         },
         Input::KeyboardAndMouse::*,
         WindowsAndMessaging::*,
