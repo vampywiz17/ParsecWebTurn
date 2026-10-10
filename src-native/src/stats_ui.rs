@@ -622,9 +622,11 @@ mod tests {
         )
         .to_vec();
         assert!(rgba
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|p| p[0] != 0x28 || p[1] != 0x28 || p[2] != 0x28));
-        for pixel in rgba.chunks_exact_mut(4) {
+        for pixel in rgba.as_chunks_mut::<4>().0 {
             pixel.swap(0, 2);
             pixel[3] = 255;
         }
