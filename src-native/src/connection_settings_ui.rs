@@ -21,6 +21,9 @@ use windows_sys::Win32::{
     },
 };
 pub const OPEN: usize = 4100;
+pub const ABOUT: usize = 4300;
+// Give the large heading and subtitle enough space, including font overhang.
+const HEADER_EXTRA: i32 = 20;
 const SAVE: usize = 4101;
 const BACK: usize = 4102;
 const PROVIDER: usize = 4103;
@@ -104,8 +107,25 @@ pub unsafe fn install_menu(parent: HWND) {
     }
     let menu = CreateMenu();
     AppendMenuW(menu, MF_STRING, OPEN, wide("Settings").as_ptr());
+    let help = CreatePopupMenu();
+    AppendMenuW(help, MF_STRING, ABOUT, wide("About ParsecWebTurn").as_ptr());
+    AppendMenuW(menu, MF_POPUP, help as usize, wide("Help").as_ptr());
     SetMenu(parent, menu);
     DrawMenuBar(parent);
+}
+fn about_text() -> String {
+    format!(
+        "ParsecWebTurn\n\nNative Rust app: {}\nEmbedded Parsec WASM client: {}\n\nIndependent client; not an official Parsec application.",
+        env!("CARGO_PKG_VERSION"), crate::PARSEC_CORE_VERSION
+    )
+}
+pub unsafe fn show_about(parent: HWND) {
+    MessageBoxW(
+        parent,
+        wide(&about_text()).as_ptr(),
+        wide("About ParsecWebTurn").as_ptr(),
+        MB_OK | MB_ICONINFORMATION,
+    );
 }
 pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
     let name = wide("ParsecWebTurnSettings");
@@ -175,7 +195,7 @@ pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
         "STATIC",
         "Settings",
         0,
-        [0, 24, 820, 58],
+        [0, 24, 820, 64],
         0,
         0,
         page.heading,
@@ -530,7 +550,7 @@ unsafe fn layout(hwnd: HWND) {
     GetClientRect(hwnd, &mut client);
     let cloudflare = SendMessageW(GetDlgItem(hwnd, PROVIDER as i32), CB_GETCURSEL, 0, 0) == 1;
     let shift = if cloudflare { 0 } else { 44 };
-    let height = 1000 - shift;
+    let height = 1000 + HEADER_EXTRA - shift;
     page.scroll = page.scroll.clamp(0, (height - client.bottom).max(0));
     let info = SCROLLINFO {
         cbSize: size_of::<SCROLLINFO>() as u32,
@@ -557,7 +577,7 @@ unsafe fn layout(hwnd: HWND) {
             item.hwnd,
             null_mut(),
             x + r.left,
-            r.top - page.scroll - dy,
+            r.top + if r.top >= 88 { HEADER_EXTRA } else { 0 } - page.scroll - dy,
             r.right - r.left,
             r.bottom - r.top,
             SWP_NOZORDER
@@ -589,9 +609,9 @@ unsafe fn paint_page(hwnd: HWND, dc: HDC, page: &Page) {
     let x = ((rect.right - 820) / 2).max(24);
     let line = RECT {
         left: x,
-        top: 127 - page.scroll,
+        top: 127 + HEADER_EXTRA - page.scroll,
         right: x + 820,
-        bottom: 129 - page.scroll,
+        bottom: 129 + HEADER_EXTRA - page.scroll,
     };
     SetDCBrushColor(dc, 0x003b3b3b);
     FillRect(dc, &line, GetStockObject(DC_BRUSH) as HBRUSH);
@@ -948,7 +968,12 @@ mod tests {
             );
             assert!(!parent.is_null());
             install_menu(parent);
-            assert_eq!(GetMenuItemCount(GetMenu(parent)), 1);
+            assert_eq!(GetMenuItemCount(GetMenu(parent)), 2);
+            let help = GetSubMenu(GetMenu(parent), 1);
+            assert!(!help.is_null());
+            assert_eq!(GetMenuItemID(help, 0), ABOUT as u32);
+            assert!(about_text().contains(env!("CARGO_PKG_VERSION")));
+            assert!(about_text().contains(crate::PARSEC_CORE_VERSION));
             let page = open(parent, manager.clone());
             assert!(!page.is_null());
             assert_ne!(

@@ -33,8 +33,9 @@ fn run() -> Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args == ["--version"] {
         println!(
-            "ParsecWebTurn {} / Parsec WASM 150-104a",
-            env!("CARGO_PKG_VERSION")
+            "ParsecWebTurn {} / Parsec WASM {}",
+            env!("CARGO_PKG_VERSION"),
+            PARSEC_CORE_VERSION
         );
         return Ok(());
     }

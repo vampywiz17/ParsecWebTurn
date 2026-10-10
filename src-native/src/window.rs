@@ -176,6 +176,9 @@ impl Window {
     pub fn handle(&self) -> HWND {
         self.hwnd.load(Ordering::Acquire) as HWND
     }
+    pub fn settings_open(&self) -> bool {
+        self.settings_page.load(Ordering::Acquire) != 0
+    }
     #[cfg(not(feature = "diagnostics"))]
     pub fn install_connection_settings(&self, manager: Arc<crate::connection_settings::Manager>) {
         *self
@@ -523,6 +526,10 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
             }
             WM_COMMAND if wp & 0xffff == crate::connection_settings_ui::OPEN => {
                 s.open_connection_settings();
+                return 0;
+            }
+            WM_COMMAND if wp & 0xffff == crate::connection_settings_ui::ABOUT => {
+                crate::connection_settings_ui::show_about(hwnd);
                 return 0;
             }
             WM_KEYDOWN

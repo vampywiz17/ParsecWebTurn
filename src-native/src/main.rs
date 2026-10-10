@@ -5,6 +5,7 @@
 #![warn(unused_crate_dependencies)]
 mod attempt;
 const APP_TITLE: &str = "ParsecWebTurn";
+const PARSEC_CORE_VERSION: &str = "150-104a";
 #[cfg(any(test, feature = "diagnostics"))]
 mod attempt_probe;
 mod audio;

@@ -283,11 +283,15 @@ impl Graphics {
         }
         unsafe {
             self.gl.flush();
-            if SwapBuffers(self.dc) == 0 {
-                bail!("native SwapBuffers failed");
+            // The native settings child owns the visible client area. Keep the
+            // core/overlay running, but don't swap its background over GDI UI.
+            if !self.window.settings_open() {
+                if SwapBuffers(self.dc) == 0 {
+                    bail!("native SwapBuffers failed");
+                }
+                self.report.frames_presented += 1;
             }
         }
-        self.report.frames_presented += 1;
         *self
             .window
             .graphics
