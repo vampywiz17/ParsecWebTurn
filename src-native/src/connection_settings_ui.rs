@@ -64,6 +64,7 @@ struct Page {
     manager: Arc<Manager>,
     saved: Settings,
     gpu_choices: Vec<Option<crate::connection_settings::GpuPreference>>,
+    gpu_labels: Vec<String>,
     background: HBRUSH,
     field: HBRUSH,
     font: HFONT,
@@ -152,6 +153,7 @@ pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
         manager,
         saved,
         gpu_choices: vec![None],
+        gpu_labels: vec!["Automatic (Windows default)".into()],
         background: CreateSolidBrush(BG),
         field: CreateSolidBrush(FIELD),
         font: font(16, 400),
@@ -453,6 +455,7 @@ pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
             };
             SendMessageW(gpu, CB_ADDSTRING, 0, wide(&label).as_ptr() as isize);
             page.gpu_choices.push(Some(p));
+            page.gpu_labels.push(label);
         }
     }
     let selected = s
@@ -470,6 +473,8 @@ pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
                         wide(&format!("Unavailable: {}", preferred.name)).as_ptr() as isize,
                     );
                     page.gpu_choices.push(Some(preferred.clone()));
+                    page.gpu_labels
+                        .push(format!("Unavailable: {}", preferred.name));
                     page.gpu_choices.len() - 1
                 }
             }
@@ -903,21 +908,17 @@ unsafe extern "system" fn page_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: LP
                         },
                     );
                     let combo = draw.CtlID == PROVIDER as u32 || draw.CtlID == GPU as u32;
-                    let label = if combo {
-                        let len =
-                            SendMessageW(draw.hwndItem, CB_GETLBTEXTLEN, draw.itemID as usize, 0);
-                        if (0..=4096).contains(&len) {
-                            let mut buffer = vec![0u16; len as usize + 1];
-                            SendMessageW(
-                                draw.hwndItem,
-                                CB_GETLBTEXT,
-                                draw.itemID as usize,
-                                buffer.as_mut_ptr() as isize,
-                            );
-                            String::from_utf16_lossy(&buffer[..len as usize])
-                        } else {
-                            String::new()
+                    let label = if draw.CtlID == PROVIDER as u32 {
+                        match draw.itemID {
+                            0 => "Custom servers".into(),
+                            1 => "Cloudflare TURN".into(),
+                            _ => String::new(),
                         }
+                    } else if draw.CtlID == GPU as u32 {
+                        page.gpu_labels
+                            .get(draw.itemID as usize)
+                            .cloned()
+                            .unwrap_or_default()
                     } else if primary {
                         "Save settings".into()
                     } else {
