@@ -198,7 +198,10 @@ impl Conn for TurnStream {
                 writer.write_all(&[0; 3][..padding]).await?;
                 writer.flush().await?;
                 Ok::<_, io::Error>(buffer.len())
-            } => result.map_err(Into::into),
+            } => {
+                if result.is_err() { self.closed.send_replace(true); }
+                result.map_err(Into::into)
+            },
         }
     }
     async fn send_to(&self, buffer: &[u8], target: SocketAddr) -> util::Result<usize> {

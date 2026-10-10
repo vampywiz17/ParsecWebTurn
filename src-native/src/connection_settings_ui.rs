@@ -462,6 +462,7 @@ pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
     hwnd
 }
 
+#[allow(clippy::too_many_arguments)] // Flat Win32 control descriptor, UI-thread only.
 unsafe fn field(
     hwnd: HWND,
     page: &Page,

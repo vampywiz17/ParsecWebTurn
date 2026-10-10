@@ -563,6 +563,77 @@ mod tests {
         assert_eq!(std::fs::read(dir.file()).unwrap(), b"malformed");
     }
 
+    #[tokio::test]
+    async fn credential_request_uses_post_and_preserves_generated_tls_urls() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            loop {
+                let mut buffer = [0; 1024];
+                let n = socket.read(&mut buffer).await.unwrap();
+                assert_ne!(n, 0);
+                request.extend_from_slice(&buffer[..n]);
+                if request.ends_with(b"{\"ttl\":60}") {
+                    break;
+                }
+                assert!(request.len() < 8192);
+            }
+            let body = br#"{"iceServers":[{"urls":"turns:localhost:5349?transport=tcp","username":"fixture","credential":"fixture-password"}]}"#;
+            socket
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            socket.write_all(body).await.unwrap();
+            String::from_utf8(request).unwrap()
+        });
+        let servers =
+            cloudflare_request(&format!("http://{address}/fixture"), "synthetic-token", 60)
+                .await
+                .unwrap();
+        assert_eq!(servers[0].urls, ["turns:localhost:5349?transport=tcp"]);
+        let request = server.await.unwrap();
+        assert!(request.starts_with("POST /fixture HTTP/1.1"));
+        assert!(request
+            .to_ascii_lowercase()
+            .contains("authorization: bearer synthetic-token"));
+        assert!(request.ends_with(r#"{"ttl":60}"#));
+    }
+
+    #[tokio::test]
+    async fn credential_service_redirects_are_not_followed() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let _ = socket.read(&mut [0; 8192]).await.unwrap();
+            socket.write_all(format!("HTTP/1.1 302 Found\r\nLocation: http://{address}/redirected\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
+            drop(socket);
+            assert!(
+                tokio::time::timeout(Duration::from_millis(200), listener.accept())
+                    .await
+                    .is_err()
+            );
+        });
+        let error = cloudflare_request(&format!("http://{address}/fixture"), "synthetic-token", 60)
+            .await
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(error.contains("HTTP 302"));
+        assert!(!error.contains("synthetic-token"));
+        server.await.unwrap();
+    }
+
     #[test]
     fn supported_turn_transports_are_validated_without_forcing_relay() {
         for url in [
