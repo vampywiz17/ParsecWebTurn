@@ -26,7 +26,7 @@ available on `main` and in the [v0.7.0 source](https://github.com/vampywiz17/Par
 - **More connection options:** bring custom STUN/TURN servers to the native client,
   building on the earlier WebView2 version.
 - **More platforms:** work toward Linux, then explore Android and Android TV.
-- **Better visibility:** plan useful connection and playback statistics from the
+- **Better visibility:** useful connection and playback statistics from the
   native client itself.
 
 These are development goals, not a promise of lower resource usage than every
@@ -43,6 +43,9 @@ The native Windows development build currently supports:
 - Remembering your sign-in and Parsec preferences between launches.
 - Graceful disconnect from the overlay and when closing the app.
 - Custom STUN servers and TURN relays over UDP, TCP or TLS, including Cloudflare.
+- A separate Connection stats window with live traffic, RTT, FPS, video/audio details,
+  encryption status and this app's CPU/GPU usage. It identifies the active direct or
+  TURN route and, when available, the relay server actually in use.
 
 Your remote computer still needs the regular Parsec host. Not every setting in
 the original interface has been integrated or tested yet.
@@ -63,6 +66,12 @@ a connection succeeds.
 **Shortcuts:** F11 switches fullscreen on or off. F8 shows or hides the video layer
 if you need to reach the interface underneath. Use the Parsec overlay for stream
 controls, volume and relative mouse mode.
+
+Open **Connection stats** or press **Ctrl+Shift+S** for native measurements in a
+separate window. Unknown measurements stay unknown. Traffic shows actual usage,
+not your maximum connection speed. Audio format remains visible during silence;
+the host's configured audio bitrate is not exposed. Network packet loss is not
+available for this client's SCTP video transport; local dropped frames are separate.
 
 Open **Settings** or press **Ctrl+,** to change servers. The Network page shows only
 the fields for your selected TURN provider, with descriptions beside each setting.
@@ -98,7 +107,7 @@ delivery commitment. There are no fixed release dates for these milestones.
 | STUN connectivity | Available | Parsec's default STUN server, custom discovery servers and a STUN-only option for LAN/VPN use. |
 | Custom STUN and TURN relay support | Available | Cloudflare or custom TURN servers, including UDP, TCP and TLS server connections. Compatible with the earlier client's server settings file. |
 | More audio formats and menu integration | Planned | Support additional audio choices and review which Parsec settings need native integration. |
-| Native connection and playback statistics | Planned for native; available in the earlier WebView2 client | Bring the earlier client's statistics to the native app, including connection quality, playback and resource usage. |
+| Native connection and playback statistics | Available | Separate native stats window: active direct/TURN route, relay server, RTT, traffic, decoded FPS, video/audio details, DTLS state and app CPU/GPU usage. Missing data stays unknown. |
 | Vulkan rendering backend | Planned | Add another GPU rendering option alongside D3D11 and build toward Linux support. |
 | D3D12 rendering backend | Exploring | Investigate an additional native GPU rendering option on Windows. |
 | Linux client, distributed as Flatpak | Planned | Make the native client available on Linux with straightforward installation. |
@@ -136,7 +145,7 @@ app and the earlier Tauri/WebView2 approach.
 
 > **Concept illustration:** it includes planned features and potential benefits.
 > In particular, custom TURN support, Vulkan, broader platform support and a native
-> statistics panel are not all present in this dev build. Use the roadmap above
+> other planned features are not all present in this dev build. Use the roadmap above
 > for the current status. The image is not a benchmark or an up-to-date reference
 > for the official app's features or pricing.
 

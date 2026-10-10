@@ -23,6 +23,14 @@ impl fmt::Display for RTCIceCandidatePair {
 }
 
 impl RTCIceCandidatePair {
+    /// Read-only access to the actual selected local candidate (telemetry).
+    pub fn local(&self) -> &RTCIceCandidate {
+        &self.local
+    }
+    /// Read-only access to the actual selected remote candidate (telemetry).
+    pub fn remote(&self) -> &RTCIceCandidate {
+        &self.remote
+    }
     fn stats_id(local_id: &str, remote_id: &str) -> String {
         format!("{local_id}-{remote_id}")
     }

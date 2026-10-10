@@ -183,6 +183,8 @@ struct Progress {
 }
 
 struct Completion {
+    #[cfg(windows)]
+    telemetry: Option<(Arc<crate::stats::Shared>, u64)>,
     started_at: std::time::Instant,
     closing: bool,
     output: Option<Output>,
@@ -200,6 +202,14 @@ struct Completion {
     video_output: Option<crate::video_windows::Pipeline>,
 }
 
+impl Drop for Completion {
+    fn drop(&mut self) {
+        #[cfg(windows)]
+        if let Some((bus, generation)) = &self.telemetry {
+            bus.finish(*generation);
+        }
+    }
+}
 impl Completion {
     fn elapsed_ms(&self) -> u64 {
         u64::try_from(self.started_at.elapsed().as_millis()).unwrap_or(u64::MAX)
@@ -378,6 +388,8 @@ impl Attempt {
             video_stream.configure(config.video_protocol.clone());
         }
         let completion = Arc::new(Mutex::new(Completion {
+            #[cfg(windows)]
+            telemetry: None,
             started_at: std::time::Instant::now(),
             closing: false,
             output: Some(output),
@@ -524,6 +536,11 @@ impl Attempt {
 
     #[cfg(windows)]
     pub fn start_video(&self, window: Arc<crate::window::Window>) {
+        let generation = window.stats.begin();
+        self.completion
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .telemetry = Some((window.stats.clone(), generation));
         self.completion
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -731,6 +748,49 @@ fn worker(
         tokio::time::timeout(Duration::from_secs(5), api.new_peer_connection(ice)).await
     })??);
     let callback_state = shared.clone();
+    #[cfg(windows)]
+    {
+        let state = shared.clone();
+        let weak = Arc::downgrade(&peer);
+        runtime.spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                let link = {
+                    let s = state.lock().unwrap_or_else(|e| e.into_inner());
+                    if s.cancelled || s.closing {
+                        break;
+                    }
+                    s.telemetry.clone()
+                };
+                let Some((bus, generation)) = link else {
+                    continue;
+                };
+                if !bus.requested() {
+                    continue;
+                }
+                let Some(peer) = weak.upgrade() else {
+                    break;
+                };
+                let Ok(mut sample) =
+                    tokio::time::timeout(Duration::from_millis(750), crate::stats::network(&peer))
+                        .await
+                else {
+                    continue;
+                };
+                {
+                    let s = state.lock().unwrap_or_else(|e| e.into_inner());
+                    if s.cancelled || s.closing {
+                        break;
+                    }
+                    sample.audio_bytes = s.progress.channel_bytes_received[2];
+                    sample.audio_ready = s.audio_stream.is_some();
+                    sample.video = s.video_output.as_ref().map(|v| v.snapshot());
+                    sample.profile = s.video_stream.snapshot().sps_profile_idc;
+                }
+                bus.publish(generation, sample);
+            }
+        });
+    }
     let callback_wake = wake.clone();
     let attempt_id = id.to_owned();
     peer.on_ice_candidate(Box::new(move |candidate| {
@@ -964,6 +1024,10 @@ fn worker(
         }
         state.progress.transport_states_before_close = states;
         state.closing = true;
+        #[cfg(windows)]
+        if let Some((bus, generation)) = &state.telemetry {
+            bus.finish(*generation);
+        }
     }
     let closed = runtime
         .block_on(async { tokio::time::timeout(Duration::from_secs(2), peer.close()).await });
@@ -1165,6 +1229,8 @@ mod tests {
     use wasmtime::{Config, Engine, MemoryType, SharedMemory};
     fn empty_completion() -> Completion {
         Completion {
+            #[cfg(windows)]
+            telemetry: None,
             started_at: std::time::Instant::now(),
             closing: false,
             output: None,

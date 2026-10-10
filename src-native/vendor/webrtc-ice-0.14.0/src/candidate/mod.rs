@@ -21,7 +21,7 @@ use std::time::SystemTime;
 
 use async_trait::async_trait;
 use candidate_base::*;
-use portable_atomic::{AtomicBool, AtomicU16, AtomicU8};
+use portable_atomic::{AtomicBool, AtomicU16, AtomicU64, AtomicU8};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, Mutex};
 
@@ -72,6 +72,13 @@ pub trait Candidate: fmt::Display {
     fn related_address(&self) -> Option<CandidateRelatedAddress>;
 
     fn candidate_type(&self) -> CandidateType;
+    /// Local TURN allocation provenance; empty when unavailable. No credentials.
+    fn relay_url(&self) -> String {
+        String::new()
+    }
+    fn relay_protocol(&self) -> String {
+        String::new()
+    }
     fn tcp_type(&self) -> TcpType;
 
     fn marshal(&self) -> String;
@@ -228,6 +235,9 @@ impl fmt::Display for CandidatePairState {
 
 /// Represents a combination of a local and remote candidate.
 pub struct CandidatePair {
+    pub(crate) rtt_ns: AtomicU64,
+    pub(crate) total_rtt_ns: AtomicU64,
+    pub(crate) responses_received: AtomicU64,
     pub(crate) ice_role_controlling: AtomicBool,
     pub remote: Arc<dyn Candidate + Send + Sync>,
     pub local: Arc<dyn Candidate + Send + Sync>,
@@ -240,6 +250,9 @@ pub struct CandidatePair {
 impl Default for CandidatePair {
     fn default() -> Self {
         Self {
+            rtt_ns: AtomicU64::new(0),
+            total_rtt_ns: AtomicU64::new(0),
+            responses_received: AtomicU64::new(0),
             ice_role_controlling: AtomicBool::new(false),
             remote: Arc::new(CandidateBase::default()),
             local: Arc::new(CandidateBase::default()),
@@ -293,6 +306,9 @@ impl CandidatePair {
         controlling: bool,
     ) -> Self {
         Self {
+            rtt_ns: AtomicU64::new(0),
+            total_rtt_ns: AtomicU64::new(0),
+            responses_received: AtomicU64::new(0),
             ice_role_controlling: AtomicBool::new(controlling),
             remote,
             local,

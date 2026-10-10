@@ -27,6 +27,8 @@ pub enum Event {
 }
 
 pub struct Window {
+    pub stats: Arc<crate::stats::Shared>,
+    stats_page: AtomicUsize,
     connection_settings: Mutex<Option<Arc<crate::connection_settings::Manager>>>,
     settings_page: AtomicUsize,
     pub hwnd: AtomicUsize,
@@ -70,6 +72,16 @@ pub struct Window {
 }
 
 impl Window {
+    unsafe fn open_stats(&self) {
+        let existing = self.stats_page.load(Ordering::Acquire) as HWND;
+        if !existing.is_null() {
+            ShowWindow(existing, SW_RESTORE);
+            SetForegroundWindow(existing);
+            return;
+        }
+        let page = crate::stats_ui::open(self.handle(), self.stats.clone());
+        self.stats_page.store(page as usize, Ordering::Release);
+    }
     pub fn create(
         synthetic_login: bool,
         live: bool,
@@ -93,6 +105,8 @@ impl Window {
         opengl_required: bool,
     ) -> Result<Arc<Self>> {
         let state = Arc::new(Self {
+            stats: Default::default(),
+            stats_page: AtomicUsize::new(0),
             connection_settings: Default::default(),
             settings_page: AtomicUsize::new(0),
             hwnd: AtomicUsize::new(0),
@@ -511,6 +525,26 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
         let x = lp as i16 as i32;
         let y = (lp >> 16) as i16 as i32;
         match message {
+            m if m == WM_APP + 10 => {
+                let _ = s
+                    .stats_page
+                    .compare_exchange(wp, 0, Ordering::AcqRel, Ordering::Acquire);
+                return 0;
+            }
+            WM_COMMAND if wp & 0xffff == crate::stats_ui::OPEN => {
+                s.open_stats();
+                return 0;
+            }
+            WM_KEYDOWN
+                if wp == b'S' as usize
+                    && GetKeyState(VK_CONTROL as i32) < 0
+                    && GetKeyState(VK_SHIFT as i32) < 0 =>
+            {
+                if lp & (1 << 30) == 0 {
+                    s.open_stats();
+                }
+                return 0;
+            }
             m if m == WM_APP + 8 => {
                 crate::connection_settings_ui::install_menu(hwnd);
                 return 0;

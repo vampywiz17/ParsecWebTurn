@@ -826,6 +826,14 @@ impl Agent {
                 } else {
                     None
                 };
+                let relay_url = url.to_string(); // Url Display excludes username/password.
+                let relay_protocol = if url.scheme == SchemeType::Turns {
+                    "tls"
+                } else if url.proto == ProtoType::Tcp {
+                    "tcp"
+                } else {
+                    "udp"
+                };
                 let cfg = turn::client::ClientConfig {
                     stun_serv_addr: String::new(),
                     turn_serv_addr: turn_server_addr.clone(),
@@ -914,7 +922,11 @@ impl Agent {
 
                 let candidate: Arc<dyn Candidate + Send + Sync> =
                     match relay_config.new_candidate_relay() {
-                        Ok(candidate) => Arc::new(candidate),
+                        Ok(mut candidate) => {
+                            candidate.relay_url = relay_url;
+                            candidate.relay_protocol = relay_protocol.into();
+                            Arc::new(candidate)
+                        }
                         Err(err) => {
                             let _ = relay_conn.close().await;
                             let _ = client.close().await;

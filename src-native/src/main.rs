@@ -48,6 +48,8 @@ mod network_policy;
 mod overlay;
 #[cfg(windows)]
 mod overlay_windows;
+#[cfg(windows)]
+mod performance;
 #[cfg(all(test, windows))]
 mod persistence_tests;
 mod platform;
@@ -60,6 +62,10 @@ mod secure_storage;
 #[cfg(any(test, feature = "diagnostics"))]
 mod session_probe;
 mod signaling;
+#[cfg(windows)]
+mod stats;
+#[cfg(windows)]
+mod stats_ui;
 #[cfg(any(test, feature = "diagnostics"))]
 mod thread_probe;
 mod threads;

@@ -134,15 +134,50 @@ mod integration {
             assert_eq!((side, got_id), (0, id as u16));
             assert_eq!(got, payload);
         }
-        let _pair = a
+        let pair = a
             .sctp()
             .transport()
             .ice_transport()
             .get_selected_candidate_pair()
             .await
             .unwrap();
-        // The offer above contains only relay candidates and actual bytes
-        // traversed the selected pair; no private candidate-pair fields needed.
+        assert_eq!(pair.local().typ.to_string(), "relay");
+        let stats = a.get_stats().await;
+        let id = format!("{}-{}", pair.local().stats_id, pair.remote().stats_id);
+        let mut measured_rtt = false;
+        let mut allocation = false;
+        for value in stats.reports.values() {
+            match value {
+                webrtc::stats::StatsReportType::CandidatePair(p) if p.id == id => {
+                    assert!(p.responses_received > 0);
+                    assert!(p.current_round_trip_time > 0.0);
+                    assert!(p.total_round_trip_time >= p.current_round_trip_time);
+                    measured_rtt = true;
+                }
+                webrtc::stats::StatsReportType::LocalCandidate(c)
+                    if c.id == pair.local().stats_id =>
+                {
+                    assert_eq!(c.url, url);
+                    assert_eq!(
+                        c.relay_protocol,
+                        if url.starts_with("turns:") {
+                            "tls"
+                        } else if url.ends_with("tcp") {
+                            "tcp"
+                        } else {
+                            "udp"
+                        }
+                    );
+                    assert!(!c.url.contains("fixture"));
+                    allocation = true;
+                }
+                _ => {}
+            }
+        }
+        assert!(
+            measured_rtt && allocation,
+            "selected TURN telemetry must be present"
+        );
         timeout(Duration::from_secs(5), a.close())
             .await
             .unwrap()

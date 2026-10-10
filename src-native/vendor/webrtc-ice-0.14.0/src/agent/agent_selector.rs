@@ -324,6 +324,12 @@ impl ControllingSelector for AgentInternal {
             let selected_pair_is_none = self.agent_conn.get_selected_pair().is_none();
 
             if let Some(p) = self.find_pair(local, remote).await {
+                // Observe only an authenticated, transaction/source-matched STUN response.
+                let ns = u64::try_from(pending_request.timestamp.elapsed().as_nanos())
+                    .unwrap_or(u64::MAX);
+                p.rtt_ns.store(ns, Ordering::Relaxed);
+                p.total_rtt_ns.fetch_add(ns, Ordering::Relaxed);
+                p.responses_received.fetch_add(1, Ordering::Relaxed);
                 p.state
                     .store(CandidatePairState::Succeeded as u8, Ordering::SeqCst);
                 log::trace!(
@@ -474,6 +480,12 @@ impl ControlledSelector for AgentInternal {
             log::trace!("inbound STUN (SuccessResponse) from {remote} to {local}");
 
             if let Some(p) = self.find_pair(local, remote).await {
+                // Observe only an authenticated, transaction/source-matched STUN response.
+                let ns = u64::try_from(pending_request.timestamp.elapsed().as_nanos())
+                    .unwrap_or(u64::MAX);
+                p.rtt_ns.store(ns, Ordering::Relaxed);
+                p.total_rtt_ns.fetch_add(ns, Ordering::Relaxed);
+                p.responses_received.fetch_add(1, Ordering::Relaxed);
                 p.state
                     .store(CandidatePairState::Succeeded as u8, Ordering::SeqCst);
                 log::trace!("Found valid candidate pair: {p}");

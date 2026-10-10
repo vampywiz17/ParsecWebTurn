@@ -224,6 +224,9 @@ impl AgentInternal {
                 remote_candidate_id: cp.remote.id(),
                 state: cp.state.load(Ordering::SeqCst).into(),
                 nominated: cp.nominated.load(Ordering::SeqCst),
+                current_round_trip_time: cp.rtt_ns.load(Ordering::Relaxed) as f64 / 1e9,
+                total_round_trip_time: cp.total_rtt_ns.load(Ordering::Relaxed) as f64 / 1e9,
+                responses_received: cp.responses_received.load(Ordering::Relaxed),
                 ..CandidatePairStats::default()
             };
             res.push(stat);
@@ -246,7 +249,8 @@ impl AgentInternal {
                     candidate_type: c.candidate_type(),
                     priority: c.priority(),
                     // URL string
-                    relay_protocol: "udp".to_owned(),
+                    url: c.relay_url(),
+                    relay_protocol: c.relay_protocol(),
                     // Deleted bool
                     ..CandidateStats::default()
                 };
@@ -271,7 +275,7 @@ impl AgentInternal {
                     candidate_type: c.candidate_type(),
                     priority: c.priority(),
                     // URL string
-                    relay_protocol: "udp".to_owned(),
+                    relay_protocol: String::new(),
                     // Deleted bool
                     ..CandidateStats::default()
                 };

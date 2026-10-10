@@ -107,6 +107,12 @@ pub unsafe fn install_menu(parent: HWND) {
     }
     let menu = CreateMenu();
     AppendMenuW(menu, MF_STRING, OPEN, wide("Settings").as_ptr());
+    AppendMenuW(
+        menu,
+        MF_STRING,
+        crate::stats_ui::OPEN,
+        wide("Connection stats\tCtrl+Shift+S").as_ptr(),
+    );
     let help = CreatePopupMenu();
     AppendMenuW(help, MF_STRING, ABOUT, wide("About ParsecWebTurn").as_ptr());
     AppendMenuW(menu, MF_POPUP, help as usize, wide("Help").as_ptr());
@@ -968,7 +974,7 @@ mod tests {
             );
             assert!(!parent.is_null());
             install_menu(parent);
-            assert_eq!(GetMenuItemCount(GetMenu(parent)), 2);
+            assert_eq!(GetMenuItemCount(GetMenu(parent)), 3);
             let help = GetSubMenu(GetMenu(parent), 1);
             assert!(!help.is_null());
             assert_eq!(GetMenuItemID(help, 0), ABOUT as u32);

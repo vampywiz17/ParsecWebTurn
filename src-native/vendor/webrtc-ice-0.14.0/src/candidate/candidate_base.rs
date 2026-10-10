@@ -32,6 +32,8 @@ pub struct CandidateBaseConfig {
 }
 
 pub struct CandidateBase {
+    pub(crate) relay_url: String,
+    pub(crate) relay_protocol: String,
     pub(crate) id: String,
     pub(crate) network_type: AtomicU8,
     pub(crate) candidate_type: CandidateType,
@@ -62,6 +64,8 @@ pub struct CandidateBase {
 impl Default for CandidateBase {
     fn default() -> Self {
         Self {
+            relay_url: String::new(),
+            relay_protocol: String::new(),
             id: String::new(),
             network_type: AtomicU8::new(0),
             candidate_type: CandidateType::default(),
@@ -116,6 +120,12 @@ impl fmt::Display for CandidateBase {
 
 #[async_trait]
 impl Candidate for CandidateBase {
+    fn relay_url(&self) -> String {
+        self.relay_url.clone()
+    }
+    fn relay_protocol(&self) -> String {
+        self.relay_protocol.clone()
+    }
     fn foundation(&self) -> String {
         if !self.foundation_override.is_empty() {
             return self.foundation_override.clone();

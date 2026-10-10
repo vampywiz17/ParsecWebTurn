@@ -109,6 +109,44 @@ Unused-code and unused-direct-dependency warnings are enabled; both build
 variants, including unit-test targets, must pass strict Clippy.
 Historical implementation evidence is under `docs/NATIVE_*.md`.
 
+## Native connection statistics
+
+Connection stats (Ctrl+Shift+S) opens a separate, modeless Win32 window. A bounded
+read-only task samples the active peer once per second while this window is visible.
+Session generation IDs prevent late samples from replacing a newer connection.
+No packet capture, administrator access, video readback or additional GPU texture
+copy is needed. GDI double buffering applies only to the statistics window.
+
+The selected ICE pair provides route evidence: either relay candidate confirms TURN;
+local host/srflx/prflx with remote host/srflx confirms a direct ICE path. Remote prflx
+alone remains unverified because a remote relay may be hidden. Missing data and stale
+samples never prove a direct path. For local TURN, allocation provenance reports
+the actual server URL and UDP/TCP/TLS transport without credentials.
+
+Small read-only extensions in the existing vendored ICE library expose selected
+candidate getters, allocation provenance, and RTT from transaction-matched,
+authenticated STUN connectivity-check responses. They do not alter candidate
+priority, nomination, transport policy, signaling or packet formats. The upstream
+RTT placeholder zero is never displayed as a measurement. Loopback coturn fixtures
+validate these fields over UDP, TCP and TLS with real encrypted SCTP traffic.
+
+Traffic uses ICE transport byte deltas (not an available-bandwidth estimate); FPS
+uses native decoder frame deltas. Video metadata comes from the existing H.264 SPS
+inspector and Media Foundation/D3D11 snapshots. Audio format reflects the actual
+native Opus pipeline, persists during silence, and distinguishes measured traffic
+from the unknown host encoder bitrate. SCTP data channels do not expose RTP packet
+loss; local queue drops are labeled separately. DTLS state is available, but its
+version and cipher are not exposed by the current safe transport API.
+
+CPU uses documented GetProcessTimes, normalized across logical processors. GPU uses
+the documented Windows PDH GPU Engine counters for this process only, showing the
+busiest engine and VideoDecode separately. Missing counters remain unknown. There
+are no WebView2 child processes in this client.
+
+References: [WebRTC statistics](https://www.w3.org/TR/webrtc-stats/),
+[GetProcessTimes](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getprocesstimes),
+[PDH formatted counter arrays](https://learn.microsoft.com/en-us/windows/win32/api/pdh/nf-pdh-pdhgetformattedcounterarrayw).
+
 ParsecWebTurn is an independent project. Parsec and its core belong to their
 respective owners. Included Opus and WebRTC license notices must accompany binary
 redistribution.
