@@ -15,6 +15,8 @@ mod audio_windows;
 mod audit_probe;
 mod backend;
 mod buffers;
+mod connection_settings;
+mod connection_settings_ui;
 mod control;
 #[cfg(test)]
 mod crypto_policy_tests;
@@ -53,6 +55,7 @@ mod platform_probe;
 #[cfg(windows)]
 mod platform_windows;
 mod poll;
+mod secure_storage;
 #[cfg(any(test, feature = "diagnostics"))]
 mod session_probe;
 mod signaling;
@@ -66,6 +69,9 @@ mod transport;
 mod transport_diagnostic_errors;
 #[cfg(any(test, feature = "diagnostics"))]
 mod transport_diagnostics;
+#[cfg(test)]
+#[path = "../tests/turn_stream.rs"]
+mod turn_stream_tests;
 mod video_output;
 mod video_stream;
 #[cfg(windows)]

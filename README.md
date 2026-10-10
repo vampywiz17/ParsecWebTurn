@@ -42,6 +42,7 @@ The native Windows development build currently supports:
 - The familiar Parsec stream overlay, including its relative-mouse option.
 - Remembering your sign-in and Parsec preferences between launches.
 - Graceful disconnect from the overlay and when closing the app.
+- Custom STUN servers and TURN relays over UDP, TCP or TLS, including Cloudflare.
 
 Your remote computer still needs the regular Parsec host. Not every setting in
 the original interface has been integrated or tested yet.
@@ -63,6 +64,17 @@ a connection succeeds.
 if you need to reach the interface underneath. Use the Parsec overlay for stream
 controls, volume and relative mouse mode.
 
+Open **ParsecWebTurn → Connection settings** or press **Ctrl+,** to change servers.
+Leave the STUN field empty to use Parsec's default. For LAN/VPN connections, you
+can supply your own STUN server and enable **STUN only** to exclude all TURN relays.
+For a custom relay, enter its TURN URL, username and password; or select Cloudflare
+and enter your TURN Key ID and API token. Changes apply on the next connection.
+
+Examples: `turn:turn.example.com:3478?transport=udp`,
+`turn:turn.example.com:3478?transport=tcp`, or
+`turns:turn.example.com:443?transport=tcp`. The last option requires a TLS-enabled
+TURN server with a trusted certificate; changing the port alone does not enable TLS.
+
 Sign-in and preferences are saved under `%LOCALAPPDATA%\ParsecWebTurn\Native`,
 encrypted for your Windows user. Replacing the EXE keeps these settings. When
 moving from the older WebView2 client, sign in once in the native app; your old
@@ -82,8 +94,8 @@ delivery commitment. There are no fixed release dates for these milestones.
 | Native Rust WebRTC client | Available | Connect to a Parsec host without WebView2, using the existing Parsec WASM core. |
 | Native Windows video, audio and controls | Available | D3D11 video output, H.264 playback, Opus sound, keyboard, mouse and the Parsec overlay. |
 | Single executable and saved settings | Available | Run the portable EXE; keep your sign-in and preferences after restarting. |
-| STUN connectivity | Available, with a fixed server | The native client currently uses Parsec's default STUN server for direct connections. |
-| Custom STUN and TURN relay support | Planned for native; available in the earlier WebView2 client | Choose Cloudflare or your own compatible server, such as coturn or eturnal. Retain compatibility with the old STUN/TURN configuration file. |
+| STUN connectivity | Available | Parsec's default STUN server, custom discovery servers and a STUN-only option for LAN/VPN use. |
+| Custom STUN and TURN relay support | Available | Cloudflare or custom TURN servers, including UDP, TCP and TLS server connections. Compatible with the earlier client's server settings file. |
 | More audio formats and menu integration | Planned | Support additional audio choices and review which Parsec settings need native integration. |
 | Native connection and playback statistics | Planned for native; available in the earlier WebView2 client | Bring the earlier client's statistics to the native app, including connection quality, playback and resource usage. |
 | Vulkan rendering backend | Planned | Add another GPU rendering option alongside D3D11 and build toward Linux support. |
@@ -101,10 +113,15 @@ Vulkan alone will not make the Windows client run there.
 is unavailable.** This can be useful on restrictive networks or computers where
 installing a VPN is not possible.
 
-Custom STUN/TURN is already supported by the earlier Tauri/WebView2 client.
-**The native dev client currently has no configurable TURN relay support and does
-not apply saved WebView2 server settings yet.** Bringing those options to the
-native client is a planned milestone.
+The native dev client configures its Rust WebRTC transport directly. No browser
+or JavaScript injection is involved. It reads the earlier client's `settings.json`
+beside the executable, preserving its fields and Windows-protected credentials.
+To use a different writable directory, launch with `--data-dir "C:\YourFolder"`.
+Your Parsec sign-in profile remains in its separate location described above.
+
+TURN is an alternative route offered to ICE, and may be selected even when a
+direct route is possible. **STUN only** prevents this by excluding TURN entirely.
+With that option enabled, Cloudflare credentials are not requested or required.
 
 The goal is to offer direct connections and user-chosen relays without requiring
 a VPN or Parsec's paid relay offering. Your relay provider may still charge for
@@ -137,7 +154,7 @@ credentials in a public report.
 For implementation, build instructions and host-certificate compatibility details,
 see the [technical guide](docs/NATIVE_TECHNICAL.md). The
 [configuration compatibility notes](docs/NATIVE_CONFIG_COMPATIBILITY.md) describe
-the planned migration of old STUN/TURN settings, and the
+compatibility of old STUN/TURN settings, and the
 [validation history](docs/NATIVE_DEV_0_8.md) records what has been tested.
 
 Parsec and its client core belong to their respective owners. ParsecWebTurn is an

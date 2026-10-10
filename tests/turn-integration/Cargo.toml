@@ -1,0 +1,17 @@
+[package]
+name = "parsec-turn-integration"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dev-dependencies]
+webrtc = "=0.14.0"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "time"] }
+bytes = "1"
+rcgen = "0.13"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+
+[patch.crates-io]
+webrtc = { path = "../../src-native/vendor/webrtc-0.14.0" }
+webrtc-ice = { path = "../../src-native/vendor/webrtc-ice-0.14.0" }

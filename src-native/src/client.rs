@@ -38,9 +38,19 @@ fn run() -> Result<()> {
         );
         return Ok(());
     }
-    if !args.is_empty() {
+    let root = if args.is_empty() {
+        std::env::current_exe()?
+            .parent()
+            .context("Application directory unavailable")?
+            .to_path_buf()
+    } else if args.len() == 2 && args[0] == "--data-dir" {
+        let root = std::path::PathBuf::from(&args[1]);
+        std::fs::create_dir_all(&root)?;
+        root
+    } else {
         bail!("Unsupported argument");
-    }
+    };
+    let connection_settings = connection_settings::Manager::open(root.join("settings.json"));
     let profile = profile::Profile::user()?;
     let mut saved = profile.load()?;
     saved.profile = Some(profile.clone());
@@ -56,6 +66,7 @@ fn run() -> Result<()> {
     let engine = Engine::new(&config)?;
     let module = Module::new(&engine, bytes)?;
     let window = window::Window::create(false, true, true, false)?;
+    window.install_connection_settings(connection_settings.clone());
     let (mut store, instance) = instantiate_mode(&engine, &module, Some(window.clone()))?;
     *store
         .data()
@@ -72,6 +83,7 @@ fn run() -> Result<()> {
         // Signature and certificate-fingerprint validation remain mandatory.
         backend.legacy_rsa_1024_enabled = true;
         backend.stun_provider = attempt::StunProvider::Parsec;
+        backend.connection_settings = Some(connection_settings);
     }
     let outcome = (|| -> Result<()> {
         #[cfg(test)]

@@ -689,6 +689,7 @@ fn backend_call(
                             config,
                             b.stun_provider,
                             b.legacy_rsa_1024_enabled,
+                            b.connection_settings.clone(),
                         ) {
                             Ok(attempt) => {
                                 #[cfg(windows)]

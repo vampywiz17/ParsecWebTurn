@@ -7,6 +7,8 @@ use std::collections::VecDeque;
 
 #[derive(Default, Serialize)]
 pub struct Backend {
+    #[serde(skip)]
+    pub connection_settings: Option<std::sync::Arc<crate::connection_settings::Manager>>,
     pub initialized: bool,
     pub stun_provider: crate::attempt::StunProvider,
     pub legacy_rsa_1024_enabled: bool,

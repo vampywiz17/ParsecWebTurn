@@ -36,7 +36,9 @@ clears `customUrls` after migration and omits it when empty.
 STUN-only mode, an empty STUN list uses `stun:stun.cloudflare.com:3478`. For custom
 servers, STUN entries use no credentials and TURN entries use `customUsername`
 and the decrypted custom password. Preserve these meanings when adding native
-settings; this document does not enable them in the current client.
+settings. New native installations use `provider: "custom"` with empty lists,
+meaning Parsec's default STUN server and no TURN relay. Existing files retain
+their legacy provider/default semantics.
 
 ### Credential encoding and future writes
 
@@ -46,8 +48,30 @@ credentials when implementing a native reader/writer. Do not put secrets in
 logs, reports or committed examples. The old client's defaults and URL/transport
 validation remain the baseline. Do not silently enable forced relay.
 
-The first native dev build preserves existing settings and browser profiles but
-**does not yet read, migrate, generate or apply STUN/TURN credentials**. A later
-implementation must add cross-client round-trip fixtures with synthetic values
-before enabling writes. Browser authentication cookies are distinct from these
-server settings and are not migrated into the native core.
+The native dev client reads and atomically writes `settings.json` beside its EXE,
+or in `--data-dir`. Empty password/token edits retain saved secrets; explicit
+forget controls remove them. Invalid files are preserved until the user saves a
+valid replacement. Unknown JSON properties survive editing. Tests exercise the
+legacy migration and actual Base64/CurrentUser-DPAPI encoding with synthetic data.
+Browser authentication cookies are distinct from these server settings and are
+not migrated into the native core.
+
+### Native transport behavior
+
+The normal native entry point resolves settings once per attempt, supplies
+`RTCIceServer` values directly to webrtc-rs and keeps `iceTransportPolicy: all`.
+No delayed TURN insertion, automatic ICE restart or private Parsec reconnect
+hook is used. STUN-only excludes TURN and bypasses credential decryption/API
+requests. Cloudflare generation uses HTTPS, bounded responses/timeouts and no
+redirects. `cacheCredentials` caches generated credentials in memory until their
+refresh margin; the old disk cache is not read or modified.
+
+Supported relay URLs: `turn:` (UDP by default), `turn:...?transport=tcp`, and
+`turns:` (TLS over TCP by default). TLS checks hostname and certificate chain
+against public and OS-trusted roots; there is no certificate bypass. UDP relay
+allocations are used toward the peer for all three server transports. IPv4 relay
+allocation follows the current upstream ICE implementation. `stuns:` discovery,
+HTTP proxy tunneling and RFC 6062 TCP allocations are not supported.
+
+See the [isolated transport patch](../src-native/vendor/webrtc-ice-0.14.0/LOCAL-CHANGES.md)
+and [TURN integration tests](../tests/turn-integration/README.md).

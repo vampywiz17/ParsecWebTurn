@@ -27,6 +27,8 @@ pub enum Event {
 }
 
 pub struct Window {
+    connection_settings: Mutex<Option<Arc<crate::connection_settings::Manager>>>,
+    settings_page: AtomicUsize,
     pub hwnd: AtomicUsize,
     pub closing: AtomicBool,
     pub active_contexts: AtomicUsize,
@@ -91,6 +93,8 @@ impl Window {
         opengl_required: bool,
     ) -> Result<Arc<Self>> {
         let state = Arc::new(Self {
+            connection_settings: Default::default(),
+            settings_page: AtomicUsize::new(0),
             hwnd: AtomicUsize::new(0),
             closing: AtomicBool::new(false),
             active_contexts: AtomicUsize::new(0),
@@ -143,6 +147,16 @@ impl Window {
                     unsafe {
                         let mut msg: MSG = std::mem::zeroed();
                         while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
+                            let page = ui.settings_page.load(Ordering::Acquire) as HWND;
+                            if !page.is_null() {
+                                if msg.message == WM_KEYDOWN && msg.wParam == VK_ESCAPE as usize {
+                                    PostMessageW(hwnd, WM_APP + 9, 0, 0);
+                                    continue;
+                                }
+                                if IsDialogMessageW(page, &msg) != 0 {
+                                    continue;
+                                }
+                            }
                             TranslateMessage(&msg);
                             DispatchMessageW(&msg);
                         }
@@ -161,6 +175,33 @@ impl Window {
 
     pub fn handle(&self) -> HWND {
         self.hwnd.load(Ordering::Acquire) as HWND
+    }
+    pub fn install_connection_settings(&self, manager: Arc<crate::connection_settings::Manager>) {
+        *self
+            .connection_settings
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(manager);
+        unsafe {
+            PostMessageW(self.handle(), WM_APP + 8, 0, 0);
+        }
+    }
+    unsafe fn open_connection_settings(&self) {
+        let page = self.settings_page.load(Ordering::Acquire) as HWND;
+        if !page.is_null() {
+            SetFocus(page);
+            return;
+        }
+        let manager = self
+            .connection_settings
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        if let Some(manager) = manager {
+            self.apply_relative_mouse(false);
+            let page = crate::connection_settings_ui::open(self.handle(), manager);
+            self.settings_page.store(page as usize, Ordering::Release);
+            self.show_video_surface();
+        }
     }
     // HWND creation and visibility remain on the existing UI thread.
     pub fn ensure_video_surface(&self) -> Result<usize> {
@@ -192,6 +233,7 @@ impl Window {
         let hwnd = self.video_hwnd.load(Ordering::Acquire) as HWND;
         if !hwnd.is_null() {
             let show = self.video_ready.load(Ordering::Acquire)
+                && self.settings_page.load(Ordering::Acquire) == 0
                 && self.video_visible.load(Ordering::Acquire)
                 && !self.closing.load(Ordering::Acquire);
             ShowWindow(hwnd, if show { SW_SHOWNA } else { SW_HIDE });
@@ -465,6 +507,37 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
         let x = lp as i16 as i32;
         let y = (lp >> 16) as i16 as i32;
         match message {
+            m if m == WM_APP + 8 => {
+                crate::connection_settings_ui::install_menu(hwnd);
+                return 0;
+            }
+            m if m == WM_APP + 9 => {
+                let page = s.settings_page.swap(0, Ordering::AcqRel) as HWND;
+                if !page.is_null() {
+                    DestroyWindow(page);
+                    SetFocus(hwnd);
+                }
+                s.show_video_surface();
+                return 0;
+            }
+            WM_COMMAND if wp & 0xffff == crate::connection_settings_ui::OPEN => {
+                s.open_connection_settings();
+                return 0;
+            }
+            WM_KEYDOWN
+                if wp as u32 == VK_OEM_COMMA as u32 && GetKeyState(VK_CONTROL as i32) < 0 =>
+            {
+                if lp & (1 << 30) == 0 {
+                    s.open_connection_settings();
+                }
+                return 0;
+            }
+            WM_GETMINMAXINFO if s.settings_page.load(Ordering::Acquire) != 0 => {
+                let limits = &mut *(lp as *mut MINMAXINFO);
+                limits.ptMinTrackSize.x = 900;
+                limits.ptMinTrackSize.y = 740;
+                return 0;
+            }
             WM_CLOSE => {
                 s.apply_relative_mouse(false);
                 s.apply_wake_lock(false, false);
@@ -628,6 +701,18 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
                 let w = (lp as u32 & 0xffff) as i32;
                 let h = ((lp as u32 >> 16) & 0xffff) as i32;
                 *s.dimensions.lock().unwrap_or_else(|e| e.into_inner()) = (w, h);
+                let page = s.settings_page.load(Ordering::Acquire) as HWND;
+                if !page.is_null() {
+                    SetWindowPos(
+                        page,
+                        std::ptr::null_mut(),
+                        0,
+                        0,
+                        w.max(1),
+                        h.max(1),
+                        SWP_NOACTIVATE | SWP_NOZORDER,
+                    );
+                }
                 let child = s.video_hwnd.load(Ordering::Acquire) as HWND;
                 if !child.is_null() {
                     SetWindowPos(

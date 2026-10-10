@@ -7,3 +7,6 @@ The normal build embeds the audited Parsec WASM core. Run `./src-native/fetch-co
 `diagnostics` is an opt-in build feature for offline probes and prototype reports. It is excluded from the distributed executable. Test fixtures under `fixtures` are used only by tests and diagnostic builds. The pinned Parsec ABI is a private integration contract; Windows decoding/presentation and WebRTC transport use documented APIs and protocols.
 
 The vendored WebRTC dependency and its narrowly scoped compatibility changes are documented in [LOCAL-CHANGES.md](vendor/webrtc-0.14.0/LOCAL-CHANGES.md).
+
+Native STUN/TURN settings use the [legacy-compatible configuration contract](../docs/NATIVE_CONFIG_COMPATIBILITY.md).
+TURN UDP/TCP/TLS integration is documented in the [ICE patch notes](vendor/webrtc-ice-0.14.0/LOCAL-CHANGES.md).

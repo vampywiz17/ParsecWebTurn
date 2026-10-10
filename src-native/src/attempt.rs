@@ -344,7 +344,7 @@ impl Attempt {
 
     #[cfg(test)]
     pub fn spawn_named(id: &str, output: Output) -> Result<Self> {
-        Self::spawn_configured(id, output, None, StunProvider::None, false)
+        Self::spawn_configured(id, output, None, StunProvider::None, false, None)
     }
 
     pub fn spawn_configured(
@@ -353,6 +353,7 @@ impl Attempt {
         config: Option<crate::control::Config>,
         stun_provider: StunProvider,
         legacy_rsa_1024: bool,
+        connection_settings: Option<Arc<crate::connection_settings::Manager>>,
     ) -> Result<Self> {
         CandidateGate::new(id)?;
         let mut active = ACTIVE_WORKERS.load(Ordering::SeqCst);
@@ -414,8 +415,11 @@ impl Attempt {
                     &attempt_id,
                     rx,
                     config,
-                    stun_provider,
-                    legacy_rsa_1024,
+                    NetworkOptions {
+                        stun_provider,
+                        legacy_rsa_1024,
+                        connection_settings,
+                    },
                 );
                 let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
                 if result.is_err() {
@@ -673,15 +677,25 @@ impl Drop for Attempt {
     }
 }
 
+struct NetworkOptions {
+    stun_provider: StunProvider,
+    legacy_rsa_1024: bool,
+    connection_settings: Option<Arc<crate::connection_settings::Manager>>,
+}
+
 fn worker(
     shared: &Arc<Mutex<Completion>>,
     wake: &Arc<Condvar>,
     id: &str,
     commands: mpsc::Receiver<Command>,
     config: Option<crate::control::Config>,
-    stun_provider: StunProvider,
-    legacy_rsa_1024: bool,
+    network: NetworkOptions,
 ) -> Result<()> {
+    let NetworkOptions {
+        stun_provider,
+        legacy_rsa_1024,
+        connection_settings,
+    } = network;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -697,12 +711,24 @@ fn worker(
     // verification remain enabled; insecure hashes are not enabled.
     settings.allow_insecure_verification_algorithm(legacy_rsa_1024);
     let api = APIBuilder::new().with_setting_engine(settings).build();
+    // Resolve short-lived credentials on the async worker, never the UI/WASM
+    // thread. Snapshot settings once; a save affects only the next attempt.
+    let mut ice = ice_configuration(stun_provider);
+    if let Some(manager) = connection_settings {
+        ice.ice_servers = runtime.block_on(async {
+            tokio::select! {
+                result = manager.resolve() => result,
+                _ = async {
+                    loop {
+                        if shared.lock().unwrap_or_else(|e| e.into_inner()).cancelled { break; }
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                    }
+                } => bail!("Connection cancelled during credential resolution"),
+            }
+        })?;
+    }
     let peer = Arc::new(runtime.block_on(async {
-        tokio::time::timeout(
-            Duration::from_secs(5),
-            api.new_peer_connection(ice_configuration(stun_provider)),
-        )
-        .await
+        tokio::time::timeout(Duration::from_secs(5), api.new_peer_connection(ice)).await
     })??);
     let callback_state = shared.clone();
     let callback_wake = wake.clone();
@@ -714,7 +740,7 @@ fn worker(
             if candidate.protocol != RTCIceProtocol::Udp || candidate.component != 1 { return; }
             let mut state=shared.lock().unwrap_or_else(|e|e.into_inner());
             if state.cancelled { return; }
-            if state.events.len() >= 64 || !matches!(candidate.typ,RTCIceCandidateType::Host|RTCIceCandidateType::Srflx) { state.progress.failed=true; }
+            if state.events.len() >= 64 || !matches!(candidate.typ,RTCIceCandidateType::Host|RTCIceCandidateType::Srflx|RTCIceCandidateType::Relay) { state.progress.failed=true; }
             else {
                 state.progress.local_candidates+=1;
                 if candidate.typ==RTCIceCandidateType::Host {state.progress.local_host_candidates+=1;} else if candidate.typ==RTCIceCandidateType::Srflx {state.progress.local_srflx_candidates+=1;}
