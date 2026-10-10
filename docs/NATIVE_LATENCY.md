@@ -81,6 +81,18 @@ audio underruns and device padding. A high-speed input-to-display recording is
 needed to validate full interaction latency; RTT alone is insufficient. No
 fixed millisecond gain is claimed from CI or synthetic probes.
 
+## Video reuse validation (2026-10-10)
+
+The isolated sustained probe from commit `aff3017` completed locally on an AMD
+Radeon 780M: 1,024 frames decoded, 16 input views and 2 output views created,
+including a window resize. Automatic extra processing was read back as disabled;
+synthetic pixel variation, worker completion and GPU/window cleanup passed.
+Later changes only adjust Settings combo labels and their visual regression test.
+The GitHub Windows runner lacks a usable D3D11 video device, so its probe reports
+that limitation rather than claiming a hardware decode pass. The local probe is
+offline synthetic evidence, not a real Parsec session or a latency benchmark.
+Multi-GPU hardware selection still needs testing on a system with multiple GPUs.
+
 ## Sources checked
 
 - [Disable video processor automatic processing](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11videocontext-videoprocessorsetstreamautoprocessingmode)
