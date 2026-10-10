@@ -64,6 +64,7 @@ pub unsafe fn open(parent: HWND, bus: Arc<Shared>) -> HWND {
     RegisterClassW(&WNDCLASSW {
         lpfnWndProc: Some(proc),
         hInstance: instance,
+        hIcon: LoadIconW(instance, std::ptr::without_provenance(1)),
         hCursor: LoadCursorW(null_mut(), IDC_ARROW),
         lpszClassName: class.as_ptr(),
         ..std::mem::zeroed()
@@ -100,14 +101,9 @@ pub unsafe fn open(parent: HWND, bus: Arc<Shared>) -> HWND {
         drop(Box::from_raw(ptr));
         return hwnd;
     }
-    (*ptr).bus.visible.store(true, Ordering::Release);
-    (*ptr).window_owned = true;
-    SendMessageW(
-        hwnd,
-        WM_SETICON,
-        ICON_SMALL as usize,
-        SendMessageW(parent, WM_GETICON, ICON_SMALL as usize, 0),
-    );
+    let page = &mut *ptr;
+    page.bus.visible.store(true, Ordering::Release);
+    page.window_owned = true;
     SetTimer(hwnd, 1, 1000, None);
     ShowWindow(hwnd, SW_SHOW);
     hwnd
@@ -448,6 +444,15 @@ unsafe extern "system" fn proc(hwnd: HWND, message: u32, wp: WPARAM, lp: LPARAM)
                 return 0;
             }
             WM_SIZE => {
+                let mut rect: RECT = std::mem::zeroed();
+                GetClientRect(hwnd, &mut rect);
+                page.scroll = page.scroll.min((page.height - rect.bottom).max(0));
+                if wp == SIZE_MINIMIZED as usize {
+                    page.resources = Default::default();
+                    page.usage = (None, None, None);
+                    page.rates = Rates::default();
+                    page.values = Values::default();
+                }
                 page.bus
                     .visible
                     .store(wp != SIZE_MINIMIZED as usize, Ordering::Release);

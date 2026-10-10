@@ -2,8 +2,10 @@
 
 Base: official crates.io `webrtc` 0.14.0 archive, SHA-256
 `08fd686c0920ac08f3a57eacc48e31f0e4ca1ffefba4478784606f78c14e83ad`.
-All 92 original archive files are retained. Only the four source files listed
-in `SCTP-ONLY.patch` differ. MIT/Apache-2.0 license texts are copied from the
+All 92 original archive files are retained. The SCTP corrections are listed
+in `SCTP-ONLY.patch`; `ice_candidate_pair.rs` additionally exposes read-only
+`local()` and `remote()` getters for selected-route telemetry, without changing
+ICE behavior. MIT/Apache-2.0 license texts are copied from the
 upstream v0.14.0 tag. The Parsec WASM binary is not changed.
 
 This is a locally maintained library extension, not an upstream-supported API.
