@@ -231,10 +231,6 @@ fn rows(
             .map(|x| x.frames_dropped.to_string())
             .unwrap_or_else(|| "Not reported".into()),
     );
-    row(
-        "Packets lost",
-        "Not exposed for SCTP data-channel video".into(),
-    );
     row("AUDIO", String::new());
     for (name, value) in [
         ("Codec", "Opus"),
@@ -250,10 +246,6 @@ fn rows(
             },
         );
     }
-    row(
-        "Configured bitrate",
-        "Not reported by the Parsec core".into(),
-    );
     row("Measured audio traffic", number(v.audio, "kbps"));
     row("SECURITY", String::new());
     row("DTLS state", s.dtls.clone());
@@ -265,14 +257,9 @@ fn rows(
             "Not reported".into()
         },
     );
-    row(
-        "DTLS version / cipher",
-        "Not exposed by the transport API".into(),
-    );
     row("APP PERFORMANCE", String::new());
     row("CPU (all cores)", number(cpu.0, "%"));
     row("GPU (busiest engine)", number(cpu.1, "%"));
-    row("GPU video decode", number(cpu.2, "%"));
     rows
 }
 unsafe fn text(dc: HDC, font: HFONT, color: u32, s: &str, mut rect: RECT) {
@@ -670,9 +657,12 @@ mod tests {
         let rows = rows(&sample, &Values::default(), (None, None, None));
         assert!(rows.contains(&("Codec".into(), "Opus".into())));
         assert!(rows.contains(&("TURN server in use".into(), "None".into())));
-        assert!(rows.contains(&(
-            "Configured bitrate".into(),
-            "Not reported by the Parsec core".into()
-        )));
+        assert!(rows.iter().all(|(label, _)| ![
+            "Configured bitrate",
+            "Packets lost",
+            "DTLS version / cipher",
+            "GPU video decode"
+        ]
+        .contains(&label.as_str())));
     }
 }
