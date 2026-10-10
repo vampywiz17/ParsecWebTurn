@@ -122,7 +122,7 @@ app and the earlier Tauri/WebView2 approach.
 > for the current status. The image is not a benchmark or an up-to-date reference
 > for the official app's features or pricing.
 
-![Comparison of native Rust, official Parsec and Tauri/WebView2 clients, including planned rendering and connection options](assets/native-client-comparison.png)
+![Comparison of native Rust, official Parsec and Tauri/WebView2 clients, including planned rendering and connection options](assets/native-client-comparison-v2.png)
 
 [Open the full-size comparison](assets/native-client-comparison-v2.png).
 
