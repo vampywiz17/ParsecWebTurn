@@ -207,9 +207,23 @@ fn rows(
     row(
         "Hardware decode",
         video
-            .and_then(|x| x.hardware_decode)
-            .map(|x| if x { "Yes" } else { "No" }.into())
-            .unwrap_or_else(|| "Not reported".into()),
+            .map(|x| x.hardware_decode_status())
+            .unwrap_or("Not reported")
+            .into(),
+    );
+    row(
+        "Decoder output",
+        video
+            .and_then(|x| x.d3d11_decoder_surface)
+            .map(|x| {
+                if x {
+                    "D3D11 decoder surface"
+                } else {
+                    "DXGI surface"
+                }
+            })
+            .unwrap_or("Not reported")
+            .into(),
     );
     row(
         "Local dropped frames",
@@ -564,7 +578,7 @@ mod tests {
                         renderer: Some("D3D11"),
                         width: Some(1920),
                         height: Some(1080),
-                        hardware_decode: Some(true),
+                        d3d11_decoder_surface: Some(true),
                         ..Default::default()
                     }),
                     ..Default::default()

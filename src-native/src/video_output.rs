@@ -18,6 +18,8 @@ pub struct Snapshot {
     pub gpu_surface_output: bool,
     pub synthetic_pixel_variation_verified: bool,
     pub hardware_decode: Option<bool>,
+    /// Observed on the latest decoded output, not a capability/configuration flag.
+    pub d3d11_decoder_surface: Option<bool>,
     pub frames_queued: u64,
     pub frames_dropped: u64,
     pub frames_submitted: u64,
@@ -39,6 +41,17 @@ pub struct Snapshot {
     pub failure_hresult: Option<String>,
     pub worker_finished: bool,
     pub resources_released: bool,
+}
+
+impl Snapshot {
+    pub fn hardware_decode_status(&self) -> &'static str {
+        match (self.hardware_decode, self.d3d11_decoder_surface) {
+            (Some(true), _) => "Yes",
+            (Some(false), _) => "No",
+            (None, Some(true)) => "Likely (D3D11 decoder surface)",
+            _ => "Not reported",
+        }
+    }
 }
 
 pub struct Frame {
@@ -135,6 +148,25 @@ impl Queue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn gpu_output_alone_does_not_establish_hardware_decoding() {
+        let mut snapshot = Snapshot {
+            decoder_initialized: true,
+            gpu_surface_output: true,
+            ..Default::default()
+        };
+        assert_eq!(snapshot.hardware_decode_status(), "Not reported");
+        snapshot.d3d11_decoder_surface = Some(false);
+        assert_eq!(snapshot.hardware_decode_status(), "Not reported");
+        snapshot.d3d11_decoder_surface = Some(true);
+        assert_eq!(
+            snapshot.hardware_decode_status(),
+            "Likely (D3D11 decoder surface)"
+        );
+        assert_eq!(snapshot.hardware_decode, None);
+        snapshot.hardware_decode = Some(false);
+        assert_eq!(snapshot.hardware_decode_status(), "No");
+    }
     #[test]
     fn queue_is_bounded_and_overflow_only_disables_video() {
         let mut q = Queue::default();

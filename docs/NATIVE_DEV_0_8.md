@@ -127,3 +127,27 @@ These are isolated transport and native integration results, not a new real-host
 certification. A session with the user's Parsec host and chosen TURN provider
 still requires testing. IPv4 relay allocation, no `stuns:` discovery and no HTTP
 proxy tunneling are documented in the configuration contract and transport notes.
+
+### Decoder surface telemetry
+
+The stats menu keeps Ctrl+Shift+S available without placing the shortcut in its
+label. Each successful Media Foundation output reads the existing texture's
+`D3D11_TEXTURE2D_DESC.BindFlags` using `ID3D11Texture2D::GetDesc`. No extra GPU
+work, mapping, frame copy or readback is introduced.
+
+`D3D11_BIND_DECODER` denotes a texture intended to receive decoder API output.
+The Hardware decode row labels that observation **Likely (D3D11 decoder surface)**;
+the Decoder output row reports the observed surface type. This does not set the
+confirmed `hardware_decode` boolean. Capability flags, GPU rendering and missing
+bind flags do not establish hardware execution or software fallback. The latest
+output replaces the previous observation on each frame.
+
+Supported Microsoft APIs and interpretation:
+- [D3D11 bind flags](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/ne-d3d11-d3d11_bind_flag)
+- [Texture descriptor](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/ns-d3d11-d3d11_texture2d_desc)
+- [Media Foundation D3D11 decoding and software fallback](https://learn.microsoft.com/en-us/windows/win32/medfound/supporting-direct3d-11-video-decoding-in-media-foundation)
+
+The Media Foundation H.264 transform does not expose a documented, definitive
+per-frame hardware execution status through this pipeline. In particular,
+`CODECAPI_AVDecVideoAcceleration_H264` has no effect for IMFTransform according
+to its documentation, so its value is not used as proof.

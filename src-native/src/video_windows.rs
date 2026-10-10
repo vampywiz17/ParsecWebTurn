@@ -430,6 +430,12 @@ impl Session {
                 return Err(unavailable("video-output-null-texture"));
             }
             let texture = ID3D11Texture2D::from_raw(raw);
+            // Read metadata only: no mapping, readback or additional frame copy.
+            // Microsoft documents BIND_DECODER as decoder-API output usage.
+            // It is evidence of the DXVA path, not an execution counter.
+            let mut texture_desc = D3D11_TEXTURE2D_DESC::default();
+            texture.GetDesc(&mut texture_desc);
+            let decoder_surface = texture_desc.BindFlags & D3D11_BIND_DECODER.0 as u32 != 0;
             let subresource = api("video-output-subresource", dxgi.GetSubresourceIndex())?;
             let media = api(
                 "video-output-current-type",
@@ -499,6 +505,7 @@ impl Session {
             update(shared, |s| {
                 s.frames_decoded = s.frames_decoded.saturating_add(1);
                 s.gpu_surface_output = true;
+                s.d3d11_decoder_surface = Some(decoder_surface);
                 s.width = Some((source.right - source.left) as u32);
                 s.height = Some((source.bottom - source.top) as u32);
                 s.color_matrix = matrix;

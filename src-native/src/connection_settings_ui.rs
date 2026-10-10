@@ -111,7 +111,7 @@ pub unsafe fn install_menu(parent: HWND) {
         menu,
         MF_STRING,
         crate::stats_ui::OPEN,
-        wide("Connection stats\tCtrl+Shift+S").as_ptr(),
+        wide("Connection stats").as_ptr(),
     );
     let help = CreatePopupMenu();
     AppendMenuW(help, MF_STRING, ABOUT, wide("About ParsecWebTurn").as_ptr());
