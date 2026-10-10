@@ -26,6 +26,12 @@ priorities, nomination, candidate filtering or the application's `all` policy.
   and TLS: no UDP retransmissions, a 39.5-second transaction timeout, and immediate
   pending-request failure on transport closure (RFC 8489 section 6.2.2).
 - `src/lib.rs` exports the transport for isolated regression tests.
+- Read-only native telemetry: relay candidates retain their allocation URL (without
+  credentials) and actual client-to-server transport. Authenticated, transaction-
+  and source-matched STUN success responses update RTT and response counters for
+  both ICE roles. No extra probes, candidate changes or nomination changes are
+  introduced. Host/remote candidates do not fabricate relay transport information.
+  The coturn fixture verifies selected-pair RTT and UDP/TCP/TLS provenance.
 
 Limitations: relay gathering currently follows upstream's IPv4 allocation
 path. TLS uses rustls; OS roots are imported, but this is not a Windows Schannel

@@ -12,7 +12,7 @@ Rust rather than adding a second, conflicting copy of the same setting.
 | Setting / area | Current native bridge | Further work |
 | --- | --- | --- |
 | Overlay, overlay button, HID compatibility options | Original core UI is composited over the D3D11 video surface; the core owns menu visibility. | Test individual HID options on a separate host. Visibility alone does not prove an input mode is implemented. |
-| Overlay warnings / connection statistics | Resolution, range and host encode latency reach the core. Several metrics remain unavailable or at the adapter's initialization values. | Feed measured native transport/decoder statistics; never interpret an unmeasured zero as a measurement. |
+| Overlay warnings / connection statistics | Separate native Connection stats window measures selected ICE route, TURN allocation provenance, RTT, traffic, decoded FPS, video/audio format, DTLS state and app CPU/GPU. The original overlay still has some unavailable metrics. | Never interpret an unmeasured zero as a measurement; SCTP packet loss and DTLS cipher/version remain unknown. |
 | Window Mode | `web_set_fullscreen` reaches the native fullscreen bridge. | Live regression test changing the core preference and reconnecting. |
 | Relative mouse | `web_set_pointer_lock` reaches Win32 raw mouse input. | Keep the existing core overlay switch as the owner of the mode. |
 | Immersive Mode | Relative mouse is implemented; enabling `web_set_kb_grab` is not. | Native focused-window keyboard capture, reliable release on focus loss, and a local escape shortcut. Test this before treating Immersive Mode as supported. |

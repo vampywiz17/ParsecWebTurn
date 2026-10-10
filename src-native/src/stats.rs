@@ -62,7 +62,11 @@ impl Shared {
     pub fn begin(&self) -> u64 {
         let mut data = self.latest.lock().unwrap_or_else(|e| e.into_inner());
         data.0 += 1;
-        data.1 = None;
+        data.1 = Some(Sample {
+            generation: data.0,
+            state: "Connecting".into(),
+            ..Default::default()
+        });
         data.0
     }
     pub fn publish(&self, generation: u64, mut sample: Sample) {
@@ -117,6 +121,22 @@ pub async fn network(peer: &RTCPeerConnection) -> Sample {
     sample.route = route(&sample.local, &sample.remote);
     let id = format!("{}-{}", local.stats_id, remote.stats_id);
     let report = peer.get_stats().await;
+    // A route change during sampling must not label a previous pair as active.
+    if dtls
+        .ice_transport()
+        .get_selected_candidate_pair()
+        .await
+        .as_ref()
+        .is_none_or(|active| {
+            active.local().stats_id != local.stats_id || active.remote().stats_id != remote.stats_id
+        })
+    {
+        return Sample {
+            state: sample.state,
+            dtls: sample.dtls,
+            ..Default::default()
+        };
+    }
     for stats in report.reports.values() {
         match stats {
             StatsReportType::CandidatePair(p) if p.id == id && p.responses_received > 0 => {

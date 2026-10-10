@@ -975,7 +975,7 @@ mod tests {
             assert!(!parent.is_null());
             install_menu(parent);
             assert_eq!(GetMenuItemCount(GetMenu(parent)), 3);
-            let help = GetSubMenu(GetMenu(parent), 1);
+            let help = GetSubMenu(GetMenu(parent), 2);
             assert!(!help.is_null());
             assert_eq!(GetMenuItemID(help, 0), ABOUT as u32);
             assert!(about_text().contains(env!("CARGO_PKG_VERSION")));

@@ -434,6 +434,10 @@ impl Attempt {
                     },
                 );
                 let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
+                #[cfg(windows)]
+                if let Some((bus, generation)) = &state.telemetry {
+                    bus.finish(*generation);
+                }
                 if result.is_err() {
                     state.progress.failed = true;
                     if state.progress.failure_elapsed_ms.is_none() {

@@ -430,6 +430,9 @@ unsafe extern "system" fn proc(hwnd: HWND, message: u32, wp: WPARAM, lp: LPARAM)
         let page = &mut *ptr;
         match message {
             WM_TIMER => {
+                if IsIconic(hwnd) != 0 {
+                    return 0;
+                }
                 if let Some(s) = page.bus.read() {
                     if s.at != page.sample.at {
                         page.values = page.rates.update(&s);
@@ -463,7 +466,7 @@ unsafe extern "system" fn proc(hwnd: HWND, message: u32, wp: WPARAM, lp: LPARAM)
                 let target = if message == WM_MOUSEWHEEL {
                     page.scroll - ((wp >> 16) as i16 as i32) * 90 / 120
                 } else {
-                    match wp as u32 & 0xffff {
+                    match wp as i32 & 0xffff {
                         SB_LINEUP => page.scroll - 32,
                         SB_LINEDOWN => page.scroll + 32,
                         SB_PAGEUP => page.scroll - rect.bottom,

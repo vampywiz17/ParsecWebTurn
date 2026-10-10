@@ -144,8 +144,8 @@ The illustration below compares the native Rust direction, the official Parsec
 app and the earlier Tauri/WebView2 approach.
 
 > **Concept illustration:** it includes planned features and potential benefits.
-> In particular, custom TURN support, Vulkan, broader platform support and a native
-> other planned features are not all present in this dev build. Use the roadmap above
+> In particular, Vulkan and broader platform support are not present in this
+> dev build. Use the roadmap above
 > for the current status. The image is not a benchmark or an up-to-date reference
 > for the official app's features or pricing.
 

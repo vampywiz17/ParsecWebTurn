@@ -161,8 +161,19 @@ impl Window {
                     unsafe {
                         let mut msg: MSG = std::mem::zeroed();
                         while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
+                            if msg.message == WM_KEYDOWN
+                                && msg.wParam == b'S' as usize
+                                && GetKeyState(VK_CONTROL as i32) < 0
+                                && GetKeyState(VK_SHIFT as i32) < 0
+                            {
+                                if msg.lParam & (1 << 30) == 0 {
+                                    ui.open_stats();
+                                }
+                                continue;
+                            }
                             let page = ui.settings_page.load(Ordering::Acquire) as HWND;
-                            if !page.is_null() {
+                            if !page.is_null() && (msg.hwnd == page || IsChild(page, msg.hwnd) != 0)
+                            {
                                 if msg.message == WM_KEYDOWN && msg.wParam == VK_ESCAPE as usize {
                                     PostMessageW(hwnd, WM_APP + 9, 0, 0);
                                     continue;
@@ -533,16 +544,6 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
             }
             WM_COMMAND if wp & 0xffff == crate::stats_ui::OPEN => {
                 s.open_stats();
-                return 0;
-            }
-            WM_KEYDOWN
-                if wp == b'S' as usize
-                    && GetKeyState(VK_CONTROL as i32) < 0
-                    && GetKeyState(VK_SHIFT as i32) < 0 =>
-            {
-                if lp & (1 << 30) == 0 {
-                    s.open_stats();
-                }
                 return 0;
             }
             m if m == WM_APP + 8 => {
