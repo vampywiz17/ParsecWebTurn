@@ -677,7 +677,7 @@ unsafe extern "system" fn page_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: LP
                 return 0;
             }
             WM_MOUSEWHEEL => {
-                page.scroll -= ((wp >> 16) as u16 as i16 as i32) / 120 * 72;
+                page.scroll -= ((wp >> 16) as u16 as i16 as i32) * 72 / 120;
                 layout(hwnd);
                 return 0;
             }
@@ -991,7 +991,7 @@ mod tests {
             (rect.right * rect.bottom * 4) as usize,
         )
         .to_vec();
-        for pixel in rgba.chunks_exact_mut(4) {
+        for pixel in rgba.as_chunks_mut::<4>().0 {
             pixel.swap(0, 2);
             pixel[3] = 255;
         }

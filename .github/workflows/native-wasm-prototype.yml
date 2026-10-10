@@ -84,6 +84,12 @@ jobs:
           & ./src-native/artifacts/ParsecWebTurn.exe --version
           if ($LASTEXITCODE -ne 0) { throw "Normal executable failed" }
       - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Native-settings-preview-win64
+          path: src-native/artifacts/settings/*.png
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
         with:
           name: Native-client-release-candidate-win64
           path: |
