@@ -8,7 +8,7 @@ in that runner's trust store; do not run it on a personal machine unnecessarily.
 
 Coverage: RFC 8656 stream framing/padding under fragmented and coalesced reads,
 close during a partial frame, malformed framing, untrusted certificate rejection,
-trusted certificate hostname mismatch, and actual bidirectional 128 KiB messages
+trusted certificate hostname mismatch, and actual bidirectional 64 KiB messages
 on three negotiated SCTP channels through coturn using UDP, TCP and TLS. Relay-only
 is used in the fixture to prove traffic traverses TURN; production keeps ICE `all`.
 

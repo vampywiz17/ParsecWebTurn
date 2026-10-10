@@ -45,9 +45,9 @@ profile or protection against programs already running as that same user.
 Existing Tauri `settings.json`, credentials and WebView2 profiles are preserved.
 Browser cookies cannot be imported into this native session through a supported
 API, so the first native launch requires signing in again. The prototype had no
-disk-backed session to migrate. Future native STUN/TURN settings will retain the
-[Tauri configuration contract](NATIVE_CONFIG_COMPATIBILITY.md); the native
-session snapshot does not replace or rewrite that file.
+disk-backed session to migrate. Native STUN/TURN settings retain the
+[Tauri configuration contract](NATIVE_CONFIG_COMPATIBILITY.md) in `settings.json`
+beside the EXE (or `--data-dir`). The native session snapshot remains separate.
 
 Legacy **RSA-1024 host certificate compatibility is enabled** for the observed
 Parsec host handshake. This accepts weaker host identity keys; it does not disable
@@ -62,12 +62,16 @@ interface if needed. The original overlay controls relative mouse and audio volu
 
 This is the first native development build, not a claim that every original menu
 option is supported. Additional audio formats, physical gamepad discovery,
-keyboard grabbing, menu compatibility and custom STUN/TURN configuration are the
-next development work. Previously saved Tauri relay settings are not applied yet.
-The app currently uses the pinned web client's `stun:stun.parsec.gg:3478` endpoint
-and native ICE
-behavior. Installing a TURN server or selecting relay mode is not part of this
-build. Actual decoder hardware-engine execution is not claimed when unmeasured.
+keyboard grabbing and further menu compatibility are future work. Native
+STUN/TURN configuration is available from Connection settings (Ctrl+,), including
+custom discovery, STUN-only, custom TURN and Cloudflare credential generation.
+An unconfigured installation uses `stun:stun.parsec.gg:3478` and no TURN. Native
+ICE keeps its automatic `all` policy; STUN-only omits relay servers. TURN supports
+UDP, TCP and TLS client-to-server connections with UDP allocations toward the
+host. IPv4 relay gathering follows upstream; secure STUN discovery and HTTP
+proxy tunneling are unsupported. See the
+[transport patch](../src-native/vendor/webrtc-ice-0.14.0/LOCAL-CHANGES.md).
+Actual decoder hardware-engine execution is not claimed when unmeasured.
 
 ## Build and validate
 

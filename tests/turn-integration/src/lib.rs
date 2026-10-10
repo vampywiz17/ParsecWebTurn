@@ -123,7 +123,8 @@ mod integration {
         }
         // SCTP fragments a realistic video-sized message across TURN frames.
         for (id, (a, b)) in channels.iter().enumerate() {
-            let payload = bytes::Bytes::from(vec![id as u8; 131072]);
+            // The upstream SDP advertises the RFC 8841 default 64 KiB limit.
+            let payload = bytes::Bytes::from(vec![id as u8; 65536]);
             a.send(&payload).await.unwrap();
             let (side, got_id, got) = rx.recv().await.unwrap();
             assert_eq!((side, got_id), (1, id as u16));
@@ -159,6 +160,7 @@ mod integration {
             "turn:localhost:43478?transport=tcp",
             "turns:localhost:43549?transport=tcp",
         ] {
+            eprintln!("Verifying {url}");
             timeout(Duration::from_secs(40), exchange(url))
                 .await
                 .expect(url);
