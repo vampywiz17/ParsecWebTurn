@@ -19,7 +19,7 @@ unsafe fn combo_paint(hwnd: HWND, dc: HDC) {
     if GetComboBoxInfo(hwnd, &mut info) == 0 {
         return;
     }
-    let mut rect = std::mem::zeroed();
+    let mut rect: RECT = std::mem::zeroed();
     GetClientRect(hwnd, &mut rect);
     let brush = CreateSolidBrush(FIELD);
     FillRect(dc, &info.rcButton, brush);
@@ -101,7 +101,7 @@ pub unsafe fn multiline(edit: HWND) {
     size_editor(edit, bar);
 }
 unsafe fn size_editor(edit: HWND, bar: HWND) {
-    let mut rect = std::mem::zeroed();
+    let mut rect: RECT = std::mem::zeroed();
     GetClientRect(edit, &mut rect);
     SetWindowPos(
         bar,
@@ -159,7 +159,7 @@ unsafe extern "system" fn edit_proc(
     result
 }
 unsafe fn state(edit: HWND) -> (i32, i32, i32) {
-    let mut rect = std::mem::zeroed();
+    let mut rect: RECT = std::mem::zeroed();
     SendMessageW(edit, EM_GETRECT, 0, &mut rect as *mut RECT as isize);
     let dc = GetDC(edit);
     let font = SendMessageW(edit, WM_GETFONT, 0, 0) as HFONT;
@@ -177,7 +177,7 @@ unsafe fn state(edit: HWND) -> (i32, i32, i32) {
     )
 }
 unsafe fn thumb(hwnd: HWND, first: i32, max: i32, visible: i32) -> RECT {
-    let mut rect = std::mem::zeroed();
+    let mut rect: RECT = std::mem::zeroed();
     GetClientRect(hwnd, &mut rect);
     let height = (rect.bottom * visible / (max + visible))
         .max(18)
@@ -205,7 +205,7 @@ unsafe extern "system" fn scroll_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
             } else {
                 wp as HDC
             };
-            let mut rect = std::mem::zeroed();
+            let mut rect: RECT = std::mem::zeroed();
             GetClientRect(hwnd, &mut rect);
             let brush = CreateSolidBrush(FIELD);
             FillRect(dc, &rect, brush);
@@ -243,7 +243,7 @@ unsafe extern "system" fn scroll_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
         }
         WM_MOUSEMOVE if GetCapture() == hwnd => {
             let (first, max, visible) = state(edit);
-            let mut rect = std::mem::zeroed();
+            let mut rect: RECT = std::mem::zeroed();
             GetClientRect(hwnd, &mut rect);
             let travel = (rect.bottom - (rect.bottom * visible / (max + visible)).max(18)).max(1);
             let delta = (lp >> 16) as i16 as i32 - GetWindowLongPtrW(hwnd, 0) as i32;
