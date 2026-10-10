@@ -51,6 +51,8 @@ try {
     Copy-Item src-native/vendor/webrtc-0.14.0/LICENSE-MIT (Join-Path $taskPackage 'WEBRTC-LICENSE-MIT.txt')
     Copy-Item src-native/vendor/webrtc-0.14.0/LICENSE-APACHE (Join-Path $taskPackage 'WEBRTC-LICENSE-APACHE.txt')
     Copy-Item src-native/vendor/webrtc-0.14.0/LOCAL-CHANGES.md (Join-Path $taskPackage 'WEBRTC-LOCAL-CHANGES.md')
+    Copy-Item src-native/vendor/webrtc-ice-0.14.0/LOCAL-CHANGES.md (Join-Path $taskPackage 'ICE-LOCAL-CHANGES.md')
+    Copy-Item src-native/vendor/turn-0.11.0/LOCAL-CHANGES.md (Join-Path $taskPackage 'TURN-LOCAL-CHANGES.md')
     $taskCargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE '.cargo' }
     $taskOpus = Get-ChildItem -Path (Join-Path $taskCargoHome 'registry/src/*/libopus_sys-0.3.3') -Directory | Select-Object -First 1
     if (!$taskOpus) { throw 'Bundled Opus license directory missing' }

@@ -69,9 +69,6 @@ mod transport;
 mod transport_diagnostic_errors;
 #[cfg(any(test, feature = "diagnostics"))]
 mod transport_diagnostics;
-#[cfg(test)]
-#[path = "../tests/turn_stream.rs"]
-mod turn_stream_tests;
 mod video_output;
 mod video_stream;
 #[cfg(windows)]

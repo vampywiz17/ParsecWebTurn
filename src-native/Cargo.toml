@@ -56,3 +56,4 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphic
 [patch.crates-io]
 webrtc = { path = "vendor/webrtc-0.14.0" }
 webrtc-ice = { path = "vendor/webrtc-ice-0.14.0" }
+turn = { path = "vendor/turn-0.11.0" }

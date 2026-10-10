@@ -852,6 +852,11 @@ impl Agent {
                         return Ok(());
                     }
                 };
+                if stream_transport.is_some() {
+                    client
+                        .set_reliable_transport_timeout(std::time::Duration::from_millis(39500))
+                        .await?;
+                }
                 if let Err(err) = client.listen().await {
                     let _ = client.close().await;
                     if let Some(transport) = &stream_transport {

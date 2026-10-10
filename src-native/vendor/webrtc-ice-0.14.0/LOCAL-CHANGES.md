@@ -22,6 +22,9 @@ priorities, nomination, candidate filtering or the application's `all` policy.
   setup and explicit candidate shutdown. The already-connected server address
   is passed to the upstream TURN client to avoid a second round-robin DNS
   lookup choosing a different endpoint.
+- The companion `turn-0.11.0` patch selects reliable STUN transactions for TCP
+  and TLS: no UDP retransmissions, a 39.5-second transaction timeout, and immediate
+  pending-request failure on transport closure (RFC 8489 section 6.2.2).
 - `src/lib.rs` exports the transport for isolated regression tests.
 
 Limitations: relay gathering currently follows upstream's IPv4 allocation

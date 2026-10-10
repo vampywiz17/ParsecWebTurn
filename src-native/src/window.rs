@@ -176,6 +176,7 @@ impl Window {
     pub fn handle(&self) -> HWND {
         self.hwnd.load(Ordering::Acquire) as HWND
     }
+    #[cfg(not(feature = "diagnostics"))]
     pub fn install_connection_settings(&self, manager: Arc<crate::connection_settings::Manager>) {
         *self
             .connection_settings

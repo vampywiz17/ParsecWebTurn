@@ -14,6 +14,98 @@ fn binding() -> Vec<u8> {
     packet
 }
 
+async fn binding_client(
+    stream: Arc<TurnStream>,
+    address: std::net::SocketAddr,
+) -> webrtc::turn::client::Client {
+    webrtc::turn::client::Client::new(webrtc::turn::client::ClientConfig {
+        stun_serv_addr: address.to_string(),
+        turn_serv_addr: String::new(),
+        username: String::new(),
+        password: String::new(),
+        realm: String::new(),
+        software: String::new(),
+        rto_in_ms: 200,
+        conn: stream,
+        vnet: None,
+    })
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn reliable_stun_times_out_once_without_udp_retransmissions() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let stream = Arc::new(
+        TurnStream::dial("127.0.0.1", address.port(), false)
+            .await
+            .unwrap(),
+    );
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut header = [0; 20];
+        socket.read_exact(&mut header).await.unwrap();
+        let length = u16::from_be_bytes([header[2], header[3]]) as usize;
+        socket.read_exact(&mut vec![0; length]).await.unwrap();
+        // The upstream UDP timer would send a duplicate after 200 ms.
+        assert!(
+            timeout(Duration::from_millis(900), socket.read(&mut [0; 100]))
+                .await
+                .is_err()
+        );
+    });
+    let client = binding_client(stream.clone(), address).await;
+    client
+        .set_reliable_transport_timeout(Duration::from_millis(800))
+        .await
+        .unwrap();
+    client.listen().await.unwrap();
+    let started = std::time::Instant::now();
+    let result = timeout(Duration::from_secs(2), client.send_binding_request())
+        .await
+        .unwrap();
+    assert!(result.is_err());
+    assert!(started.elapsed() >= Duration::from_millis(700));
+    timeout(Duration::from_secs(2), server)
+        .await
+        .unwrap()
+        .unwrap();
+    client.close().await.unwrap();
+    stream.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn reliable_transport_failure_fails_pending_transaction_immediately() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let stream = Arc::new(
+        TurnStream::dial("127.0.0.1", address.port(), false)
+            .await
+            .unwrap(),
+    );
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        socket.read_exact(&mut [0; 20]).await.unwrap();
+        // Drop the transport with a response outstanding.
+    });
+    let client = binding_client(stream.clone(), address).await;
+    client
+        .set_reliable_transport_timeout(Duration::from_millis(39500))
+        .await
+        .unwrap();
+    client.listen().await.unwrap();
+    assert!(
+        timeout(Duration::from_secs(2), client.send_binding_request())
+            .await
+            .unwrap()
+            .is_err()
+    );
+    server.await.unwrap();
+    client.close().await.unwrap();
+    stream.close().await.unwrap();
+}
+
 #[tokio::test]
 async fn fragmented_and_coalesced_turn_frames_preserve_message_boundaries() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

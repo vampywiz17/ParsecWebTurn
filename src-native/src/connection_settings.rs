@@ -4,11 +4,13 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
-    io::{Read, Write},
+    io::Write,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::Mutex,
     time::{Duration, Instant},
 };
+#[cfg(any(test, not(feature = "diagnostics")))]
+use std::{io::Read, sync::Arc};
 use webrtc::{
     ice::url::{ProtoType, SchemeType, Url},
     ice_transport::ice_server::RTCIceServer,
@@ -57,6 +59,7 @@ impl Default for Settings {
     }
 }
 impl Settings {
+    #[cfg(any(test, not(feature = "diagnostics")))]
     fn fresh() -> Self {
         Self {
             provider: "custom".into(),
@@ -211,6 +214,7 @@ struct Cached {
 }
 
 impl Manager {
+    #[cfg(any(test, not(feature = "diagnostics")))]
     pub fn open(path: PathBuf) -> Arc<Self> {
         let loaded = (|| -> Result<Settings> {
             let file = match std::fs::File::open(&path) {
