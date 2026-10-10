@@ -17,6 +17,7 @@ builds, not published stable releases.
 
 ### Improved
 
+- The Video GPU selector excludes virtual display-only adapters that can appear under the same name as a real GPU. Separate real GPUs remain selectable, even when their names match.
 - Disable the video driver's automatic extra picture processing and reuse GPU video views and stream-format details. Cached views are released when the stream changes or the window is resized. Presentation queue behavior is unchanged.
 - A clearer, Parsec-inspired **Settings** page with descriptions, provider-specific fields and dark controls.
 - Fixed overlapping text, clipped buttons and scrolling/repainting problems in Settings. Improved the stats window's resizing, scrolling and handling of ended sessions.

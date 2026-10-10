@@ -1,5 +1,7 @@
 //! Public DXGI hardware enumeration; no vendor SDK or global GPU override.
 use crate::connection_settings::GpuPreference;
+use windows::Wdk::Graphics::Direct3D::*;
+use windows::Win32::Foundation::LUID;
 use windows::Win32::Graphics::Dxgi::*;
 
 pub struct Adapter {
@@ -20,6 +22,9 @@ pub fn enumerate() -> windows::core::Result<Vec<Adapter>> {
             if desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0 {
                 continue;
             }
+            if is_display_only_indirect(adapter_type(desc.AdapterLuid)) {
+                continue;
+            }
             adapters.push(Adapter {
                 preference: GpuPreference {
                     name: String::from_utf16_lossy(&desc.Description)
@@ -37,6 +42,39 @@ pub fn enumerate() -> windows::core::Result<Vec<Adapter>> {
         }
         Ok(adapters)
     }
+}
+
+// Indirect display drivers can appear in DXGI under the backing GPU's name,
+// with a separate LUID, even exposing its video profiles. Query the documented
+// kernel adapter type instead of merging names or probing decoder support.
+fn adapter_type(luid: LUID) -> Option<u32> {
+    unsafe {
+        let mut opened = D3DKMT_OPENADAPTERFROMLUID {
+            AdapterLuid: luid,
+            ..Default::default()
+        };
+        if D3DKMTOpenAdapterFromLuid(&mut opened).is_err() {
+            return None;
+        }
+        let mut kind = D3DKMT_ADAPTERTYPE::default();
+        let mut query = D3DKMT_QUERYADAPTERINFO {
+            hAdapter: opened.hAdapter,
+            Type: KMTQAITYPE_ADAPTERTYPE,
+            pPrivateDriverData: std::ptr::from_mut(&mut kind).cast(),
+            PrivateDriverDataSize: std::mem::size_of_val(&kind) as u32,
+        };
+        let result = D3DKMTQueryAdapterInfo(&mut query);
+        let _ = D3DKMTCloseAdapter(&D3DKMT_CLOSEADAPTER {
+            hAdapter: opened.hAdapter,
+        });
+        result.is_ok().then_some(kind.Anonymous.Value)
+    }
+}
+
+fn is_display_only_indirect(kind: Option<u32>) -> bool {
+    const RENDER_SUPPORTED: u32 = 1;
+    const INDIRECT_DISPLAY_DEVICE: u32 = 1 << 6;
+    kind.is_some_and(|flags| flags & INDIRECT_DISPLAY_DEVICE != 0 && flags & RENDER_SUPPORTED == 0)
 }
 
 // LUIDs can change after reboot. Only accept a unique hardware match in that
@@ -59,6 +97,14 @@ pub fn match_index(preferred: &GpuPreference, adapters: &[GpuPreference]) -> Opt
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn excludes_indirect_display_alias_but_keeps_render_devices_and_unknowns() {
+        assert!(is_display_only_indirect(Some(0x0342)));
+        assert!(!is_display_only_indirect(Some(0x232b))); // integrated GPU
+        assert!(!is_display_only_indirect(Some(0x2313))); // discrete GPU
+        assert!(!is_display_only_indirect(Some(0x0343))); // render-capable indirect
+        assert!(!is_display_only_indirect(None)); // query failure is not evidence
+    }
     #[test]
     fn adapter_identity_survives_reorder_and_unique_reboot_but_not_ambiguity() {
         let gpu = GpuPreference {

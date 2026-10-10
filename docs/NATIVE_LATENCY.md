@@ -95,6 +95,16 @@ Multi-GPU hardware selection still needs testing on a system with multiple GPUs.
 
 ## Sources checked
 
+GPU enumeration also queries the documented `D3DKMT_ADAPTERTYPE` by DXGI LUID.
+An indirect adapter without `RenderSupported` is excluded from video selection;
+query failures retain the adapter rather than guessing from its name. A local
+read-only probe found two Radeon 780M entries with different LUIDs: the real GPU
+reported type `0x232b`, the indirect display-only alias `0x0342`. Both exposed 20
+D3D11 decoder profiles, so a decoder-profile probe alone cannot distinguish them.
+The NVIDIA adapter reported `0x2313` and remains selectable. No live session or
+system setting was modified by this probe.
+
+- [Documented adapter type flags](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/d3dkmthk/ns-d3dkmthk-_d3dkmt_adaptertype)
 - [Disable video processor automatic processing](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11videocontext-videoprocessorsetstreamautoprocessingmode)
 - [Explicit D3D11 adapter selection](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-d3d11createdevice)
 - [Transform input ownership](https://learn.microsoft.com/en-us/windows/win32/api/mftransform/nf-mftransform-imftransform-processinput)
