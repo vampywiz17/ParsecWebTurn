@@ -64,7 +64,8 @@ a connection succeeds.
 if you need to reach the interface underneath. Use the Parsec overlay for stream
 controls, volume and relative mouse mode.
 
-Open **ParsecWebTurn → Connection settings** or press **Ctrl+,** to change servers.
+Open **Settings** or press **Ctrl+,** to change servers. The Network page shows only
+the fields for your selected TURN provider, with descriptions beside each setting.
 Leave the STUN field empty to use Parsec's default. For LAN/VPN connections, you
 can supply your own STUN server and enable **STUN only** to exclude all TURN relays.
 For a custom relay, enter its TURN URL, username and password; or select Cloudflare

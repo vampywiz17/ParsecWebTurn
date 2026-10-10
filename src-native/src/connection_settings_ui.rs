@@ -9,9 +9,15 @@ use windows_sys::Win32::{
     Foundation::*,
     Graphics::Gdi::*,
     System::LibraryLoader::*,
-    UI::{Controls::EM_SETLIMITTEXT, Input::KeyboardAndMouse::*, WindowsAndMessaging::*},
+    UI::{
+        Controls::{
+            DRAWITEMSTRUCT, EM_SETLIMITTEXT, MEASUREITEMSTRUCT, ODS_DISABLED, ODS_FOCUS,
+            ODS_SELECTED,
+        },
+        Input::KeyboardAndMouse::*,
+        WindowsAndMessaging::*,
+    },
 };
-
 pub const OPEN: usize = 4100;
 const SAVE: usize = 4101;
 const BACK: usize = 4102;
@@ -28,13 +34,25 @@ const CACHE: usize = 4112;
 const FORGET_PASSWORD: usize = 4113;
 const FORGET_TOKEN: usize = 4114;
 const STATUS: usize = 4115;
-const BG: u32 = 0x00212121;
-const FIELD: u32 = 0x00333333;
+const BG: u32 = 0x00282828;
+const FIELD: u32 = 0x00212121;
 const FG: u32 = 0x00eeeeee;
+const MUTED: u32 = 0x00bcbcbc;
+const ACCENT: u32 = 0x00ffbb00;
+const CUSTOM: u8 = 1;
+const CLOUDFLARE: u8 = 2;
+const HELP: usize = 4200;
+const TAB: usize = 4201;
+const SECTION: usize = 4202;
+const NOTICE: usize = 4203;
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain([0]).collect()
 }
-
+struct Item {
+    hwnd: HWND,
+    rect: RECT,
+    group: u8,
+}
 struct Page {
     window_owned: bool,
     manager: Arc<Manager>,
@@ -43,6 +61,9 @@ struct Page {
     field: HBRUSH,
     font: HFONT,
     heading: HFONT,
+    small: HFONT,
+    items: Vec<Item>,
+    scroll: i32,
 }
 impl Drop for Page {
     fn drop(&mut self) {
@@ -51,29 +72,38 @@ impl Drop for Page {
             DeleteObject(self.field);
             DeleteObject(self.font);
             DeleteObject(self.heading);
+            DeleteObject(self.small);
         }
     }
 }
-
-/// Use standard menus/accessibility and a stable keyboard shortcut, without
-/// modifying the Parsec WASM's UI or intercepting its private menu callbacks.
+unsafe fn font(size: i32, weight: i32) -> HFONT {
+    CreateFontW(
+        -size,
+        0,
+        0,
+        0,
+        weight,
+        0,
+        0,
+        0,
+        DEFAULT_CHARSET as u32,
+        0,
+        0,
+        CLEARTYPE_QUALITY as u32,
+        0,
+        wide("Segoe UI").as_ptr(),
+    )
+}
+/// A native menu command and keyboard shortcut; no private Parsec UI callbacks.
 pub unsafe fn install_menu(parent: HWND) {
     if !GetMenu(parent).is_null() {
         return;
     }
     let menu = CreateMenu();
-    let app = CreatePopupMenu();
-    AppendMenuW(
-        app,
-        MF_STRING,
-        OPEN,
-        wide("Connection settings\tCtrl+,").as_ptr(),
-    );
-    AppendMenuW(menu, MF_POPUP, app as usize, wide("ParsecWebTurn").as_ptr());
+    AppendMenuW(menu, MF_STRING, OPEN, wide("Settings").as_ptr());
     SetMenu(parent, menu);
     DrawMenuBar(parent);
 }
-
 pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
     let name = wide("ParsecWebTurnSettings");
     let instance = GetModuleHandleW(null());
@@ -84,7 +114,6 @@ pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
         lpszClassName: name.as_ptr(),
         ..std::mem::zeroed()
     };
-    // A class can remain registered between page openings.
     RegisterClassW(&class);
     let (saved, error) = manager.view();
     let mut page = Box::new(Page {
@@ -93,52 +122,24 @@ pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
         saved,
         background: CreateSolidBrush(BG),
         field: CreateSolidBrush(FIELD),
-        font: CreateFontW(
-            -16,
-            0,
-            0,
-            0,
-            400,
-            0,
-            0,
-            0,
-            DEFAULT_CHARSET as u32,
-            0,
-            0,
-            CLEARTYPE_QUALITY as u32,
-            0,
-            wide("Segoe UI").as_ptr(),
-        ),
-        heading: CreateFontW(
-            -26,
-            0,
-            0,
-            0,
-            600,
-            0,
-            0,
-            0,
-            DEFAULT_CHARSET as u32,
-            0,
-            0,
-            CLEARTYPE_QUALITY as u32,
-            0,
-            wide("Segoe UI").as_ptr(),
-        ),
+        font: font(16, 400),
+        heading: font(46, 300),
+        small: font(13, 400),
+        items: Vec::new(),
+        scroll: 0,
     });
-    // Keep ownership until CreateWindowEx succeeds: WM_NCDESTROY may also run
-    // during failed creation and must not free the creator's Box a second time.
+    // Failed CreateWindowEx may send WM_NCDESTROY. Transfer ownership only on success.
     let pointer = (&mut *page) as *mut Page;
     let mut rect: RECT = std::mem::zeroed();
     GetClientRect(parent, &mut rect);
-    if rect.right < 860 || rect.bottom < 650 {
+    if rect.right < 860 || rect.bottom < 600 {
         SetWindowPos(
             parent,
             null_mut(),
             0,
             0,
-            920,
-            750,
+            1000,
+            780,
             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
         );
         GetClientRect(parent, &mut rect);
@@ -146,8 +147,8 @@ pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
     let hwnd = CreateWindowExW(
         WS_EX_CONTROLPARENT,
         name.as_ptr(),
-        wide("Connection settings").as_ptr(),
-        WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN,
+        wide("Settings").as_ptr(),
+        WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_VSCROLL,
         0,
         0,
         rect.right,
@@ -161,334 +162,374 @@ pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
         return hwnd;
     }
     page.window_owned = true;
-    let pointer = Box::into_raw(page);
-    let page = &*pointer;
-    let s = &page.saved;
-    let x = (rect.right - 820).max(24) / 2;
-    let right = x + 420;
-    control(
+    let page = &mut *Box::into_raw(page);
+    let s = page.saved.clone();
+    add(
         hwnd,
+        page,
         "STATIC",
-        "Connection settings",
+        "Settings",
         0,
-        x,
-        22,
-        800,
-        38,
+        [0, 24, 820, 58],
+        0,
         0,
         page.heading,
     );
-    control(
+    add(
         hwnd,
+        page,
         "STATIC",
-        "Choose how this client finds and reaches your computer.",
+        "Customize how ParsecWebTurn connects to your computer.",
         0,
-        x,
-        66,
-        800,
-        24,
+        [4, 88, 816, 24],
+        0,
         0,
         page.font,
     );
-    control(
+    add(
         hwnd,
+        page,
         "STATIC",
-        "STUN discovery",
+        "Network",
         0,
-        x,
-        108,
-        380,
-        24,
+        [4, 142, 300, 24],
+        TAB,
         0,
         page.font,
     );
-    control(
+    add(
         hwnd,
-        "EDIT",
-        &s.stun_urls.join("\r\n"),
-        ES_MULTILINE as u32 | ES_AUTOVSCROLL as u32 | WS_VSCROLL | WS_BORDER | WS_TABSTOP,
-        x,
-        138,
-        380,
-        84,
-        STUN,
-        page.font,
-    );
-    control(
-        hwnd,
+        page,
         "STATIC",
-        "One stun: URL per line. Blank uses Parsec's default.",
+        "CONNECTION SETTINGS",
         0,
-        x,
-        230,
-        390,
-        38,
+        [0, 192, 820, 25],
+        SECTION,
         0,
         page.font,
     );
-    control(
+    row(hwnd, page, "STUN servers",
+        "Discover a direct route. One stun: URL per line.\nLeave blank to use the default discovery server.",
+        STUN, &s.stun_urls.join("\r\n"), 242, 76, 0, ES_MULTILINE as u32 | ES_AUTOVSCROLL as u32 | WS_VSCROLL);
+    row_label(
         hwnd,
+        page,
+        "STUN only",
+        "For LAN or VPN connections that do not need a relay.",
+        344,
+        0,
+    );
+    add(
+        hwnd,
+        page,
         "BUTTON",
-        "STUN only (LAN / VPN; no TURN relay)",
+        "Use STUN only (no TURN relay)",
         BS_AUTOCHECKBOX as u32 | WS_TABSTOP,
-        x,
-        280,
-        395,
-        30,
+        [420, 344, 400, 36],
         STUN_ONLY,
+        0,
         page.font,
     );
     check(hwnd, STUN_ONLY, s.stun_only);
-    control(
+    row_label(
         hwnd,
-        "STATIC",
+        page,
         "TURN provider",
+        "An optional relay when a direct connection is unavailable.",
+        418,
         0,
-        right,
-        108,
-        380,
-        24,
-        0,
-        page.font,
     );
-    let provider = control(
+    let provider = add(
         hwnd,
+        page,
         "COMBOBOX",
         "",
-        CBS_DROPDOWNLIST as u32 | WS_VSCROLL | WS_TABSTOP,
-        right,
-        138,
-        380,
-        120,
+        CBS_DROPDOWNLIST as u32
+            | CBS_OWNERDRAWFIXED as u32
+            | CBS_HASSTRINGS as u32
+            | WS_VSCROLL
+            | WS_TABSTOP,
+        [420, 418, 400, 160],
         PROVIDER,
+        0,
         page.font,
     );
-    SendMessageW(
-        provider,
-        CB_ADDSTRING,
-        0,
-        wide("Custom servers (coturn, eturnal, ExpressTURN…)").as_ptr() as isize,
-    );
-    SendMessageW(
-        provider,
-        CB_ADDSTRING,
-        0,
-        wide("Cloudflare TURN").as_ptr() as isize,
-    );
+    for name in ["Custom servers", "Cloudflare TURN"] {
+        SendMessageW(provider, CB_ADDSTRING, 0, wide(name).as_ptr() as isize);
+    }
     SendMessageW(
         provider,
         CB_SETCURSEL,
         usize::from(s.provider == "cloudflare"),
         0,
     );
-    control(
-        hwnd,
-        "STATIC",
-        "TURN URLs — one per line",
-        0,
-        right,
-        184,
-        380,
-        24,
-        0,
-        page.font,
-    );
-    control(
-        hwnd,
-        "EDIT",
-        &s.turn_urls.join("\r\n"),
-        ES_MULTILINE as u32 | ES_AUTOVSCROLL as u32 | WS_VSCROLL | WS_BORDER | WS_TABSTOP,
-        right,
-        214,
-        380,
-        72,
-        TURN,
-        page.font,
-    );
-    control(
-        hwnd,
-        "STATIC",
-        "UDP, TCP and TLS supported. Example: turns:host:443",
-        0,
-        right,
-        294,
-        390,
-        38,
-        0,
-        page.font,
-    );
-    field(
+    row(hwnd, page, "TURN servers",
+        "coturn, eturnal, ExpressTURN and other providers.\nUDP, TCP or TLS; e.g. turns:host:443. One URL per line.",
+        TURN, &s.turn_urls.join("\r\n"), 502, 76, CUSTOM,
+        ES_MULTILINE as u32 | ES_AUTOVSCROLL as u32 | WS_VSCROLL);
+    row(
         hwnd,
         page,
-        "TURN username",
-        &s.custom_username,
+        "Username",
+        "The username supplied by your TURN provider.",
         USERNAME,
-        x,
-        340,
-        false,
+        &s.custom_username,
+        608,
+        36,
+        CUSTOM,
+        ES_AUTOHSCROLL as u32,
     );
-    field(
+    row(
         hwnd,
         page,
-        if s.encrypted_custom_password.is_empty() {
-            "TURN password"
-        } else {
-            "TURN password (blank keeps saved password)"
-        },
-        "",
+        "Password",
+        "Leave blank to keep your saved password.",
         PASSWORD,
-        x,
-        410,
-        true,
-    );
-    control(
-        hwnd,
-        "BUTTON",
-        "Forget saved TURN password",
-        BS_AUTOCHECKBOX as u32 | WS_TABSTOP,
-        x,
-        480,
-        390,
-        28,
-        FORGET_PASSWORD,
-        page.font,
-    );
-    field(
-        hwnd,
-        page,
-        "Cloudflare TURN Key ID",
-        &s.turn_key_id,
-        KEY,
-        right,
-        340,
-        false,
-    );
-    field(
-        hwnd,
-        page,
-        if s.encrypted_api_token.is_empty() {
-            "Cloudflare API token"
-        } else {
-            "API token (blank keeps saved token)"
-        },
         "",
-        TOKEN,
-        right,
-        410,
-        true,
+        688,
+        36,
+        CUSTOM,
+        ES_AUTOHSCROLL as u32 | ES_PASSWORD as u32,
     );
-    control(
+    add(
         hwnd,
+        page,
+        "BUTTON",
+        "Forget saved password",
+        BS_AUTOCHECKBOX as u32 | WS_TABSTOP,
+        [420, 734, 400, 28],
+        FORGET_PASSWORD,
+        CUSTOM,
+        page.small,
+    );
+    row(
+        hwnd,
+        page,
+        "TURN Key ID",
+        "The key ID from your Cloudflare TURN configuration.",
+        KEY,
+        &s.turn_key_id,
+        502,
+        36,
+        CLOUDFLARE,
+        ES_AUTOHSCROLL as u32,
+    );
+    row(
+        hwnd,
+        page,
+        "API token",
+        "Leave blank to keep your saved token.",
+        TOKEN,
+        "",
+        582,
+        36,
+        CLOUDFLARE,
+        ES_AUTOHSCROLL as u32 | ES_PASSWORD as u32,
+    );
+    add(
+        hwnd,
+        page,
         "BUTTON",
         "Forget saved API token",
         BS_AUTOCHECKBOX as u32 | WS_TABSTOP,
-        right,
-        480,
-        390,
-        28,
+        [420, 628, 400, 28],
         FORGET_TOKEN,
-        page.font,
+        CLOUDFLARE,
+        page.small,
     );
-    control(
+    row(
         hwnd,
-        "STATIC",
-        "Credential lifetime (seconds)",
-        0,
-        right,
-        518,
-        245,
-        24,
-        0,
-        page.font,
-    );
-    control(
-        hwnd,
-        "EDIT",
-        &s.ttl.to_string(),
-        ES_NUMBER as u32 | WS_BORDER | WS_TABSTOP,
-        right + 265,
-        514,
-        115,
-        30,
+        page,
+        "Credential lifetime",
+        "How long generated TURN credentials remain valid (seconds).",
         TTL,
-        page.font,
+        &s.ttl.to_string(),
+        678,
+        36,
+        CLOUDFLARE,
+        ES_NUMBER as u32,
     );
-    control(
+    row_label(
         hwnd,
+        page,
+        "Credential cache",
+        "Reuse valid credentials until you close ParsecWebTurn.",
+        758,
+        CLOUDFLARE,
+    );
+    add(
+        hwnd,
+        page,
         "BUTTON",
-        "Reuse unexpired credentials while the app is open",
+        "Reuse unexpired credentials",
         BS_AUTOCHECKBOX as u32 | WS_TABSTOP,
-        right,
-        554,
-        395,
-        28,
+        [420, 758, 400, 36],
         CACHE,
+        CLOUDFLARE,
         page.font,
     );
     check(hwnd, CACHE, s.cache_credentials);
-    control(hwnd, "STATIC", "TURN is optional. ICE chooses the route; enabling TURN may select a relay even when a direct route exists. Changes apply on the next connection.", 0, x, 522, 395, 70, 0, page.font);
+    add(hwnd, page, "STATIC",
+        "ICE chooses the route automatically. Enabling TURN may select a relay even when a direct route exists.\nChanges apply to your next connection.",
+        0, [0, 816, 820, 48], NOTICE, 0, page.small);
     let status = error.unwrap_or_else(|| {
-        "Settings are stored in settings.json; secrets are protected for your Windows user.".into()
+        "Saved in settings.json. Secrets are protected for your Windows user.".into()
     });
-    control(
-        hwnd, "STATIC", &status, 0, x, 602, 540, 46, STATUS, page.font,
-    );
-    control(
+    add(
         hwnd,
+        page,
+        "STATIC",
+        &status,
+        0,
+        [0, 878, 820, 40],
+        STATUS,
+        0,
+        page.small,
+    );
+    add(
+        hwnd,
+        page,
         "BUTTON",
         "Back",
-        BS_PUSHBUTTON as u32 | WS_TABSTOP,
-        right + 160,
-        608,
-        90,
-        34,
+        BS_OWNERDRAW as u32 | WS_TABSTOP,
+        [550, 934, 110, 40],
         BACK,
+        0,
         page.font,
     );
-    control(
+    add(
         hwnd,
+        page,
         "BUTTON",
         "Save settings",
-        BS_DEFPUSHBUTTON as u32 | WS_TABSTOP,
-        right + 260,
-        608,
-        120,
-        34,
+        BS_OWNERDRAW as u32 | WS_TABSTOP,
+        [676, 934, 144, 40],
         SAVE,
+        0,
         page.font,
     );
     update_enabled(hwnd);
     SetFocus(GetDlgItem(hwnd, STUN as i32));
     hwnd
 }
-
-#[allow(clippy::too_many_arguments)] // Flat Win32 control descriptor, UI-thread only.
-unsafe fn field(
-    hwnd: HWND,
-    page: &Page,
-    label: &str,
-    value: &str,
+#[allow(clippy::too_many_arguments)] // Native control descriptors, UI-thread only.
+unsafe fn add(
+    parent: HWND,
+    page: &mut Page,
+    class: &str,
+    text: &str,
+    style: u32,
+    rect: [i32; 4],
     id: usize,
-    x: i32,
-    y: i32,
-    secret: bool,
-) {
-    control(hwnd, "STATIC", label, 0, x, y, 395, 24, 0, page.font);
-    control(
+    group: u8,
+    font: HFONT,
+) -> HWND {
+    let [x, y, w, h] = rect;
+    let hwnd = control(parent, class, text, style, x, y, w, h, id, font);
+    page.items.push(Item {
         hwnd,
-        "EDIT",
-        value,
-        ES_AUTOHSCROLL as u32
-            | WS_BORDER
-            | WS_TABSTOP
-            | if secret { ES_PASSWORD as u32 } else { 0 },
-        x,
-        y + 28,
-        380,
-        30,
-        id,
+        rect: RECT {
+            left: x,
+            top: y,
+            right: x + w,
+            bottom: y + h,
+        },
+        group,
+    });
+    hwnd
+}
+unsafe fn row_label(hwnd: HWND, page: &mut Page, label: &str, help: &str, y: i32, group: u8) {
+    add(
+        hwnd,
+        page,
+        "STATIC",
+        label,
+        0,
+        [0, y + 2, 392, 24],
+        0,
+        group,
         page.font,
     );
+    add(
+        hwnd,
+        page,
+        "STATIC",
+        help,
+        0,
+        [0, y + 32, 392, 48],
+        HELP,
+        group,
+        page.small,
+    );
+}
+#[allow(clippy::too_many_arguments)] // Label, help and native editor describe one settings row.
+unsafe fn row(
+    hwnd: HWND,
+    page: &mut Page,
+    label: &str,
+    help: &str,
+    id: usize,
+    value: &str,
+    y: i32,
+    height: i32,
+    group: u8,
+    style: u32,
+) {
+    row_label(hwnd, page, label, help, y, group);
+    add(
+        hwnd,
+        page,
+        "EDIT",
+        value,
+        style | WS_BORDER | WS_TABSTOP,
+        [420, y, 400, height],
+        id,
+        group,
+        page.font,
+    );
+}
+/// Reflow on resize/provider changes. Hidden controls retain unsaved values.
+unsafe fn layout(hwnd: HWND) {
+    let pointer = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut Page;
+    if pointer.is_null() {
+        return;
+    }
+    let page = &mut *pointer;
+    let mut client = std::mem::zeroed();
+    GetClientRect(hwnd, &mut client);
+    let cloudflare = SendMessageW(GetDlgItem(hwnd, PROVIDER as i32), CB_GETCURSEL, 0, 0) == 1;
+    let shift = if cloudflare { 0 } else { 44 };
+    let height = 1000 - shift;
+    page.scroll = page.scroll.clamp(0, (height - client.bottom).max(0));
+    let info = SCROLLINFO {
+        cbSize: size_of::<SCROLLINFO>() as u32,
+        fMask: SIF_RANGE | SIF_PAGE | SIF_POS,
+        nMin: 0,
+        nMax: height - 1,
+        nPage: client.bottom.max(0) as u32,
+        nPos: page.scroll,
+        nTrackPos: 0,
+    };
+    SetScrollInfo(hwnd, SB_VERT, &info, 1);
+    let x = ((client.right - 820) / 2).max(24);
+    for item in &page.items {
+        let visible = item.group == 0 || item.group == if cloudflare { CLOUDFLARE } else { CUSTOM };
+        ShowWindow(item.hwnd, if visible { SW_SHOW } else { SW_HIDE });
+        if visible {
+            let r = item.rect;
+            let dy = if r.top >= 816 { shift } else { 0 };
+            SetWindowPos(
+                item.hwnd,
+                null_mut(),
+                x + r.left,
+                r.top - page.scroll - dy,
+                r.right - r.left,
+                r.bottom - r.top,
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+        }
+    }
+    InvalidateRect(hwnd, null(), 1);
 }
 #[allow(clippy::too_many_arguments)] // Flat Win32 control descriptor, UI-thread only.
 unsafe fn control(
@@ -507,7 +548,14 @@ unsafe fn control(
         0,
         wide(class).as_ptr(),
         wide(text).as_ptr(),
-        WS_CHILD | WS_VISIBLE | style,
+        WS_CHILD
+            | WS_VISIBLE
+            | style
+            | if class == "BUTTON" {
+                BS_NOTIFY as u32
+            } else {
+                0
+            },
         x,
         y,
         width,
@@ -563,6 +611,7 @@ unsafe fn update_enabled(hwnd: HWND) {
             };
         EnableWindow(GetDlgItem(hwnd, id as i32), enabled as i32);
     }
+    layout(hwnd);
 }
 unsafe fn save(hwnd: HWND, page: &mut Page) -> anyhow::Result<()> {
     let mut s = page.saved.clone();
@@ -623,8 +672,118 @@ unsafe extern "system" fn page_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: LP
     if !pointer.is_null() {
         let page = &mut *pointer;
         match message {
+            WM_SIZE => {
+                layout(hwnd);
+                return 0;
+            }
+            WM_MOUSEWHEEL => {
+                page.scroll -= ((wp >> 16) as u16 as i16 as i32) / 120 * 72;
+                layout(hwnd);
+                return 0;
+            }
+            WM_VSCROLL => {
+                let mut info = SCROLLINFO {
+                    cbSize: size_of::<SCROLLINFO>() as u32,
+                    fMask: SIF_ALL,
+                    ..std::mem::zeroed()
+                };
+                GetScrollInfo(hwnd, SB_VERT, &mut info);
+                page.scroll = match (wp & 0xffff) as i32 {
+                    SB_LINEUP => page.scroll - 36,
+                    SB_LINEDOWN => page.scroll + 36,
+                    SB_PAGEUP => page.scroll - info.nPage as i32,
+                    SB_PAGEDOWN => page.scroll + info.nPage as i32,
+                    SB_THUMBTRACK | SB_THUMBPOSITION => info.nTrackPos,
+                    SB_TOP => 0,
+                    SB_BOTTOM => info.nMax,
+                    _ => page.scroll,
+                };
+                layout(hwnd);
+                return 0;
+            }
+            WM_MEASUREITEM if wp == PROVIDER => {
+                (*(lp as *mut MEASUREITEMSTRUCT)).itemHeight = 30;
+                return 1;
+            }
+            WM_DRAWITEM => {
+                let draw = &*(lp as *const DRAWITEMSTRUCT);
+                if [SAVE as u32, BACK as u32, PROVIDER as u32].contains(&draw.CtlID) {
+                    let dc = draw.hDC;
+                    let state = SaveDC(dc);
+                    let primary = draw.CtlID == SAVE as u32;
+                    let color = if draw.itemState & ODS_SELECTED != 0 {
+                        0x00404040
+                    } else if primary {
+                        ACCENT
+                    } else {
+                        FIELD
+                    };
+                    let brush = CreateSolidBrush(color);
+                    FillRect(dc, &draw.rcItem, brush);
+                    DeleteObject(brush);
+                    SelectObject(dc, page.font);
+                    SetBkMode(dc, TRANSPARENT as i32);
+                    SetTextColor(
+                        dc,
+                        if draw.itemState & ODS_DISABLED != 0 {
+                            MUTED
+                        } else if primary && draw.itemState & ODS_SELECTED == 0 {
+                            FIELD
+                        } else {
+                            FG
+                        },
+                    );
+                    let label = if draw.CtlID == PROVIDER as u32 {
+                        match draw.itemID {
+                            0 => "Custom servers",
+                            1 => "Cloudflare TURN",
+                            _ => "",
+                        }
+                    } else if primary {
+                        "Save settings"
+                    } else {
+                        "Back"
+                    };
+                    let mut rect = draw.rcItem;
+                    rect.left += 10;
+                    rect.right -= 10;
+                    DrawTextW(
+                        dc,
+                        wide(label).as_ptr(),
+                        -1,
+                        &mut rect,
+                        DT_SINGLELINE
+                            | DT_VCENTER
+                            | if draw.CtlID == PROVIDER as u32 {
+                                DT_LEFT
+                            } else {
+                                DT_CENTER
+                            },
+                    );
+                    if draw.itemState & ODS_FOCUS != 0 {
+                        InflateRect(&mut rect, -2, -4);
+                        DrawFocusRect(dc, &rect);
+                    }
+                    RestoreDC(dc, state);
+                    return 1;
+                }
+            }
+            WM_COMMAND if matches!((wp >> 16) as u32, EN_SETFOCUS | BN_SETFOCUS | CBN_SETFOCUS) => {
+                let mut rect: RECT = std::mem::zeroed();
+                GetWindowRect(lp as HWND, &mut rect);
+                MapWindowPoints(null_mut(), hwnd, (&mut rect as *mut RECT).cast(), 2);
+                let mut client = std::mem::zeroed();
+                GetClientRect(hwnd, &mut client);
+                if rect.top < 8 {
+                    page.scroll += rect.top - 8;
+                } else if rect.bottom > client.bottom - 8 {
+                    page.scroll += rect.bottom - client.bottom + 8;
+                }
+                layout(hwnd);
+                return 0;
+            }
             WM_COMMAND => match wp & 0xffff {
-                SAVE => {
+                SAVE | 1 => {
                     let status = match save(hwnd, page) {
                         Ok(()) => "Settings saved. They apply on your next connection.".into(),
                         Err(e) => e.to_string(),
@@ -636,7 +795,11 @@ unsafe extern "system" fn page_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: LP
                     PostMessageW(GetParent(hwnd), WM_APP + 9, 0, 0);
                     return 0;
                 }
-                PROVIDER | STUN_ONLY => {
+                PROVIDER if (wp >> 16) as u32 == CBN_SELCHANGE => {
+                    update_enabled(hwnd);
+                    return 0;
+                }
+                STUN_ONLY if (wp >> 16) as u32 == BN_CLICKED => {
                     update_enabled(hwnd);
                     return 0;
                 }
@@ -645,7 +808,19 @@ unsafe extern "system" fn page_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: LP
             WM_CTLCOLORSTATIC | WM_CTLCOLORBTN | WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX => {
                 let dc = wp as HDC;
                 let edit = matches!(message, WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX);
-                SetTextColor(dc, FG);
+                let id = GetDlgCtrlID(lp as HWND) as usize;
+                SetTextColor(
+                    dc,
+                    if id == TAB {
+                        ACCENT
+                    } else if matches!(id, HELP | NOTICE | STATUS)
+                        || IsWindowEnabled(lp as HWND) == 0
+                    {
+                        MUTED
+                    } else {
+                        FG
+                    },
+                );
                 SetBkColor(dc, if edit { FIELD } else { BG });
                 return if edit { page.field } else { page.background } as isize;
             }
@@ -654,6 +829,23 @@ unsafe extern "system" fn page_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: LP
                 GetClientRect(hwnd, &mut rect);
                 FillRect(wp as HDC, &rect, page.background);
                 return 1;
+            }
+            WM_PAINT => {
+                let mut paint = std::mem::zeroed();
+                let dc = BeginPaint(hwnd, &mut paint);
+                let mut rect: RECT = std::mem::zeroed();
+                GetClientRect(hwnd, &mut rect);
+                let x = ((rect.right - 820) / 2).max(24);
+                let line = RECT {
+                    left: x,
+                    top: 127 - page.scroll,
+                    right: x + 820,
+                    bottom: 129 - page.scroll,
+                };
+                SetDCBrushColor(dc, 0x003b3b3b);
+                FillRect(dc, &line, GetStockObject(DC_BRUSH) as HBRUSH);
+                EndPaint(hwnd, &paint);
+                return 0;
             }
             WM_NCDESTROY => {
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
@@ -698,6 +890,48 @@ mod tests {
             assert_eq!(GetMenuItemCount(GetMenu(parent)), 1);
             let page = open(parent, manager.clone());
             assert!(!page.is_null());
+            assert_ne!(
+                GetWindowLongW(GetDlgItem(page, TURN as i32), GWL_STYLE) as u32 & WS_VISIBLE,
+                0
+            );
+            assert_eq!(
+                GetWindowLongW(GetDlgItem(page, KEY as i32), GWL_STYLE) as u32 & WS_VISIBLE,
+                0
+            );
+            capture(page, "custom");
+            SetWindowTextW(
+                GetDlgItem(page, USERNAME as i32),
+                wide("unsaved-user").as_ptr(),
+            );
+            SendMessageW(GetDlgItem(page, PROVIDER as i32), CB_SETCURSEL, 1, 0);
+            update_enabled(page);
+            assert_eq!(
+                GetWindowLongW(GetDlgItem(page, TURN as i32), GWL_STYLE) as u32 & WS_VISIBLE,
+                0
+            );
+            assert_ne!(
+                GetWindowLongW(GetDlgItem(page, KEY as i32), GWL_STYLE) as u32 & WS_VISIBLE,
+                0
+            );
+            capture(page, "cloudflare");
+            // The last control remains reachable at a small window size and
+            // keyboard focus scrolls it into view without touching real data.
+            SendMessageW(
+                page,
+                WM_COMMAND,
+                SAVE | ((BN_SETFOCUS as usize) << 16),
+                GetDlgItem(page, SAVE as i32) as isize,
+            );
+            let mut button = std::mem::zeroed();
+            let mut client = std::mem::zeroed();
+            GetWindowRect(GetDlgItem(page, SAVE as i32), &mut button);
+            MapWindowPoints(null_mut(), page, (&mut button as *mut RECT).cast(), 2);
+            GetClientRect(page, &mut client);
+            assert!(button.top >= 0 && button.bottom <= client.bottom);
+            capture(page, "cloudflare-bottom");
+            SendMessageW(GetDlgItem(page, PROVIDER as i32), CB_SETCURSEL, 0, 0);
+            update_enabled(page);
+            assert_eq!(text(page, USERNAME), "unsaved-user");
             SetWindowTextW(
                 GetDlgItem(page, STUN as i32),
                 wide("stun:stun.example.org:3478").as_ptr(),
@@ -721,5 +955,56 @@ mod tests {
                 .stun_only
         );
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    // Optional CI-only visual fixtures. This cannot capture an account, stream
+    // or production profile: the fixture above owns only synthetic controls.
+    unsafe fn capture(hwnd: HWND, name: &str) {
+        let Some(directory) = std::env::var_os("PARSEC_SETTINGS_SCREENSHOTS") else {
+            return;
+        };
+        let directory = std::path::PathBuf::from(directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        let mut rect: RECT = std::mem::zeroed();
+        GetClientRect(hwnd, &mut rect);
+        let dc = CreateCompatibleDC(null_mut());
+        let mut info: BITMAPINFO = std::mem::zeroed();
+        info.bmiHeader.biSize = size_of::<BITMAPINFOHEADER>() as u32;
+        info.bmiHeader.biWidth = rect.right;
+        info.bmiHeader.biHeight = -rect.bottom;
+        info.bmiHeader.biPlanes = 1;
+        info.bmiHeader.biBitCount = 32;
+        info.bmiHeader.biCompression = BI_RGB;
+        let mut pixels = null_mut();
+        let bitmap = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &mut pixels, null_mut(), 0);
+        assert!(!bitmap.is_null() && !dc.is_null() && !pixels.is_null());
+        let previous = SelectObject(dc, bitmap);
+        SendMessageW(
+            hwnd,
+            WM_PRINT,
+            dc as usize,
+            (PRF_CLIENT | PRF_CHILDREN | PRF_ERASEBKGND) as isize,
+        );
+        GdiFlush();
+        let mut rgba = std::slice::from_raw_parts(
+            pixels.cast::<u8>(),
+            (rect.right * rect.bottom * 4) as usize,
+        )
+        .to_vec();
+        for pixel in rgba.chunks_exact_mut(4) {
+            pixel.swap(0, 2);
+            pixel[3] = 255;
+        }
+        SelectObject(dc, previous);
+        DeleteObject(bitmap);
+        DeleteDC(dc);
+        image::save_buffer(
+            directory.join(format!("{name}.png")),
+            &rgba,
+            rect.right as u32,
+            rect.bottom as u32,
+            image::ColorType::Rgba8,
+        )
+        .unwrap();
     }
 }

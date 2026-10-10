@@ -62,6 +62,8 @@ jobs:
           if-no-files-found: error
       - name: Validate and build independent Rust host
         shell: pwsh
+        env:
+          PARSEC_SETTINGS_SCREENSHOTS: ${{ github.workspace }}/src-native/artifacts/settings
         run: |
           $ErrorActionPreference = 'Stop'
           cargo fmt --manifest-path src-native/Cargo.toml -- --check

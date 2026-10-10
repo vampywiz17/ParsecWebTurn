@@ -536,7 +536,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
             WM_GETMINMAXINFO if s.settings_page.load(Ordering::Acquire) != 0 => {
                 let limits = &mut *(lp as *mut MINMAXINFO);
                 limits.ptMinTrackSize.x = 900;
-                limits.ptMinTrackSize.y = 740;
+                limits.ptMinTrackSize.y = 600;
                 return 0;
             }
             WM_CLOSE => {
