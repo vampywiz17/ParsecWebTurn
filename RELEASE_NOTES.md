@@ -9,6 +9,10 @@ with native video, Opus audio, keyboard and mouse support.
 
 ## What's new
 
+- **Video GPU choice:** select the adapter for stream decoding and rendering in
+  Settings, or keep Automatic. The choice is saved for the next connection.
+- **Less repeated video work:** disable automatic driver picture processing and
+  reuse GPU views and stream-format details, without changing the presentation queue.
 - **Your own STUN/TURN servers:** use Cloudflare or a custom provider, with UDP,
   TCP and encrypted TLS support. The earlier client's `settings.json` remains
   compatible. STUN-only mode excludes TURN for LAN/VPN connections.

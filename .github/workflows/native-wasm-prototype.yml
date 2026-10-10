@@ -138,6 +138,7 @@ jobs:
           if (!$sustained.sustained -or $sustained.external_requests_enabled -or !$sustained.native_window_released -or !$sustained.gpu_resources_released -or !$sustained.video.worker_finished) { throw 'Sustained video cleanup failed' }
           if ($sustained.video.frames_decoded -gt 0 -and ($sustained.video.frames_decoded -ne 1024 -or $sustained.video.frames_presented -lt 1 -or $sustained.video.failure_stage -or $sustained.video.frames_dropped -ne 0 -or !$sustained.video.synthetic_pixel_variation_verified)) { throw 'Sustained GPU decode did not preserve reference pictures' }
           if ($sustained.video.frames_decoded -eq 0 -and !$sustained.video.failure_stage) { throw 'Missing sustained GPU diagnostic' }
+          if ($sustained.video.frames_decoded -gt 0 -and (!$sustained.video.auto_processing_disabled -or $sustained.video.input_views_created -ge $sustained.video.frames_decoded -or $sustained.video.output_views_created -ge $sustained.video.frames_decoded)) { throw 'Video processing state or GPU view reuse not verified' }
           & $exe transport-probe "$artifact/transport.json"
           if ($LASTEXITCODE -ne 0) { throw 'Native WebRTC transport failed' }
           $transport = Get-Content "$artifact/transport.json" -Raw | ConvertFrom-Json

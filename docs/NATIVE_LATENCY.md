@@ -9,6 +9,20 @@ pictures would require host/protocol changes and recovery behavior.
 
 ## Applied optimizations
 
+- Disable automatic extra processing on the D3D11 video processor. Required
+  NV12-to-RGB conversion, scaling and overlay composition remain on the GPU.
+- Cache input views by decoder texture and array slice, and output views by
+  backbuffer identity. Caches are bounded and cleared on stream/processor changes;
+  release backbuffer views before ResizeBuffers. Cache validated output geometry
+  and color metadata until Media Foundation reports a stream change.
+- Preserve input sample ownership: ProcessInput can retain the compressed input.
+  Do not overwrite or recycle its storage without a documented release callback.
+- Allow explicit hardware adapter selection using DXGI and D3D11CreateDevice with
+  D3D_DRIVER_TYPE_UNKNOWN. Automatic retains the default adapter. Save LUID plus
+  hardware IDs; after a LUID change, accept only a unique hardware match. Missing
+  or ambiguous saved adapters require reselecting in Settings, never a silent
+  switch to an arbitrary identical card. This selects the stream GPU, not the
+  embedded UI's OpenGL adapter or the host encoder. No cross-GPU-copy claim is made.
 - Register the video worker with the documented Windows MMCSS `Playback` task
   and the WASAPI render worker with `Pro Audio`. Registration is optional:
   unavailable MMCSS keeps normal scheduling. RAII guards restore each thread's
@@ -69,6 +83,9 @@ fixed millisecond gain is claimed from CI or synthetic probes.
 
 ## Sources checked
 
+- [Disable video processor automatic processing](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11videocontext-videoprocessorsetstreamautoprocessingmode)
+- [Explicit D3D11 adapter selection](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-d3d11createdevice)
+- [Transform input ownership](https://learn.microsoft.com/en-us/windows/win32/api/mftransform/nf-mftransform-imftransform-processinput)
 - [RFC 8831: data-channel reliability, ordering, congestion and large-message interaction](https://www.rfc-editor.org/rfc/rfc8831.html)
 - [Microsoft: low latency audio](https://learn.microsoft.com/en-us/windows-hardware/drivers/audio/low-latency-audio)
 - [Supported shared-mode engine periods](https://learn.microsoft.com/en-us/windows/win32/api/audioclient/nf-audioclient-iaudioclient3-getsharedmodeengineperiod)

@@ -204,6 +204,13 @@ impl Window {
     pub fn settings_open(&self) -> bool {
         self.settings_page.load(Ordering::Acquire) != 0
     }
+    pub fn video_gpu(&self) -> Option<crate::connection_settings::GpuPreference> {
+        self.connection_settings
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .and_then(|manager| manager.view().0.video_gpu)
+    }
     #[cfg(not(feature = "diagnostics"))]
     pub fn install_connection_settings(&self, manager: Arc<crate::connection_settings::Manager>) {
         *self

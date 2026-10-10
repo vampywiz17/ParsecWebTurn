@@ -64,11 +64,17 @@ impl Pipeline {
             .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         let activity = Activity(window.clone());
         let error_state = shared.clone();
+        let preferred_gpu = window.video_gpu();
         let spawned = std::thread::Builder::new()
             .name("native-video-d3d11".into())
             .spawn(move || {
                 let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    run(&state, &window, verify_synthetic_pixels)
+                    run(
+                        &state,
+                        &window,
+                        verify_synthetic_pixels,
+                        preferred_gpu.as_ref(),
+                    )
                 }));
                 let mut q = state.0.lock().unwrap_or_else(|e| e.into_inner());
                 match outcome {
@@ -148,6 +154,7 @@ fn run(
     shared: &Shared,
     window: &Arc<crate::window::Window>,
     verify_synthetic_pixels: bool,
+    preferred_gpu: Option<&crate::connection_settings::GpuPreference>,
 ) -> Result<()> {
     let scheduling = crate::media_scheduling::Registration::video();
     update(shared, |s| s.mmcss_registered = scheduling.is_some());
@@ -178,7 +185,9 @@ fn run(
             let hwnd = window
                 .ensure_video_surface()
                 .map_err(|_| unavailable("video-surface-create"))?;
-            let native = unsafe { Session::create(HWND(hwnd as *mut _), verify_synthetic_pixels)? };
+            let native = unsafe {
+                Session::create(HWND(hwnd as *mut _), verify_synthetic_pixels, preferred_gpu)?
+            };
             update(shared, |s| {
                 s.decoder_initialized = true;
                 s.low_latency_request_accepted = native.low_latency_request_accepted;
@@ -236,17 +245,100 @@ impl Drop for Runtime {
     }
 }
 
+#[derive(Clone, Copy)]
+struct OutputFormat {
+    source: RECT,
+    color: u32,
+    matrix: Option<u32>,
+    nominal: Option<u32>,
+}
+impl OutputFormat {
+    unsafe fn read(media: &IMFMediaType) -> Result<Self> {
+        let size = api("video-output-size", media.GetUINT64(&MF_MT_FRAME_SIZE))?;
+        let width = (size >> 32) as u32;
+        let height = size as u32;
+        if width == 0 || height == 0 || width > 8192 || height > 8192 {
+            return Err(unavailable("video-output-invalid-size"));
+        }
+        let mut source = RECT {
+            left: 0,
+            top: 0,
+            right: width as i32,
+            bottom: height as i32,
+        };
+        let mut aperture = [0u8; std::mem::size_of::<MFVideoArea>()];
+        let mut aperture_size = 0;
+        if media
+            .GetBlob(
+                &MF_MT_MINIMUM_DISPLAY_APERTURE,
+                &mut aperture,
+                Some(&mut aperture_size),
+            )
+            .is_ok()
+            && aperture_size as usize == aperture.len()
+        {
+            let area = std::ptr::read_unaligned(aperture.as_ptr().cast::<MFVideoArea>());
+            if area.OffsetX.fract != 0 || area.OffsetY.fract != 0 {
+                return Err(unavailable("video-fractional-aperture"));
+            }
+            let left = i32::from(area.OffsetX.value);
+            let top = i32::from(area.OffsetY.value);
+            let right = left
+                .checked_add(area.Area.cx)
+                .ok_or_else(|| unavailable("video-aperture-overflow"))?;
+            let bottom = top
+                .checked_add(area.Area.cy)
+                .ok_or_else(|| unavailable("video-aperture-overflow"))?;
+            if left < 0
+                || top < 0
+                || right <= left
+                || bottom <= top
+                || right > width as i32
+                || bottom > height as i32
+            {
+                return Err(unavailable("video-invalid-aperture"));
+            }
+            source = RECT {
+                left,
+                top,
+                right,
+                bottom,
+            };
+        }
+        let matrix = media.GetUINT32(&MF_MT_YUV_MATRIX).ok().filter(|v| *v != 0);
+        let nominal = media
+            .GetUINT32(&MF_MT_VIDEO_NOMINAL_RANGE)
+            .ok()
+            .filter(|v| *v != 0);
+        if matrix.is_some_and(|v| v > 2) || nominal.is_some_and(|v| v > 2) {
+            return Err(unavailable("video-unsupported-color-space"));
+        }
+        let color = (if matrix.unwrap_or(1) == 1 { 4 } else { 0 }) | (nominal.unwrap_or(2) << 4);
+        Ok(Self {
+            source,
+            color,
+            matrix,
+            nominal,
+        })
+    }
+}
+
 struct Session {
     low_latency_request_accepted: bool,
     decoder: IMFTransform,
     _manager: IMFDXGIDeviceManager,
     renderer: Renderer,
+    output_format: Option<OutputFormat>,
     _runtime: Runtime,
 }
 impl Session {
-    unsafe fn create(hwnd: HWND, verify_synthetic_pixels: bool) -> Result<Self> {
+    unsafe fn create(
+        hwnd: HWND,
+        verify_synthetic_pixels: bool,
+        preferred_gpu: Option<&crate::connection_settings::GpuPreference>,
+    ) -> Result<Self> {
         let runtime = Runtime::start()?;
-        let mut renderer = Renderer::create(hwnd)?;
+        let mut renderer = Renderer::create(hwnd, preferred_gpu)?;
         renderer.verify_synthetic_pixels = verify_synthetic_pixels;
         let mut token = 0;
         let mut manager = None;
@@ -304,6 +396,7 @@ impl Session {
             decoder,
             _manager: manager,
             renderer,
+            output_format: None,
             _runtime: runtime,
         };
         result.output_type()?;
@@ -332,6 +425,10 @@ impl Session {
                     "video-output-set-nv12",
                     self.decoder.SetOutputType(0, &media, 0),
                 )?;
+                // Geometry can remain unspecified until the first decoded sample.
+                self.output_format = None;
+                // A stream change may replace the decoder's texture pool.
+                self.renderer.processor = None;
                 let stream = api(
                     "video-output-stream-info",
                     self.decoder.GetOutputStreamInfo(0),
@@ -439,71 +536,21 @@ impl Session {
             texture.GetDesc(&mut texture_desc);
             let decoder_surface = texture_desc.BindFlags & D3D11_BIND_DECODER.0 as u32 != 0;
             let subresource = api("video-output-subresource", dxgi.GetSubresourceIndex())?;
-            let media = api(
-                "video-output-current-type",
-                self.decoder.GetOutputCurrentType(0),
-            )?;
-            let size = api("video-output-size", media.GetUINT64(&MF_MT_FRAME_SIZE))?;
-            let width = (size >> 32) as u32;
-            let height = size as u32;
-            if width == 0 || height == 0 || width > 8192 || height > 8192 {
-                return Err(unavailable("video-output-invalid-size"));
+            if self.output_format.is_none() {
+                let media = api(
+                    "video-output-current-type",
+                    self.decoder.GetOutputCurrentType(0),
+                )?;
+                self.output_format = Some(OutputFormat::read(&media)?);
             }
-            let mut source = RECT {
-                left: 0,
-                top: 0,
-                right: width as i32,
-                bottom: height as i32,
-            };
-            let mut aperture = [0u8; std::mem::size_of::<MFVideoArea>()];
-            let mut aperture_size = 0;
-            if media
-                .GetBlob(
-                    &MF_MT_MINIMUM_DISPLAY_APERTURE,
-                    &mut aperture,
-                    Some(&mut aperture_size),
-                )
-                .is_ok()
-                && aperture_size as usize == aperture.len()
-            {
-                let area = std::ptr::read_unaligned(aperture.as_ptr().cast::<MFVideoArea>());
-                if area.OffsetX.fract != 0 || area.OffsetY.fract != 0 {
-                    return Err(unavailable("video-fractional-aperture"));
-                }
-                let left = i32::from(area.OffsetX.value);
-                let top = i32::from(area.OffsetY.value);
-                let right = left
-                    .checked_add(area.Area.cx)
-                    .ok_or_else(|| unavailable("video-aperture-overflow"))?;
-                let bottom = top
-                    .checked_add(area.Area.cy)
-                    .ok_or_else(|| unavailable("video-aperture-overflow"))?;
-                if left < 0
-                    || top < 0
-                    || right <= left
-                    || bottom <= top
-                    || right > width as i32
-                    || bottom > height as i32
-                {
-                    return Err(unavailable("video-invalid-aperture"));
-                }
-                source = RECT {
-                    left,
-                    top,
-                    right,
-                    bottom,
-                };
-            }
-            let matrix = media.GetUINT32(&MF_MT_YUV_MATRIX).ok().filter(|v| *v != 0);
-            let nominal = media
-                .GetUINT32(&MF_MT_VIDEO_NOMINAL_RANGE)
-                .ok()
-                .filter(|v| *v != 0);
-            if matrix.is_some_and(|v| v > 2) || nominal.is_some_and(|v| v > 2) {
-                return Err(unavailable("video-unsupported-color-space"));
-            }
-            let color =
-                (if matrix.unwrap_or(1) == 1 { 4 } else { 0 }) | (nominal.unwrap_or(2) << 4);
+            let OutputFormat {
+                source,
+                color,
+                matrix,
+                nominal,
+            } = self
+                .output_format
+                .ok_or_else(|| unavailable("video-output-format-missing"))?;
             update(shared, |s| {
                 s.frames_decoded = s.frames_decoded.saturating_add(1);
                 s.gpu_surface_output = true;
@@ -565,6 +612,8 @@ struct ProcessorCache {
     enumeration: ID3D11VideoProcessorEnumerator,
     processor: ID3D11VideoProcessor,
     key: (u32, u32, u32, u32),
+    inputs: Vec<(ID3D11Texture2D, u32, ID3D11VideoProcessorInputView)>,
+    outputs: Vec<(ID3D11Texture2D, ID3D11VideoProcessorOutputView)>,
 }
 
 struct Renderer {
@@ -582,14 +631,35 @@ struct Renderer {
     overlay_failed: bool,
 }
 impl Renderer {
-    unsafe fn create(hwnd: HWND) -> Result<Self> {
+    unsafe fn create(
+        hwnd: HWND,
+        preferred_gpu: Option<&crate::connection_settings::GpuPreference>,
+    ) -> Result<Self> {
+        let chosen = if let Some(preferred) = preferred_gpu {
+            let mut adapters = api("video-gpu-enumeration", crate::gpu_windows::enumerate())?;
+            let identities: Vec<_> = adapters.iter().map(|a| a.preference.clone()).collect();
+            let index =
+                crate::gpu_windows::match_index(preferred, &identities).ok_or_else(|| {
+                    unavailable("video-selected-gpu-unavailable-select-automatic-in-settings")
+                })?;
+            Some(api(
+                "video-gpu-interface",
+                adapters.swap_remove(index).handle.cast::<IDXGIAdapter>(),
+            )?)
+        } else {
+            None
+        };
         let mut device = None;
         let mut context = None;
         api(
             "video-d3d11-device",
             D3D11CreateDevice(
-                None,
-                D3D_DRIVER_TYPE_HARDWARE,
+                chosen.as_ref(),
+                if chosen.is_some() {
+                    D3D_DRIVER_TYPE_UNKNOWN
+                } else {
+                    D3D_DRIVER_TYPE_HARDWARE
+                },
                 HMODULE::default(),
                 D3D11_CREATE_DEVICE_VIDEO_SUPPORT | D3D11_CREATE_DEVICE_BGRA_SUPPORT,
                 Some(&[D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0]),
@@ -728,6 +798,8 @@ impl Renderer {
             (rect.bottom - rect.top).max(1) as u32,
         );
         if size != self.size {
+            // ResizeBuffers requires all cached backbuffer views to be released.
+            self.processor = None;
             api(
                 "video-swapchain-resize",
                 self.swap.ResizeBuffers(
@@ -739,7 +811,6 @@ impl Renderer {
                 ),
             )?;
             self.size = size;
-            self.processor = None;
         }
         let key = (td.Width, td.Height, size.0, size.1);
         if self.processor.as_ref().is_none_or(|p| p.key != key) {
@@ -767,13 +838,23 @@ impl Renderer {
                 "video-processor-create",
                 self.video_device.CreateVideoProcessor(&enumeration, 0),
             )?;
+            self.video_context
+                .VideoProcessorSetStreamAutoProcessingMode(&processor, 0, false);
+            update(shared, |s| {
+                s.auto_processing_disabled = !self
+                    .video_context
+                    .VideoProcessorGetStreamAutoProcessingMode(&processor, 0)
+                    .as_bool();
+            });
             self.processor = Some(ProcessorCache {
                 enumeration,
                 processor,
                 key,
+                inputs: Vec::new(),
+                outputs: Vec::new(),
             });
         }
-        let cached = self.processor.as_ref().unwrap();
+        let cached = self.processor.as_mut().unwrap();
         let enumeration = &cached.enumeration;
         let processor = &cached.processor;
         let input_desc = D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC {
@@ -786,16 +867,34 @@ impl Renderer {
             },
             ..Default::default()
         };
-        let mut input = None;
-        api(
-            "video-processor-input-view",
-            self.video_device.CreateVideoProcessorInputView(
-                texture,
-                enumeration,
-                &input_desc,
-                Some(&mut input),
-            ),
-        )?;
+        let input = if let Some((_, _, view)) = cached
+            .inputs
+            .iter()
+            .find(|(resource, slice, _)| resource == texture && *slice == subresource)
+        {
+            view.clone()
+        } else {
+            let mut input = None;
+            api(
+                "video-processor-input-view",
+                self.video_device.CreateVideoProcessorInputView(
+                    texture,
+                    enumeration,
+                    &input_desc,
+                    Some(&mut input),
+                ),
+            )?;
+            let input = input.ok_or_else(|| unavailable("video-processor-null-input"))?;
+            // Bound retained views even if a driver rotates its texture pool.
+            if cached.inputs.len() == 32 {
+                cached.inputs.remove(0);
+            }
+            cached
+                .inputs
+                .push((texture.clone(), subresource, input.clone()));
+            update(shared, |s| s.input_views_created += 1);
+            input
+        };
         let back: ID3D11Texture2D = api("video-backbuffer", self.swap.GetBuffer(0))?;
         let output_desc = D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC {
             ViewDimension: D3D11_VPOV_DIMENSION_TEXTURE2D,
@@ -803,17 +902,31 @@ impl Renderer {
                 Texture2D: D3D11_TEX2D_VPOV { MipSlice: 0 },
             },
         };
-        let mut output = None;
-        api(
-            "video-processor-output-view",
-            self.video_device.CreateVideoProcessorOutputView(
-                &back,
-                enumeration,
-                &output_desc,
-                Some(&mut output),
-            ),
-        )?;
-        let output = output.ok_or_else(|| unavailable("video-processor-null-output"))?;
+        let output = if let Some((_, view)) = cached
+            .outputs
+            .iter()
+            .find(|(resource, _)| resource == &back)
+        {
+            view.clone()
+        } else {
+            let mut output = None;
+            api(
+                "video-processor-output-view",
+                self.video_device.CreateVideoProcessorOutputView(
+                    &back,
+                    enumeration,
+                    &output_desc,
+                    Some(&mut output),
+                ),
+            )?;
+            let output = output.ok_or_else(|| unavailable("video-processor-null-output"))?;
+            if cached.outputs.len() == 2 {
+                cached.outputs.remove(0);
+            }
+            cached.outputs.push((back.clone(), output.clone()));
+            update(shared, |s| s.output_views_created += 1);
+            output
+        };
         // Preserve aspect ratio and letterbox on the GPU, without CPU pixels.
         let [left, top, right, bottom] = crate::viewport::Viewport {
             source: (width, height),
@@ -856,7 +969,7 @@ impl Renderer {
         );
         let mut stream = D3D11_VIDEO_PROCESSOR_STREAM {
             Enable: true.into(),
-            pInputSurface: ManuallyDrop::new(input),
+            pInputSurface: ManuallyDrop::new(Some(input)),
             ..Default::default()
         };
         let result = self.video_context.VideoProcessorBlt(
@@ -963,7 +1076,23 @@ pub fn probe(sustained: bool) -> anyhow::Result<serde_json::Value> {
     starts.push(fixture.len());
     let mut inspector = crate::video_stream::Inspector::default();
     let cycles = if sustained { 128 } else { 1 };
-    'feeding: for _ in 0..cycles {
+    'feeding: for cycle in 0..cycles {
+        if sustained && cycle == cycles / 2 {
+            // Exercise release of cached backbuffer views before ResizeBuffers.
+            unsafe {
+                windows_sys::Win32::UI::WindowsAndMessaging::SetWindowPos(
+                    window.handle(),
+                    std::ptr::null_mut(),
+                    0,
+                    0,
+                    900,
+                    640,
+                    windows_sys::Win32::UI::WindowsAndMessaging::SWP_NOMOVE
+                        | windows_sys::Win32::UI::WindowsAndMessaging::SWP_NOZORDER
+                        | windows_sys::Win32::UI::WindowsAndMessaging::SWP_NOACTIVATE,
+                );
+            }
+        }
         for pair in starts.windows(2) {
             let bytes = &fixture[pair[0]..pair[1]];
             let info = inspector

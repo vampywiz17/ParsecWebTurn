@@ -33,6 +33,8 @@ mod filesystem;
 #[cfg(windows)]
 mod fullscreen;
 #[cfg(windows)]
+mod gpu_windows;
+#[cfg(windows)]
 mod graphics;
 mod host;
 mod http;

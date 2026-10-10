@@ -7,6 +7,7 @@ builds, not published stable releases.
 
 ### New
 
+- **Video GPU selector:** choose the graphics adapter used for native stream decoding and rendering in Settings. The choice is saved and applies to your next connection; Automatic keeps the Windows default.
 - **Choose your own connection servers.** Configure custom STUN servers and TURN relays, including Cloudflare, coturn, eturnal and ExpressTURN. TURN connections support UDP, TCP and encrypted TLS, including servers on port 443.
 - **STUN-only mode for LAN/VPN use.** Discover a direct connection without offering a TURN relay. Leave the STUN field empty to use Parsec's default server.
 - **Keep your previous server settings.** The native client can read the earlier WebView2 client's `settings.json`, including Windows-protected credentials.
@@ -16,6 +17,7 @@ builds, not published stable releases.
 
 ### Improved
 
+- Disable the video driver's automatic extra picture processing and reuse GPU video views and stream-format details. Cached views are released when the stream changes or the window is resized. Presentation queue behavior is unchanged.
 - A clearer, Parsec-inspired **Settings** page with descriptions, provider-specific fields and dark controls.
 - Fixed overlapping text, clipped buttons and scrolling/repainting problems in Settings. Improved the stats window's resizing, scrolling and handling of ended sessions.
 - Sign-in and Parsec preferences now save correctly between launches.

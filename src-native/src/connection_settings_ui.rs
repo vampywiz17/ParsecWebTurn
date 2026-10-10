@@ -39,6 +39,7 @@ const CACHE: usize = 4112;
 const FORGET_PASSWORD: usize = 4113;
 const FORGET_TOKEN: usize = 4114;
 const STATUS: usize = 4115;
+const GPU: usize = 4116;
 const BG: u32 = 0x00282828;
 const FIELD: u32 = 0x00212121;
 const FG: u32 = 0x00eeeeee;
@@ -62,6 +63,7 @@ struct Page {
     window_owned: bool,
     manager: Arc<Manager>,
     saved: Settings,
+    gpu_choices: Vec<Option<crate::connection_settings::GpuPreference>>,
     background: HBRUSH,
     field: HBRUSH,
     font: HFONT,
@@ -149,6 +151,7 @@ pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
         window_owned: false,
         manager,
         saved,
+        gpu_choices: vec![None],
         background: CreateSolidBrush(BG),
         field: CreateSolidBrush(FIELD),
         font: font(16, 400),
@@ -210,7 +213,7 @@ pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
         hwnd,
         page,
         "STATIC",
-        "Customize how ParsecWebTurn connects to your computer.",
+        "Customize your connection and video playback.",
         0,
         [4, 88, 816, 24],
         0,
@@ -221,7 +224,7 @@ pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
         hwnd,
         page,
         "STATIC",
-        "Network",
+        "Network and video",
         0,
         [4, 142, 300, 24],
         TAB,
@@ -232,7 +235,7 @@ pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
         hwnd,
         page,
         "STATIC",
-        "CONNECTION SETTINGS",
+        "CONNECTION AND VIDEO SETTINGS",
         0,
         [0, 192, 820, 25],
         SECTION,
@@ -404,9 +407,69 @@ pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
         page.font,
     );
     check(hwnd, CACHE, s.cache_credentials);
+    row_label(
+        hwnd,
+        page,
+        "Video GPU",
+        "GPU for stream decoding and rendering.\nAutomatic uses Windows' default. Next connection.",
+        816,
+        0,
+        40,
+    );
+    let gpu = add(
+        hwnd,
+        page,
+        "COMBOBOX",
+        "",
+        CBS_DROPDOWNLIST as u32
+            | CBS_OWNERDRAWFIXED as u32
+            | CBS_HASSTRINGS as u32
+            | WS_VSCROLL
+            | WS_TABSTOP,
+        [420, 816, 400, 200],
+        GPU,
+        0,
+        page.font,
+    );
+    controls::combo(gpu);
+    SendMessageW(
+        gpu,
+        CB_ADDSTRING,
+        0,
+        wide("Automatic (Windows default)").as_ptr() as isize,
+    );
+    if let Ok(adapters) = crate::gpu_windows::enumerate() {
+        for adapter in adapters {
+            let p = adapter.preference;
+            let label = format!("{} [{:08x}]", p.name, p.luid as u32);
+            SendMessageW(gpu, CB_ADDSTRING, 0, wide(&label).as_ptr() as isize);
+            page.gpu_choices.push(Some(p));
+        }
+    }
+    let selected = s
+        .video_gpu
+        .as_ref()
+        .map(|preferred| {
+            let available: Vec<_> = page.gpu_choices.iter().skip(1).flatten().cloned().collect();
+            match crate::gpu_windows::match_index(preferred, &available) {
+                Some(index) => index + 1,
+                None => {
+                    SendMessageW(
+                        gpu,
+                        CB_ADDSTRING,
+                        0,
+                        wide(&format!("Unavailable: {}", preferred.name)).as_ptr() as isize,
+                    );
+                    page.gpu_choices.push(Some(preferred.clone()));
+                    page.gpu_choices.len() - 1
+                }
+            }
+        })
+        .unwrap_or(0);
+    SendMessageW(gpu, CB_SETCURSEL, selected, 0);
     add(hwnd, page, "STATIC",
         "ICE chooses the route automatically. Enabling TURN may select a relay even when a direct route exists.\nChanges apply to your next connection.",
-        0, [0, 816, 820, 48], NOTICE, 0, page.small);
+        0, [0, 926, 820, 48], NOTICE, 0, page.small);
     let status = error.unwrap_or_else(|| {
         "Saved in settings.json. Secrets are protected for your Windows user.".into()
     });
@@ -416,7 +479,7 @@ pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
         "STATIC",
         &status,
         0,
-        [0, 878, 820, 40],
+        [0, 988, 820, 40],
         STATUS,
         0,
         page.small,
@@ -427,7 +490,7 @@ pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
         "BUTTON",
         "Back",
         BS_OWNERDRAW as u32 | WS_TABSTOP,
-        [550, 934, 110, 40],
+        [550, 1044, 110, 40],
         BACK,
         0,
         page.font,
@@ -438,7 +501,7 @@ pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
         "BUTTON",
         "Save settings",
         BS_OWNERDRAW as u32 | WS_TABSTOP,
-        [676, 934, 144, 40],
+        [676, 1044, 144, 40],
         SAVE,
         0,
         page.font,
@@ -556,7 +619,7 @@ unsafe fn layout(hwnd: HWND) {
     GetClientRect(hwnd, &mut client);
     let cloudflare = SendMessageW(GetDlgItem(hwnd, PROVIDER as i32), CB_GETCURSEL, 0, 0) == 1;
     let shift = if cloudflare { 0 } else { 44 };
-    let height = 1000 + HEADER_EXTRA - shift;
+    let height = 1110 + HEADER_EXTRA - shift;
     page.scroll = page.scroll.clamp(0, (height - client.bottom).max(0));
     let info = SCROLLINFO {
         cbSize: size_of::<SCROLLINFO>() as u32,
@@ -706,6 +769,12 @@ unsafe fn update_enabled(hwnd: HWND) {
 }
 unsafe fn save(hwnd: HWND, page: &mut Page) -> anyhow::Result<()> {
     let mut s = page.saved.clone();
+    let selected = SendMessageW(GetDlgItem(hwnd, GPU as i32), CB_GETCURSEL, 0, 0);
+    s.video_gpu = usize::try_from(selected)
+        .ok()
+        .and_then(|i| page.gpu_choices.get(i))
+        .ok_or_else(|| anyhow::anyhow!("Choose Automatic or an available video GPU"))?
+        .clone();
     let urls = |id| {
         text(hwnd, id)
             .lines()
@@ -792,13 +861,13 @@ unsafe extern "system" fn page_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: LP
                 layout(hwnd);
                 return 0;
             }
-            WM_MEASUREITEM if wp == PROVIDER => {
+            WM_MEASUREITEM if wp == PROVIDER || wp == GPU => {
                 (*(lp as *mut MEASUREITEMSTRUCT)).itemHeight = 30;
                 return 1;
             }
             WM_DRAWITEM => {
                 let draw = &*(lp as *const DRAWITEMSTRUCT);
-                if [SAVE as u32, BACK as u32, PROVIDER as u32].contains(&draw.CtlID) {
+                if [SAVE as u32, BACK as u32, PROVIDER as u32, GPU as u32].contains(&draw.CtlID) {
                     let dc = draw.hDC;
                     let state = SaveDC(dc);
                     let primary = draw.CtlID == SAVE as u32;
@@ -824,32 +893,36 @@ unsafe extern "system" fn page_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: LP
                             FG
                         },
                     );
-                    let label = if draw.CtlID == PROVIDER as u32 {
-                        match draw.itemID {
-                            0 => "Custom servers",
-                            1 => "Cloudflare TURN",
-                            _ => "",
+                    let combo = draw.CtlID == PROVIDER as u32 || draw.CtlID == GPU as u32;
+                    let label = if combo {
+                        let len =
+                            SendMessageW(draw.hwndItem, CB_GETLBTEXTLEN, draw.itemID as usize, 0);
+                        if (0..=4096).contains(&len) {
+                            let mut buffer = vec![0u16; len as usize + 1];
+                            SendMessageW(
+                                draw.hwndItem,
+                                CB_GETLBTEXT,
+                                draw.itemID as usize,
+                                buffer.as_mut_ptr() as isize,
+                            );
+                            String::from_utf16_lossy(&buffer[..len as usize])
+                        } else {
+                            String::new()
                         }
                     } else if primary {
-                        "Save settings"
+                        "Save settings".into()
                     } else {
-                        "Back"
+                        "Back".into()
                     };
                     let mut rect = draw.rcItem;
                     rect.left += 10;
                     rect.right -= 10;
                     DrawTextW(
                         dc,
-                        wide(label).as_ptr(),
+                        wide(&label).as_ptr(),
                         -1,
                         &mut rect,
-                        DT_SINGLELINE
-                            | DT_VCENTER
-                            | if draw.CtlID == PROVIDER as u32 {
-                                DT_LEFT
-                            } else {
-                                DT_CENTER
-                            },
+                        DT_SINGLELINE | DT_VCENTER | if combo { DT_LEFT } else { DT_CENTER },
                     );
                     if draw.itemState & ODS_FOCUS != 0 {
                         InflateRect(&mut rect, -2, -4);
@@ -1035,12 +1108,24 @@ mod tests {
             check(page, STUN_ONLY, true);
             update_enabled(page);
             assert_eq!(IsWindowEnabled(GetDlgItem(page, TURN as i32)), 0);
+            let state = &*(GetWindowLongPtrW(page, GWLP_USERDATA) as *const Page);
+            let selected = usize::from(state.gpu_choices.len() > 1);
+            let expected_gpu = state.gpu_choices[selected].clone();
+            SendMessageW(GetDlgItem(page, GPU as i32), CB_SETCURSEL, selected, 0);
             SendMessageW(page, WM_COMMAND, SAVE, 0);
             assert!(text(page, STATUS).starts_with("Settings saved"));
+            assert_eq!(manager.view().0.video_gpu, expected_gpu);
             DestroyWindow(page);
             let page = open(parent, manager.clone());
             assert_eq!(text(page, STUN), "stun:stun.example.org:3478");
             assert!(checked(page, STUN_ONLY));
+            assert_eq!(
+                SendMessageW(GetDlgItem(page, GPU as i32), CB_GETCURSEL, 0, 0),
+                selected as isize
+            );
+            SendMessageW(GetDlgItem(page, GPU as i32), CB_SETCURSEL, 0, 0);
+            SendMessageW(page, WM_COMMAND, SAVE, 0);
+            assert!(manager.view().0.video_gpu.is_none());
             DestroyWindow(page);
             DestroyWindow(parent);
         }

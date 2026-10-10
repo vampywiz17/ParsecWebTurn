@@ -48,6 +48,7 @@ The native Windows development build currently supports:
   TURN route and, when available, the relay server actually in use.
 - Windows media scheduling and device-supported low-latency audio output,
   with automatic fallback for endpoints that need the standard audio path.
+- A saved video GPU choice for multi-GPU systems, with Automatic as the default.
 
 Your remote computer still needs the regular Parsec host. Not every setting in
 the original interface has been integrated or tested yet.
@@ -85,6 +86,13 @@ Leave the STUN field empty to use Parsec's default. For LAN/VPN connections, you
 can supply your own STUN server and enable **STUN only** to exclude all TURN relays.
 For a custom relay, enter its TURN URL, username and password; or select Cloudflare
 and enter your TURN Key ID and API token. Changes apply on the next connection.
+
+**Video GPU** selects the adapter for native stream decoding and rendering;
+it does not change the host or the GPU used by the embedded interface. Automatic
+keeps Windows' default adapter. Choose a GPU that supports D3D11 and H.264 decoding.
+If a saved GPU becomes unavailable or cannot be identified uniquely, select
+Automatic or another available GPU before reconnecting. Using a different GPU
+from your display can introduce driver-managed transfers on hybrid systems.
 
 Examples: `turn:turn.example.com:3478?transport=udp`,
 `turn:turn.example.com:3478?transport=tcp`, or

@@ -19,9 +19,37 @@ use webrtc::{
 pub const PARSEC_STUN: &str = "stun:stun.parsec.gg:3478";
 const MAX_FILE: usize = 65536;
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GpuPreference {
+    pub name: String,
+    pub vendor_id: u32,
+    pub device_id: u32,
+    pub subsystem_id: u32,
+    pub revision: u32,
+    pub luid: u64,
+}
+impl GpuPreference {
+    pub fn same_hardware(&self, other: &Self) -> bool {
+        (
+            self.vendor_id,
+            self.device_id,
+            self.subsystem_id,
+            self.revision,
+        ) == (
+            other.vendor_id,
+            other.device_id,
+            other.subsystem_id,
+            other.revision,
+        )
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub video_gpu: Option<GpuPreference>,
     pub provider: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub custom_urls: Vec<String>,
@@ -42,6 +70,7 @@ impl Default for Settings {
     // Legacy defaults apply to existing JSON; a new native installation uses fresh().
     fn default() -> Self {
         Self {
+            video_gpu: None,
             provider: "cloudflare".into(),
             custom_urls: vec![],
             stun_urls: vec![],
