@@ -1,7 +1,7 @@
 //! Native data-channel transport proof, deliberately separate from host login.
 //! Public webrtc-rs APIs; no browser, JS, account, STUN or TURN server involved.
 pub const CHANNELS: [(u16, &str); 3] = [(0, "control"), (1, "video"), (2, "audio")];
-#[cfg(any(test, feature = "diagnostics"))]
+#[cfg(feature = "diagnostics")]
 pub use diagnostics::{probe, signaling_probe};
 #[cfg(any(test, feature = "diagnostics"))]
 mod diagnostics {

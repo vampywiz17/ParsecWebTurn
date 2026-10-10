@@ -904,7 +904,7 @@ impl Renderer {
 }
 
 /// No account, network or real content: create and release the actual GPU path.
-#[cfg(any(test, feature = "diagnostics"))]
+#[cfg(feature = "diagnostics")]
 pub fn probe(sustained: bool) -> anyhow::Result<serde_json::Value> {
     use std::sync::atomic::Ordering;
     let window = crate::window::Window::create_video_probe()?;

@@ -78,7 +78,7 @@ impl Window {
     }
 
     // The standalone D3D11 test has no OpenGL UI and must not depend on WGL.
-    #[cfg(any(test, feature = "diagnostics"))]
+    #[cfg(feature = "diagnostics")]
     pub fn create_video_probe() -> Result<Arc<Self>> {
         Self::create_mode(false, true, false, false, false)
     }

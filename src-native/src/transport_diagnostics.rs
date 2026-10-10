@@ -26,6 +26,7 @@ static COLLECTOR: Collector = Collector {
     events: Mutex::new((Vec::new(), 0)),
 };
 
+#[cfg(feature = "diagnostics")]
 #[derive(serde::Serialize)]
 pub struct Snapshot {
     source: &'static str,
@@ -35,6 +36,7 @@ pub struct Snapshot {
     omitted: usize,
 }
 
+#[cfg(feature = "diagnostics")]
 pub fn enable() -> bool {
     let installed = log::set_logger(&COLLECTOR).is_ok();
     if installed {
@@ -58,6 +60,7 @@ pub fn contains_reason(reason: &str) -> bool {
         .any(|event| event.reason == reason)
 }
 
+#[cfg(feature = "diagnostics")]
 pub fn snapshot(installed: bool) -> Snapshot {
     let events = COLLECTOR.events.lock().unwrap_or_else(|e| e.into_inner());
     Snapshot {

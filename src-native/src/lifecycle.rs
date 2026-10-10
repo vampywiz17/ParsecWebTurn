@@ -38,6 +38,7 @@ impl StopSignal {
             .unwrap_or_else(|e| e.into_inner())
             .0
     }
+    #[cfg(any(test, feature = "diagnostics"))]
     pub fn wait(&self) {
         let guard = self.stopped.lock().unwrap_or_else(|e| e.into_inner());
         drop(

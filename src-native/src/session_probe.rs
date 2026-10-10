@@ -32,6 +32,7 @@ pub fn buffer_probe() -> Result<serde_json::Value> {
     probe_mode(Mode::Buffers, false)
 }
 
+#[cfg(feature = "diagnostics")]
 pub fn dtls_failure_probe(legacy_rsa_1024: bool) -> Result<serde_json::Value> {
     if !crate::transport_diagnostics::enable() {
         bail!("controlled DTLS diagnostic logger unavailable");
