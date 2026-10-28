@@ -43,11 +43,22 @@ body:
         WebRTC or BUD; direct or TURN:
         Relevant settings (codec, Zero copy, HID, etc.):
   - type: textarea
-    id: attachments
+    id: logs
     attributes:
-      label: Logs or screenshots (optional)
-      description: >-
-        Attach a screenshot or client-events.jsonl if available. Enable event logging in
-        Settings > Network, reproduce the problem, then find the log beside settings.json.
-        Remove secrets and personal information; do not upload settings.json.
-      placeholder: Drag files here, paste a screenshot, or include a short relevant log excerpt.
+      label: client-events.jsonl (required)
+      description: |
+        1. Open **Settings > Network**. Under **Event log**, check **Enable event logging**, then click **Save settings**.
+        2. Reproduce the problem with logging enabled.
+        3. Find **client-events.jsonl** in the same folder as **settings.json** (normally beside **EvoParseq.exe**, or **ParsecWebTurn.exe** for the older client). If you use `--data-dir`, look in that folder instead.
+        4. Drag the complete log file into this field. If GitHub rejects `.jsonl`, upload a `.txt` copy or put it in a ZIP. A screenshot or a single error line does not replace the log.
+
+        Remove secrets and personal information; **do not upload settings.json**. If the app cannot start or no log is created, explain that here and include the exact error message.
+      placeholder: Attach client-events.jsonl here, or explain why the app could not create a log.
+    validations:
+      required: true
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots (optional)
+      description: Add screenshots if they help explain the problem. Screenshots do not replace the required log.
+      placeholder: Drag screenshots here.
