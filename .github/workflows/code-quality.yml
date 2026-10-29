@@ -1,0 +1,97 @@
+name: Code quality
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+# PR code runs on disposable GitHub-hosted runners, without secrets, persisted
+# checkout credentials, write permissions, approvals or automatic merging.
+permissions:
+  contents: read
+
+concurrency:
+  group: code-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  clippy:
+    name: Clippy (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-native
+            src-native/crates/bud
+            src-native/crates/video
+            tools/qos-latency
+            src-native/tests/turn-integration
+      - name: Prepare optional RTX Video SDK for vendor code checks
+        shell: pwsh
+        run: ./scripts/fetch-rtx-video-sdk.ps1 -Destination (Join-Path $env:RUNNER_TEMP 'rtx-video-sdk-1.1.0')
+      - name: Check application, adapters, tools and test targets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($manifest in @(
+            'src-native/Cargo.toml',
+            'src-native/crates/bud/Cargo.toml',
+            'src-native/crates/video/Cargo.toml',
+            'tools/qos-latency/Cargo.toml',
+            'src-native/tests/turn-integration/Cargo.toml'
+          )) {
+            cargo clippy --locked --manifest-path $manifest --target x86_64-pc-windows-msvc --workspace --all-targets --all-features -- -D warnings
+            if ($LASTEXITCODE -ne 0) { throw "Clippy failed: $manifest" }
+          }
+
+  dependencies:
+    name: Dependency policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install pinned cargo-deny
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-x86_64-unknown-linux-musl.tar.gz -o "$RUNNER_TEMP/cargo-deny.tar.gz"
+          echo "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f  $RUNNER_TEMP/cargo-deny.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/cargo-deny.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/cargo-deny-0.20.2-x86_64-unknown-linux-musl" >> "$GITHUB_PATH"
+      - name: Check advisories, licenses and dependency sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          for manifest in src-native/Cargo.toml src-native/crates/bud/Cargo.toml src-native/crates/video/Cargo.toml tools/qos-latency/Cargo.toml src-native/tests/turn-integration/Cargo.toml; do
+            cargo deny --manifest-path "$manifest" --config deny.toml --locked check
+          done
+
+  workflows:
+    name: Workflow lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check all GitHub Actions workflows
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz -o "$RUNNER_TEMP/actionlint.tar.gz"
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $RUNNER_TEMP/actionlint.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -color
