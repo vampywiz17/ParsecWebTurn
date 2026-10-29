@@ -175,6 +175,12 @@ At a constant average relayed bitrate, this is approximately:
 | 30 Mbit/s | 74 | 2.5 |
 | 50 Mbit/s | 44 | 1.5 |
 
+**Video uses a variable bitrate:** with little or no screen movement, such as
+mostly static desktop work, it can use much less bandwidth than during active
+gameplay. Read the table using the **actual average relayed bitrate**, not the
+configured bandwidth limit. Lower average usage makes the allowance last longer;
+these figures are estimates, not fixed daily streaming limits.
+
 Estimates use decimal GB and exclude audio/control/protocol overhead, which
 reduces the available streaming time. Actual usage varies with the stream;
 direct traffic does not consume TURN allowance. Cloudflare meters traffic sent
