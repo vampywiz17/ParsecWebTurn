@@ -43,6 +43,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $failed = @()
           foreach ($manifest in @(
             'src-native/Cargo.toml',
             'src-native/crates/bud/Cargo.toml',
@@ -51,8 +52,9 @@ jobs:
             'src-native/tests/turn-integration/Cargo.toml'
           )) {
             cargo clippy --locked --manifest-path $manifest --target x86_64-pc-windows-msvc --workspace --all-targets --all-features -- -D warnings
-            if ($LASTEXITCODE -ne 0) { throw "Clippy failed: $manifest" }
+            if ($LASTEXITCODE -ne 0) { $failed += $manifest }
           }
+          if ($failed.Count) { throw "Clippy failed: $($failed -join ', ')" }
 
   dependencies:
     name: Dependency policy
@@ -75,9 +77,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          failed=0
           for manifest in src-native/Cargo.toml src-native/crates/bud/Cargo.toml src-native/crates/video/Cargo.toml tools/qos-latency/Cargo.toml src-native/tests/turn-integration/Cargo.toml; do
-            cargo deny --manifest-path "$manifest" --config deny.toml --locked check
+            cargo deny --manifest-path "$manifest" --config deny.toml --locked check || failed=1
           done
+          exit "$failed"
 
   workflows:
     name: Workflow lint

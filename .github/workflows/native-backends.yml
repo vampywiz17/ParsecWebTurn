@@ -42,7 +42,7 @@ jobs:
             --lt-cred-mech --no-tls --no-dtls \
             --no-cli --pidfile=/tmp/evoparseq-turn.pid \
             --log-file=/tmp/evoparseq-turn.log >/tmp/evoparseq-turn-stdout.log 2>&1 &
-          for i in $(seq 1 50); do
+          for _ in $(seq 1 50); do
             if ss -uln | grep -q ':3478 '; then exit 0; fi
             sleep 0.1
           done
