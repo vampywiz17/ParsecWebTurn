@@ -34,8 +34,10 @@ const METRICS: i32 = 4609;
 const DISPLAY: usize = 4611;
 const REFRESH_DISPLAYS: usize = 4612;
 const DISPLAY_HINT: i32 = 4613;
+const TIMING_HINT: i32 = 4614;
 const DISPLAYS: u32 = WM_APP + 28;
-const PANEL_HEIGHT: i32 = 764;
+const DISPLAY_TIMING_CHANGED: u32 = WM_APP + 29;
+const PANEL_HEIGHT: i32 = 920;
 pub const RESULT: u32 = WM_APP + 26;
 pub const VISIBILITY: u32 = WM_APP + 27;
 impl Status {
@@ -78,6 +80,9 @@ struct Panel {
     bg: HBRUSH,
     field: HBRUSH,
     rates: crate::stats::Rates,
+    display: super::display_timing::Display,
+    monitor: HMONITOR,
+    measured_fps: Option<f64>,
 }
 impl Drop for Panel {
     fn drop(&mut self) {
@@ -94,22 +99,22 @@ impl Drop for Panel {
 unsafe fn text(hwnd: HWND) -> String {
     controls::text(hwnd, 256)
 }
+unsafe fn selected_field(p: &Panel, i: usize) -> String {
+    let index = SendMessageW(p.controls[i], CB_GETCURSEL, 0, 0);
+    if index == CB_ERR as isize
+        || SendMessageW(p.controls[i], CB_GETITEMDATA, index as usize, 0) == 1
+    {
+        p.initial_fields[i].clone()
+    } else {
+        text(p.controls[i])
+    }
+}
 unsafe fn collect(p: &Panel) -> Result<Video> {
     let select = |i: usize| SendMessageW(p.controls[i], CB_GETCURSEL, 0, 0);
-    let field = |i: usize| {
-        let index = select(i);
-        if index == CB_ERR as isize
-            || SendMessageW(p.controls[i], CB_GETITEMDATA, index as usize, 0) == 1
-        {
-            p.initial_fields[i].clone()
-        } else {
-            text(p.controls[i])
-        }
-    };
     PanelFields {
-        resolution: &field(0),
-        bandwidth: &field(1),
-        fps: &field(2),
+        resolution: &selected_field(p, 0),
+        bandwidth: &selected_field(p, 1),
+        fps: &selected_field(p, 2),
         constant_fps: select(3) == 1,
         rotated: select(4) == 1,
         immersive: match select(5) {
@@ -228,10 +233,58 @@ unsafe fn update_metrics(hwnd: HWND, panel: &mut Panel) {
         .as_ref()
         .map(|s| panel.rates.update(s))
         .unwrap_or_default();
+    panel.measured_fps = values.fps;
     SetWindowTextW(
         GetDlgItem(hwnd, METRICS),
         wide(&metrics(sample.as_ref(), &values)).as_ptr(),
     );
+    update_timing_hint(hwnd, panel);
+}
+unsafe fn update_timing_hint(hwnd: HWND, panel: &Panel) {
+    let window = &*panel.window;
+    let host = *window
+        .session
+        .host_video
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let requested = selected_field(panel, 2).parse().unwrap_or(60);
+    let message = panel.display.advice(
+        requested,
+        host.fps,
+        panel.measured_fps,
+        window.presentation_mode() == crate::connection_settings::PresentationMode::Vrr,
+    );
+    SetWindowTextW(GetDlgItem(hwnd, TIMING_HINT), wide(&message).as_ptr());
+}
+unsafe fn update_display_cache(hwnd: HWND, panel: &mut Panel, force: bool) {
+    if GetDlgItem(hwnd, TIMING_HINT).is_null() {
+        return;
+    }
+    let window = &*panel.window;
+    let monitor = MonitorFromWindow(window.handle(), MONITOR_DEFAULTTONEAREST);
+    if !force && monitor == panel.monitor {
+        return;
+    }
+    panel.monitor = monitor;
+    panel.display = super::display_windows::query(window.handle());
+    crate::event_log::record(
+        "INFO",
+        "client_display_timing",
+        serde_json::json!({
+            "configured_refresh_hz":panel.display.hz,
+            "supported_rates_at_current_resolution":panel.display.supported_hz,
+            "vrr_activation_verified":false,"automatic_changes":false
+        }),
+    );
+    update_timing_hint(hwnd, panel);
+}
+pub fn display_changed(window: &crate::window::Window) {
+    unsafe {
+        let hwnd = panel(window);
+        if !hwnd.is_null() {
+            PostMessageW(hwnd, DISPLAY_TIMING_CHANGED, 0, 0);
+        }
+    }
 }
 unsafe fn draw_metrics(lp: LPARAM, p: &Panel) -> bool {
     if lp == 0 {
@@ -285,6 +338,13 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
     if !pointer.is_null() {
         let p = &mut *pointer;
         match msg {
+            WM_WINDOWPOSCHANGED => {
+                update_display_cache(hwnd, p, false);
+            }
+            DISPLAY_TIMING_CHANGED => {
+                update_display_cache(hwnd, p, true);
+                return 0;
+            }
             WM_TIMER if wp == 1 => {
                 if IsWindowVisible(hwnd) != 0 {
                     update_metrics(hwnd, p);
@@ -374,10 +434,14 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 );
                 update_displays(hwnd, p);
                 SetWindowTextW(GetDlgItem(hwnd, STATUS), wide(status.text()).as_ptr());
+                update_timing_hint(hwnd, p);
                 return 0;
             }
             WM_COMMAND => {
                 match wp & 0xffff {
+                    22 if (wp >> 16) == CBN_SELCHANGE as usize => {
+                        update_timing_hint(hwnd, p);
+                    }
                     DISPLAY if (wp >> 16) == CBN_SELCHANGE as usize => {
                         let window = &*p.window;
                         let displays = window
@@ -638,6 +702,9 @@ pub unsafe fn toggle(
         bg: CreateSolidBrush(BG),
         field: CreateSolidBrush(FIELD),
         rates: Default::default(),
+        display: Default::default(),
+        monitor: null_mut(),
+        measured_fps: None,
     });
     let name = wide("EvoParseq.NativeCore.SessionPanel");
     let instance = GetModuleHandleW(null());
@@ -791,17 +858,27 @@ pub unsafe fn toggle(
         p,
         "STATIC",
         "",
+        TIMING_HINT as usize,
+        0,
+        [24, 554, 370, 146],
+    );
+    update_display_cache(hwnd, p, true);
+    control(
+        hwnd,
+        p,
+        "STATIC",
+        "",
         STATUS as usize,
         0,
-        [24, 554, 370, 40],
+        [24, 710, 370, 40],
     );
     for (id, label, x, y, w) in [
-        (SETTINGS, "Settings", 24, 602, 178),
-        (APPLY, "Apply", 214, 602, 178),
-        (DISCONNECT, "Disconnect", 24, 652, 178),
-        (CLOSE, "Close", 214, 652, 178),
-        (HIDE_BUTTON, "Hide button", 24, 702, 178),
-        (SECURE_ATTENTION, "Send Ctrl+Alt+Del", 214, 702, 178),
+        (SETTINGS, "Settings", 24, 758, 178),
+        (APPLY, "Apply", 214, 758, 178),
+        (DISCONNECT, "Disconnect", 24, 808, 178),
+        (CLOSE, "Close", 214, 808, 178),
+        (HIDE_BUTTON, "Hide button", 24, 858, 178),
+        (SECURE_ATTENTION, "Send Ctrl+Alt+Del", 214, 858, 178),
     ] {
         control(
             hwnd,
@@ -1188,6 +1265,27 @@ mod tests {
         events.clear();
         window.events.take_batch(&mut events);
         assert!(events.iter().any(|e|matches!(e,crate::window::Event::NativeSession(Command::Apply(v)) if v.resolution==Resolution::Host && v.immersive==0 && v.fps==Some(90) && v.bandwidth_mbps==Some(35))));
+        unsafe {
+            select_text(panel, 22, "120");
+            SendMessageW(panel, WM_COMMAND, 22 | ((CBN_SELCHANGE as usize) << 16), 0);
+            assert!(text(GetDlgItem(panel, TIMING_HINT)).contains("Request: 120 FPS"));
+            assert_eq!(
+                collect(&*(GetWindowLongPtrW(panel, GWLP_USERDATA) as *const Panel))
+                    .unwrap()
+                    .fps,
+                Some(120)
+            );
+            let mut hint = RECT::default();
+            let mut status = RECT::default();
+            let mut apply = RECT::default();
+            GetWindowRect(GetDlgItem(panel, TIMING_HINT), &mut hint);
+            GetWindowRect(GetDlgItem(panel, STATUS), &mut status);
+            GetWindowRect(GetDlgItem(panel, APPLY as i32), &mut apply);
+            assert!(
+                hint.bottom <= status.top && status.bottom <= apply.top,
+                "Timing advice must not overlap status or session actions"
+            );
+        }
         for (selected, mode) in [(0, 0), (1, 3), (2, 2), (3, 1)] {
             unsafe {
                 select_text(panel, 20, "1280 x 720");

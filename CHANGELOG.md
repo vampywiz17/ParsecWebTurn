@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add read-only Session display/FPS advice, showing configured client refresh,
+  requested and host-reported FPS, and measured decoded FPS separately. Suggest
+  compatible Windows-listed client refresh rates without changing display modes
+  or video timing; clarify host display requirements above 60 FPS and unverified VRR.
+
 - Extend experimental original-surface Zero copy to HEVC Main10 4:2:0 P010. Check optional P010 displayable support at setup; decode directly into displayable P010 DPB textures and retain existing presentation leases. No application pixel copy, RGB target, processor/shader pass or new per-frame format probe is added. Unsupported setup/runtime falls back to normal Media Foundation rendering without a silent 8-bit downgrade.
 - Report original P010 presentation and actual decoded 10-bit depth without claiming final compositor/scanout output depth. HEVC 10-bit 4:2:0 Zero copy is now live-confirmed on tested AMD and NVIDIA systems; Intel HEVC paths under the current decoder policy still require live testing.
 

@@ -48,6 +48,13 @@ Host permissions, encoders and graphics drivers determine the actual stream.
 **Connection stats shows the received depth/chroma and application RGB output**;
 a selected preference alone does not prove that the host accepted it.
 
+The Session panel compares the client's configured display refresh with the host
+FPS setting and shows measured decoded FPS separately. It can suggest a
+Windows-listed refresh rate at the current client resolution for more even
+fixed-refresh cadence; it never changes the display automatically. VRR activation
+is not verified. A confirmed 120 FPS request does not prove 120 distinct frames:
+the captured host display/mode must support it, and static content can lower FPS.
+
 ## Video rendering modes
 
 ![Animated comparison of normal GPU rendering, Zero copy and optional AI upscaling.](assets/evoparseq-rendering-modes.gif)

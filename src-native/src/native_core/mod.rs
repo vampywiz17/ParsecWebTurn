@@ -2,6 +2,8 @@
 //! The production media, carrier, route retry and HID workers are reused.
 mod account;
 mod controls;
+mod display_timing;
+mod display_windows;
 pub(crate) mod host_displays;
 mod host_video;
 mod input;

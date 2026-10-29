@@ -1234,6 +1234,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: 
                 return 0;
             }
             WM_SETTINGCHANGE | WM_DISPLAYCHANGE | WM_DPICHANGED => {
+                crate::native_core::session_ui::display_changed(s);
                 // Reuse the existing UI thread; no process DPI-awareness change.
                 s.cursor
                     .lock()
