@@ -13,11 +13,11 @@ use std::{
     sync::{atomic::Ordering, Arc},
 };
 
-pub struct Windows {
+pub struct Platform {
     window: Arc<Window>,
     clipboard: Services,
 }
-impl Windows {
+impl Platform {
     pub fn create(manager: Arc<Manager>) -> Result<Self> {
         let window = Window::create_native()?;
         window.install_connection_settings(manager);
@@ -27,7 +27,7 @@ impl Windows {
         Ok(Self { window, clipboard })
     }
 }
-impl Drop for Windows {
+impl Drop for Platform {
     fn drop(&mut self) {
         // Same teardown order after the controller and its attempt have ended,
         // including failures during signaling/media setup.
@@ -36,7 +36,7 @@ impl Drop for Windows {
         self.window.close();
     }
 }
-impl View for Windows {
+impl View for Platform {
     fn session(&self) -> &State {
         self.window.session()
     }
@@ -47,7 +47,7 @@ impl View for Windows {
         self.window.notify(notification);
     }
 }
-impl Desktop for Windows {
+impl Desktop for Platform {
     fn running(&self) -> bool {
         !self.window.closing.load(Ordering::Acquire) && !self.window.stop.stopped()
     }
@@ -76,7 +76,7 @@ impl Desktop for Windows {
         &self.clipboard
     }
 }
-impl Runtime for Windows {
+impl Runtime for Platform {
     fn start_attempt(
         &self,
         id: &str,
@@ -135,7 +135,7 @@ mod tests {
             assert!(!path.exists());
             let mut observed = None;
             let result = (|| -> Result<()> {
-                let platform = Windows::create(Manager::open(path.clone()))?;
+                let platform = Platform::create(Manager::open(path.clone()))?;
                 observed = Some(platform.window.clone());
                 assert!(platform.running());
                 if fail {

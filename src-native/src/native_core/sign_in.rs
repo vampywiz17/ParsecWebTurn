@@ -23,7 +23,7 @@ impl PersistenceNotice {
     pub fn text(self) -> &'static str {
         match self {
             Self::PreviousSignInNotRemoved => "The old saved sign-in could not be removed. Check write access to settings.json.",
-            Self::ProtectedSessionNotSaved => "Signed in, but Windows could not save the protected session. This sign-in will stay in memory.",
+            Self::ProtectedSessionNotSaved => "Signed in, but the protected session could not be saved. This sign-in will stay in memory.",
         }
     }
 }

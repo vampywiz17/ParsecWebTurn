@@ -1,5 +1,7 @@
-//! Documented Windows screen power request, confined to the window UI thread.
+//! Documented display-sleep request: Windows SetThreadExecutionState, or a
+//! macOS IOKit power assertion. Confined to the window UI thread.
 use serde::Serialize;
+#[cfg(windows)]
 use windows_sys::Win32::System::Power::{
     SetThreadExecutionState, ES_CONTINUOUS, ES_DISPLAY_REQUIRED,
 };
@@ -11,11 +13,16 @@ pub struct State {
     pub failed_requests: u64,
 }
 impl State {
+    #[cfg(windows)]
     pub fn update(&mut self, requested: bool, visible: bool) {
         self.update_with(requested, visible, |enable| unsafe {
             SetThreadExecutionState(ES_CONTINUOUS | if enable { ES_DISPLAY_REQUIRED } else { 0 })
                 != 0
         });
+    }
+    #[cfg(target_os = "macos")]
+    pub fn update(&mut self, requested: bool, visible: bool) {
+        self.update_with(requested, visible, macos::apply);
     }
     fn update_with(&mut self, requested: bool, visible: bool, mut apply: impl FnMut(bool) -> bool) {
         self.requested = requested;
@@ -31,9 +38,48 @@ impl State {
     }
 }
 
+#[cfg(target_os = "macos")]
+mod macos {
+    use objc2_foundation::NSString;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    #[link(name = "IOKit", kind = "framework")]
+    extern "C" {
+        fn IOPMAssertionCreateWithName(
+            kind: &NSString,
+            level: u32,
+            name: &NSString,
+            id: *mut u32,
+        ) -> i32;
+        fn IOPMAssertionRelease(id: u32) -> i32;
+    }
+    const ON: u32 = 255;
+    // Zero is never a valid assertion ID.
+    static ASSERTION: AtomicU32 = AtomicU32::new(0);
+    pub fn apply(enable: bool) -> bool {
+        if !enable {
+            let id = ASSERTION.swap(0, Ordering::AcqRel);
+            return id == 0 || unsafe { IOPMAssertionRelease(id) } == 0;
+        }
+        let mut id = 0;
+        let status = unsafe {
+            IOPMAssertionCreateWithName(
+                &NSString::from_str("PreventUserIdleDisplaySleep"),
+                ON,
+                &NSString::from_str("EvoParseq remote session"),
+                &mut id,
+            )
+        };
+        if status == 0 {
+            ASSERTION.store(id, Ordering::Release);
+        }
+        status == 0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
     #[test]
     fn native_request_and_release_share_one_thread() {
         std::thread::spawn(|| {

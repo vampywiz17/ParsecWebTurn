@@ -576,17 +576,17 @@ fn run(
     }
     // Probe before the lifecycle lock: a slow driver must not stall Cancel.
     let hevc_available =
-        settings.prefer_hevc && crate::video_windows::hevc_available(window.video_gpu().as_ref());
+        settings.prefer_hevc && crate::video_platform::hevc_available(window.video_gpu().as_ref());
     let chroma_444 = true
         && hevc_available
         && settings.experimental_chroma_444
-        && crate::video_windows::hevc_444_available(
+        && crate::video_platform::hevc_444_available(
             window.video_gpu().as_ref(),
             settings.experimental_ten_bit,
         );
     let ten_bit = hevc_available
         && settings.experimental_ten_bit
-        && crate::video_windows::hevc_ten_bit_available(window.video_gpu().as_ref());
+        && crate::video_platform::hevc_ten_bit_available(window.video_gpu().as_ref());
     crate::event_log::record(
         "INFO",
         "video_capabilities_declared",

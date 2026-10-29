@@ -47,7 +47,7 @@ pub(crate) const WANT_SNDBUF: i32 = 4 * 1024 * 1024;
 
 /// Expedited forwarding, on both families. A socket option where the system
 /// honours one; Windows ignores it and marks per destination instead.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) const DSCP_EF: i32 = 0xB8;
 
 /// The TTL everything but a mapping probe leaves at.
@@ -313,7 +313,7 @@ mod tests {
         // its own and a wait returns with what has completed so far -- under
         // load, measured, 17 to 25 of these 32 -- so there the burst is
         // gathered, and the pool's own tests hold the batching.
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         let seen: Vec<Vec<u8>> = {
             assert_eq!(
                 arrived(&mut receiver),
@@ -381,7 +381,12 @@ mod tests {
         let (mut receiver, to) = receiver();
         let port = to.port();
 
-        let v4_dest = IpAddr::V4(core::net::Ipv4Addr::new(127, 0, 0, 11));
+        // macOS holds 127.0.0.1 alone; 127.0.0.11 goes nowhere there.
+        let v4_dest = IpAddr::V4(if cfg!(target_os = "macos") {
+            core::net::Ipv4Addr::LOCALHOST
+        } else {
+            core::net::Ipv4Addr::new(127, 0, 0, 11)
+        });
         sender
             .send_to(b"v4", SocketAddr::new(v4_dest, port))
             .expect("send");

@@ -1,7 +1,8 @@
-//! Native cursor messages, backed by documented Win32 cursor APIs.
+//! Native cursor messages, backed by documented Win32 or AppKit cursor APIs.
 //! Cursor image buffers are copied; window cursor ownership stays on its UI thread.
 
 use anyhow::{bail, Result};
+#[cfg(windows)]
 use windows_sys::Win32::{Graphics::Gdi::*, UI::WindowsAndMessaging::*};
 
 const MAX_SIDE: u32 = 256;
@@ -96,6 +97,7 @@ impl Frame {
             rgba,
         }
     }
+    #[cfg(windows)]
     fn bgra(&self) -> Vec<u8> {
         self.rgba
             .as_chunks::<4>()
@@ -140,7 +142,9 @@ impl Pending {
     }
 }
 
+#[cfg(windows)]
 struct OwnedCursor(usize);
+#[cfg(windows)]
 impl Drop for OwnedCursor {
     fn drop(&mut self) {
         unsafe {
@@ -153,7 +157,9 @@ impl Drop for OwnedCursor {
         }
     }
 }
+#[cfg(windows)]
 struct Bitmap(HBITMAP);
+#[cfg(windows)]
 impl Drop for Bitmap {
     fn drop(&mut self) {
         unsafe {
@@ -162,6 +168,7 @@ impl Drop for Bitmap {
     }
 }
 
+#[cfg(windows)]
 fn create(frame: &Frame) -> Result<OwnedCursor> {
     // SAFETY: bounded, top-down 32bpp DIB; only owned initialized buffers are
     // copied. CreateIconIndirect copies the bitmaps, so both are released here.
@@ -226,6 +233,7 @@ fn create(frame: &Frame) -> Result<OwnedCursor> {
     }
 }
 
+#[cfg(windows)]
 // GetIconInfo reports native bitmap pixels, without DPI virtualization. All
 // returned bitmaps are owned copies; the system cursor handle stays borrowed.
 fn cursor_size(cursor: HCURSOR) -> Result<(u32, u32)> {
@@ -254,9 +262,11 @@ fn cursor_size(cursor: HCURSOR) -> Result<(u32, u32)> {
         Ok((bitmap.bmWidth as u32, height as u32))
     }
 }
+#[cfg(windows)]
 fn local_size() -> Result<(u32, u32)> {
     cursor_size(unsafe { LoadCursorW(std::ptr::null_mut(), IDC_ARROW) })
 }
+#[cfg(windows)]
 fn create_local(frame: &Frame, geometry: Geometry) -> Result<OwnedCursor> {
     if (geometry.width, geometry.height) == (frame.width, frame.height) {
         create(frame)
@@ -264,12 +274,14 @@ fn create_local(frame: &Frame, geometry: Geometry) -> Result<OwnedCursor> {
         create(&frame.resized(geometry))
     }
 }
+#[cfg(windows)]
 pub struct State {
     custom: Option<OwnedCursor>,
     source: Option<Frame>,
     geometry: Option<Geometry>,
     visible: bool,
 }
+#[cfg(windows)]
 impl Default for State {
     fn default() -> Self {
         Self {
@@ -280,6 +292,7 @@ impl Default for State {
         }
     }
 }
+#[cfg(windows)]
 impl State {
     pub fn apply(&mut self, pending: Pending) {
         if let Some(visible) = pending.visible {
@@ -372,7 +385,7 @@ impl State {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, windows))]
 mod tests {
     use super::*;
     #[test]
@@ -515,3 +528,9 @@ mod tests {
         );
     }
 }
+
+#[cfg(target_os = "macos")]
+#[path = "cursor_macos.rs"]
+mod macos;
+#[cfg(target_os = "macos")]
+pub use macos::State;

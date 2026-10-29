@@ -11,6 +11,9 @@ use std::sync::{
     Mutex,
 };
 
+// Text, pointer coordinates in buttons and the size payload are read by the
+// Windows window only.
+#[cfg_attr(not(windows), allow(dead_code))]
 #[derive(Clone, Debug)]
 pub enum Event {
     NativeSession(Command),
@@ -66,6 +69,8 @@ pub enum Command {
     SelectDisplay(String),
     RefreshDisplays,
     Disconnect,
+    // The floating session button exists only on Windows.
+    #[cfg_attr(not(windows), allow(dead_code))]
     HideButton,
     SecureAttention,
 }

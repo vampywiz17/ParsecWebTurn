@@ -1,6 +1,7 @@
 //! EvoParseq native account and session entry point.
 //! The production media, carrier, route retry and HID workers are reused.
 mod account;
+#[cfg(windows)]
 mod controls;
 mod display_timing;
 mod display_windows;
@@ -11,18 +12,52 @@ mod picker;
 mod pointer;
 pub(crate) mod profile;
 mod session;
+#[cfg(windows)]
 mod session_badge;
 pub(crate) mod session_model;
+#[cfg(windows)]
 mod session_platform;
+#[cfg(target_os = "macos")]
+#[path = "session_platform_macos.rs"]
+mod session_platform;
+#[cfg(windows)]
 pub(crate) mod session_ui;
+#[cfg(target_os = "macos")]
+#[path = "session_ui_macos.rs"]
+mod session_ui;
 mod session_video;
 mod sign_in;
 mod signaling;
 mod transport;
+#[cfg(windows)]
+pub(crate) mod ui;
+#[cfg(target_os = "macos")]
+#[path = "ui_macos.rs"]
 pub(crate) mod ui;
 
 use anyhow::{Context, Result};
 
+#[cfg(target_os = "macos")]
+pub(crate) fn open_stream_settings(
+    window: std::sync::Arc<crate::window::Window>,
+    manager: std::sync::Arc<crate::connection_settings::Manager>,
+) {
+    session_ui::open(window, manager);
+}
+
+#[cfg(target_os = "macos")]
+pub fn main() {
+    // AppKit owns the main thread; the account/session loop below blocks.
+    ui::run_application(|| {
+        if let Err(error) = run() {
+            unsafe {
+                ui::message_box(std::ptr::null_mut(), &error.to_string());
+            }
+        }
+    });
+}
+
+#[cfg(windows)]
 pub fn main() {
     if let Err(error) = run() {
         // Every error crossing this entry is an application-authored message;
@@ -43,7 +78,14 @@ fn run() -> Result<()> {
         );
         return Ok(());
     }
-    let root = if args.is_empty() {
+    let root = if args.is_empty() && cfg!(target_os = "macos") {
+        // An app bundle may be signed or translocated read-only.
+        let root =
+            std::path::PathBuf::from(std::env::var_os("HOME").context("Home folder unavailable")?)
+                .join("Library/Application Support/EvoParseq");
+        std::fs::create_dir_all(&root)?;
+        root
+    } else if args.is_empty() {
         std::env::current_exe()?
             .parent()
             .context("Application folder unavailable")?
@@ -72,6 +114,7 @@ fn run() -> Result<()> {
         "native_core_started",
         serde_json::json!({"transport":if settings.view().0.bud {"BUD"} else {"WebRTC"}}),
     );
+    #[cfg(windows)]
     prepare_vsr_runtime(&settings);
     let mut session = None;
     loop {
@@ -85,7 +128,7 @@ fn run() -> Result<()> {
         };
         let result = (|| {
             let socket = signaling::Socket::open(&selection.session)?;
-            let platform = session_platform::Windows::create(settings.clone())?;
+            let platform = session_platform::Platform::create(settings.clone())?;
             session::run(
                 &selection.peer,
                 &socket,
@@ -112,6 +155,7 @@ fn run() -> Result<()> {
     }
 }
 
+#[cfg(windows)]
 fn prepare_vsr_runtime(settings: &crate::connection_settings::Manager) {
     use crate::connection_settings::VsrRuntimeConsent;
     if !cfg!(nvidia_vsr_sdk) || settings.view().1.is_some() {

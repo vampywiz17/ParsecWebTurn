@@ -1,4 +1,6 @@
 //! Persisted native connection settings and RTCIceServer configuration.
+// Parts of this shared model serve only the Windows decoder and controls.
+#![cfg_attr(not(windows), allow(dead_code))]
 use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
@@ -379,7 +381,7 @@ fn unprotect(value: &str) -> Result<String> {
         .decode(value)
         .context("Invalid saved credential encoding")?;
     String::from_utf8(crate::secure_storage::protect(&bytes, false)?)
-        .context("Cannot read saved credential for this Windows user")
+        .context("Cannot read saved credential for this user account")
 }
 fn protect(value: &str) -> Result<String> {
     Ok(STANDARD.encode(crate::secure_storage::protect(value.as_bytes(), true)?))
@@ -535,7 +537,7 @@ impl Manager {
         self.resolve_settings(&settings).await
     }
     /// Explicit BUD adapter: freeze preferences and credentials together.
-    #[cfg(all(windows, feature = "bud"))]
+    #[cfg(all(any(windows, target_os = "macos"), feature = "bud"))]
     pub async fn resolve_bud(&self) -> Result<(Settings, Vec<RTCIceServer>)> {
         let (settings, error) = self.view();
         if error.is_some() {
@@ -549,7 +551,7 @@ impl Manager {
         Ok((settings, servers))
     }
 
-    #[cfg(all(windows, feature = "bud"))]
+    #[cfg(all(any(windows, target_os = "macos"), feature = "bud"))]
     pub async fn resolve_bud_relay(&self, settings: &Settings) -> Result<Vec<RTCIceServer>> {
         if settings.stun_only {
             bail!("TURN is disabled by STUN-only settings");
@@ -709,7 +711,9 @@ fn parse_cloudflare(raw: &[u8]) -> Result<Vec<RTCIceServer>> {
 }
 
 fn atomic_write(path: &std::path::Path, raw: &[u8]) -> Result<()> {
+    #[cfg(windows)]
     use std::os::windows::ffi::OsStrExt;
+    #[cfg(windows)]
     use windows_sys::Win32::Storage::FileSystem::{
         MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
     };
@@ -723,8 +727,15 @@ fn atomic_write(path: &std::path::Path, raw: &[u8]) -> Result<()> {
         file.write_all(raw)?;
         file.sync_all()?;
         drop(file);
+        // POSIX rename(2) atomically replaces the destination.
+        #[cfg(unix)]
+        std::fs::rename(&temporary, path)
+            .context("Cannot replace settings.json; existing settings were preserved")?;
+        #[cfg(windows)]
         let from: Vec<_> = temporary.as_os_str().encode_wide().chain([0]).collect();
+        #[cfg(windows)]
         let to: Vec<_> = path.as_os_str().encode_wide().chain([0]).collect();
+        #[cfg(windows)]
         if unsafe {
             MoveFileExW(
                 from.as_ptr(),

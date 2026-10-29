@@ -1,5 +1,7 @@
 //! Bounded inspection of pinned Parsec video framing, not a decoder.
 //! Proprietary metadata is separate from H.264/HEVC Annex B byte-stream syntax.
+// Parts of this shared model serve only the Windows decoder and controls.
+#![cfg_attr(not(windows), allow(dead_code))]
 use serde::Serialize;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

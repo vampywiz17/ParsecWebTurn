@@ -683,6 +683,7 @@ fn rows(
     }
     rows
 }
+#[cfg(any(windows, test))]
 pub fn compact_metrics(
     sample: Option<&crate::stats::Sample>,
     rates: &crate::stats::Values,

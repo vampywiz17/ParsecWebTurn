@@ -1,6 +1,15 @@
-//! Windows CurrentUser DPAPI shared by native profiles and legacy server settings.
+//! Protection shared by native profiles and server settings: Windows CurrentUser
+//! DPAPI, or on macOS ChaCha20-Poly1305 under a key kept in the login Keychain.
+#[cfg(windows)]
 use anyhow::{bail, Result};
+#[cfg(windows)]
 use windows_sys::Win32::{Foundation::LocalFree, Security::Cryptography::*};
+#[cfg(target_os = "macos")]
+#[path = "secure_storage_macos.rs"]
+mod macos;
+#[cfg(target_os = "macos")]
+pub use macos::protect;
+#[cfg(windows)]
 pub fn protect(input: &[u8], encrypt: bool) -> Result<Vec<u8>> {
     let blob = CRYPT_INTEGER_BLOB {
         cbData: u32::try_from(input.len())?,

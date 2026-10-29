@@ -155,7 +155,7 @@ impl<T> Queue<T> {
     }
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 impl Queue<crate::native_core::session_model::Event> {
     pub fn input() -> Self {
         use crate::native_core::session_model::Event;
@@ -178,7 +178,7 @@ mod tests {
         time::Duration,
     };
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     #[test]
     fn pointer_flood_keeps_latest_positions_and_all_drag_boundaries() {
         use crate::native_core::session_model::Event;
@@ -203,7 +203,7 @@ mod tests {
         assert!(matches!(events[5], Event::Key(false, "ShiftLeft", 0)));
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     #[test]
     fn camera_deltas_are_exact_and_never_cross_mode_focus_or_wheel_boundaries() {
         use crate::native_core::session_model::Event;
@@ -243,7 +243,7 @@ mod tests {
         assert!(matches!(events[1], Event::RelativeMotion(1, i32::MIN)));
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     #[test]
     fn reserved_input_capacity_and_overflow_release_barrier_are_bounded() {
         use crate::native_core::session_model::Event;
@@ -269,7 +269,7 @@ mod tests {
         assert!(queue.drain().is_empty());
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     #[test]
     fn flood_while_consumer_is_blocked_keeps_owned_batch_and_next_sum() {
         use crate::native_core::session_model::Event;

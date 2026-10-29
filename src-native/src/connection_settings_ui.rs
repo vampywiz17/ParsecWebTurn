@@ -656,7 +656,15 @@ pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
     binary_choice(hwnd, page, AUDIO_SURROUND, 630);
     check(hwnd, AUDIO_SURROUND, s.experimental_surround_audio);
     page.building_tab = Some(Tab::Input);
-    row_label(hwnd, page, "Input mode", "Standard input or experimental USB HID over BUD.\nMouse and keyboard can be selected independently.", 242, 0, 48);
+    row_label(
+        hwnd,
+        page,
+        "Input mode",
+        crate::settings_model::INPUT_MODE_HINT,
+        242,
+        0,
+        48,
+    );
     choice(
         hwnd,
         page,
@@ -665,8 +673,24 @@ pub unsafe fn open(parent: HWND, manager: Arc<Manager>) -> HWND {
         &InputMode::LABELS,
         InputMode::current(&s) as usize,
     );
-    row_label(hwnd, page, "HID requirements", "Enable USB/Yubikey passthrough on the host.\nHID mouse uses the primary display only.\nUse the same keyboard layout on host and client.", 354, 0, 64);
-    row_label(hwnd,page,"Compatibility","Absolute desktop and relative camera movement.\nCamera mode follows the host cursor state.\nKeyboard layout is not switched automatically.",466,0,64);
+    row_label(
+        hwnd,
+        page,
+        "HID requirements",
+        crate::settings_model::HID_REQUIREMENTS_HINT,
+        354,
+        0,
+        64,
+    );
+    row_label(
+        hwnd,
+        page,
+        "Compatibility",
+        crate::settings_model::HID_COMPATIBILITY_HINT,
+        466,
+        0,
+        64,
+    );
 
     page.building_tab = None;
     add(hwnd, page, "STATIC",

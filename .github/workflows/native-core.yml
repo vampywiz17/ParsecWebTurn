@@ -13,6 +13,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-native
+          cache-on-failure: true
+      - name: Verify EvoParseq macOS build
+        run: |
+          set -eu
+          target=aarch64-apple-darwin
+          cargo test --locked --manifest-path src-native/Cargo.toml --target $target -p dtls --lib -- --test-threads=1
+          cargo test --locked --manifest-path src-native/crates/bud/Cargo.toml --target $target -p lowlat-client --features external-video,turn-stream,usb-hid-input -- --test-threads=1
+          cargo test --locked --manifest-path src-native/crates/bud/Cargo.toml --target $target -p lowlat-net --features turn-stream -- --test-threads=1
+          cargo test --locked --manifest-path src-native/Cargo.toml --target $target -- --test-threads=1
+          ./scripts/package-macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EvoParseq-macos
+          path: |
+            dist/EvoParseq-v*-macos-*.zip
+            dist/SHA256SUMS-macos.txt
+          if-no-files-found: error
   windows:
     runs-on: windows-latest
     steps:

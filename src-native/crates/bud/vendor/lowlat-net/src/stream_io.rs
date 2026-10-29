@@ -560,7 +560,7 @@ fn connect_pending(error: &io::Error) -> bool {
     ) {
         return true;
     }
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     if error.raw_os_error() == Some(libc::EINPROGRESS) {
         return true;
     }

@@ -103,7 +103,9 @@ impl Batch {
             to: None,
             ttl: Ttl::Default,
             from: None,
-            offload: true,
+            // macOS has no segmentation offload; starting off there saves a
+            // refused call and its warning on the first burst.
+            offload: cfg!(not(target_os = "macos")),
             refused: 0,
             sent_bytes: 0,
         }
@@ -310,6 +312,10 @@ mod tests {
     use crate::sys::{Io, Wake};
     use core::net::{IpAddr, Ipv6Addr};
 
+    /// Whether the platform segments at all. macOS has no offload and starts
+    /// with it off, so there the offload tests hold the per-datagram path.
+    const SEGMENTS: bool = cfg!(not(target_os = "macos"));
+
     fn loopback_of(socket: &Socket) -> SocketAddr {
         let mut addr = socket.local_addr().expect("addr");
         addr.set_ip(IpAddr::V6(Ipv6Addr::LOCALHOST));
@@ -388,7 +394,7 @@ mod tests {
     /// word, and refuses the unspecified address instead, which Linux takes
     /// as this host.
     fn refused() -> SocketAddr {
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         let ip = core::net::Ipv4Addr::BROADCAST;
         #[cfg(windows)]
         let ip = core::net::Ipv4Addr::UNSPECIFIED;
@@ -469,7 +475,7 @@ mod tests {
                 IpAddr::V4(core::net::Ipv4Addr::new(127, 0, 0, 7)),
             )
         }
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         {
             (
                 IpAddr::V4(core::net::Ipv4Addr::LOCALHOST),
@@ -518,7 +524,7 @@ mod tests {
         // Here: a source the host does not hold is refused, so the claim was
         // read and checked -- an ignored one would have left from the
         // default and arrived.
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         {
             let unheld = IpAddr::V4(core::net::Ipv4Addr::new(127, 0, 0, 7));
             push_pinned(
@@ -554,8 +560,9 @@ mod tests {
         push(&mut batch, &sender, to, Ttl::Default, &[2u8; 256]);
         batch.flush(&sender).expect("a refusal is not an error");
 
-        assert!(
+        assert_eq!(
             batch.offloading(),
+            SEGMENTS,
             "a refusal about one batch disabled offload for the session"
         );
         assert_eq!(batch.refused(), 2, "the fallback sends were not counted");
@@ -610,8 +617,9 @@ mod tests {
             1,
             "a kibibyte datagram joined a batch the kernel cannot segment"
         );
-        assert!(
+        assert_eq!(
             batch.offloading(),
+            SEGMENTS,
             "the oversized batch reached the kernel and cost offload"
         );
 
@@ -651,8 +659,9 @@ mod tests {
         }
         assert_eq!(batch.staged(), 8);
         batch.flush(&sender).expect("flush");
-        assert!(
+        assert_eq!(
             batch.offloading(),
+            SEGMENTS,
             "the kernel refused to segment, so this exercised the fallback"
         );
 
@@ -680,8 +689,9 @@ mod tests {
 
         // Without this the test passes identically on the fallback path, and
         // would keep passing if offload silently stopped working.
-        assert!(
+        assert_eq!(
             batch.offloading(),
+            SEGMENTS,
             "the kernel refused to segment, so this exercised the fallback"
         );
 

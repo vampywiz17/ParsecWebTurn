@@ -46,7 +46,7 @@ pub(super) trait Runtime: Desktop {
     fn create_audio(
         &self,
         layout: crate::audio_layout::Layout,
-    ) -> Result<Arc<crate::audio_windows::Playback>>;
+    ) -> Result<Arc<crate::audio_platform::Playback>>;
     fn host_error(&self, code: i32) -> transport::HostStatus;
 }
 
@@ -225,7 +225,7 @@ pub(super) fn run(
     let mut batch = VecDeque::new();
     let mut pointer = pointer::Pointer::default();
     let mut input = input::Input::default();
-    let mut output: Option<Arc<crate::audio_windows::Playback>> = None;
+    let mut output: Option<Arc<crate::audio_platform::Playback>> = None;
     let mut established = false;
     let mut audio_source = None;
     platform.register_consumer();

@@ -1,5 +1,6 @@
 //! Absolute HID desktop input. Does not touch decoding or render surfaces.
 use std::sync::Arc;
+#[cfg(windows)]
 pub const REFRESH: u32 = windows_sys::Win32::UI::WindowsAndMessaging::WM_APP + 40;
 pub fn absolute_motion(
     frame: &[u8],

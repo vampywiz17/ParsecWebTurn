@@ -9,6 +9,7 @@ pub enum Shortcut {
     SecureAttention,
 }
 
+#[cfg(not(target_os = "macos"))]
 pub fn shortcut_binding(code: &str) -> Option<(i32, Shortcut)> {
     match code {
         "KeyM" | "KeyO" => Some((3, Shortcut::Menu)),
@@ -20,9 +21,24 @@ pub fn shortcut_binding(code: &str) -> Option<(i32, Shortcut)> {
         _ => None,
     }
 }
+#[cfg(not(target_os = "macos"))]
 pub fn shortcut(code: &str, modifiers: i32) -> Option<Shortcut> {
     let (required, action) = shortcut_binding(code)?;
     (modifiers & 15 == required).then_some(action)
+}
+/// Official Parsec macOS defaults (Shift 1, Control 2, Option 4, Command 8).
+/// Parsec's Command+Shift+S adds a screen; this client keeps S for stats.
+#[cfg(target_os = "macos")]
+pub fn shortcut(code: &str, modifiers: i32) -> Option<Shortcut> {
+    match (code, modifiers & 15) {
+        ("KeyM", 9) => Some(Shortcut::Menu),
+        ("KeyS", 9) => Some(Shortcut::Statistics),
+        ("KeyW", 9) => Some(Shortcut::Fullscreen),
+        ("KeyZ", 12) => Some(Shortcut::ReleaseInput),
+        ("Backquote", 12) | ("KeyQ" | "KeyW", 8) => Some(Shortcut::Disconnect),
+        ("Backspace", 6) => Some(Shortcut::SecureAttention),
+        _ => None,
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -67,8 +83,10 @@ impl Shortcuts {
     }
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 #[derive(Default)]
 pub struct TextDecoder(Option<u16>);
+#[cfg_attr(not(windows), allow(dead_code))]
 impl TextDecoder {
     pub fn push(&mut self, unit: u16) -> Option<char> {
         if (0xD800..=0xDBFF).contains(&unit) {
@@ -89,6 +107,34 @@ impl TextDecoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn mac_shortcuts_follow_parsec_defaults_and_ignore_lock_toggles() {
+        for (key, mods, action) in [
+            ("KeyM", 9, Shortcut::Menu),
+            ("KeyS", 9, Shortcut::Statistics),
+            ("KeyW", 9, Shortcut::Fullscreen),
+            ("KeyZ", 12, Shortcut::ReleaseInput),
+            ("Backquote", 12, Shortcut::Disconnect),
+            ("KeyQ", 8, Shortcut::Disconnect),
+            ("KeyW", 8, Shortcut::Disconnect),
+            ("Backspace", 6, Shortcut::SecureAttention),
+        ] {
+            assert_eq!(shortcut(key, mods), Some(action));
+            assert_eq!(shortcut(key, mods | 48), Some(action));
+        }
+        // Former Ctrl+Shift chords and plain Command copy/paste reach the host.
+        for (key, mods) in [
+            ("KeyM", 3),
+            ("KeyQ", 3),
+            ("End", 6),
+            ("KeyC", 8),
+            ("KeyZ", 8),
+        ] {
+            assert_eq!(shortcut(key, mods), None);
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
     #[test]
     fn shortcuts_reserve_exact_chords_and_ignore_lock_toggles() {
         for (key, mods, action) in [
@@ -123,7 +169,7 @@ mod tests {
     #[test]
     fn shortcut_repeats_and_release_stay_local_without_stealing_held_remote_keys() {
         let mut keys = Shortcuts::default();
-        let full = shortcut("KeyW", 3);
+        let full = Some(Shortcut::Fullscreen);
         assert_eq!(keys.route("KeyW", true, true, full), ShortcutRoute::Forward);
         assert_eq!(
             keys.route("KeyW", false, false, full),

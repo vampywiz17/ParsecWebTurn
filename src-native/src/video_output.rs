@@ -1,4 +1,6 @@
 //! Bounded compressed-video queue; decoder resources belong to one worker.
+// Parts of this shared model serve only the Windows decoder and controls.
+#![cfg_attr(not(windows), allow(dead_code))]
 use serde::Serialize;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};

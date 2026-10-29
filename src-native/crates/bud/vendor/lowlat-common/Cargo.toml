@@ -1,0 +1,25 @@
+[package]
+name = "lowlat-common"
+version = "0.0.0"
+publish = false
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/nomi-san/lowlat"
+authors = ["Nguyen Duy"]
+
+[features]
+default = []
+# Test-only counting allocator. Enabled by the test and bench profiles, never
+# in a shipping build. See docs/08-testing.md 8.
+alloc-counter = []
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(loom)'.dependencies]
+loom = "0.7"
+
+# Upstream declares this in its workspace lints.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(loom)"] }

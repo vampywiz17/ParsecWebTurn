@@ -1,0 +1,325 @@
+//! Runtime loading of a shared library.
+//!
+//! Backends that need a vendor runtime resolve it here rather than linking it,
+//! so a machine without that runtime has **a missing backend rather than a
+//! process that will not start**. A link-time dependency on a driver library
+//! turns "no GPU here" into a loader error before `main` runs.
+//!
+//! Two reasons this lives in `lowlat-common` rather than beside the backend
+//! that first needed it. It is the one piece of the platform that differs
+//! between the operating systems we target while the code above it does not,
+//! so the split belongs at the bottom. And this crate is the only one in the
+//! workspace containing `unsafe`, which is what keeps that obligation in one
+//! auditable place; a loader written into each backend would spread it.
+//!
+//! **A library, once opened, stays mapped for the life of the process.**
+//! Dropping a `Library` releases the handle and nothing else. Two reasons,
+//! the first measured (2026-09-19). A vendor runtime carries thread-local
+//! storage that must live in the static area glibc sets aside at start,
+//! about two kilobytes; that area is given back only in stack order, so a
+//! runtime opened and closed once per pipeline build, interleaved with the
+//! others a build opens, leaves holes that are never reused, and after ten
+//! to twenty builds the vendor's driver refuses to load at all -- "cannot
+//! allocate memory in static TLS block" -- and its device is gone from every
+//! enumeration until the process restarts. And a vendor runtime is not built
+//! to be unloaded in the first place: reopening one after a close is a path
+//! its authors never test. Opening a library that is already open costs a
+//! reference count, so a backend keeps opening by name as it always did.
+//!
+//! **`miri` cannot reach any of this**, because it cannot execute a loader
+//! syscall or run foreign code. The tests below check the observable contract
+//! -- a library opens, a symbol resolves, an absent one reports absence -- and
+//! the handle discipline is what review has to cover.
+
+use core::ffi::{CStr, c_void};
+use core::ptr::NonNull;
+
+/// An open shared library. The mapping outlives the handle (see the module
+/// note); dropping this releases nothing the process cannot open again.
+pub struct Library {
+    handle: NonNull<c_void>,
+}
+
+impl core::fmt::Debug for Library {
+    /// Deliberately opaque. The handle is an address in this process and
+    /// printing it puts a mapping address into logs for no diagnostic gain.
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("Library(open)")
+    }
+}
+
+// SAFETY: a library handle is a process-wide token, not thread-affine. Both
+// platforms' loaders are internally synchronised, and neither the handle nor
+// the symbol addresses derived from it depend on the calling thread. Sending a
+// handle is what lets a backend be constructed on one thread and run on
+// another, which is the arrangement the pipeline uses.
+unsafe impl Send for Library {}
+// SAFETY: as above, and every method taking `&self` only reads the handle.
+unsafe impl Sync for Library {}
+
+impl Library {
+    /// Open a library by name, or by absolute path.
+    ///
+    /// Returns `None` if it is absent or fails to load. The caller knows which
+    /// names it tried and is the one that can say so usefully in a log, which
+    /// is why no error detail comes back: carrying one would mean either
+    /// allocating or handing out a pointer into the loader's own buffer.
+    pub fn open(name: &CStr) -> Option<Self> {
+        let handle = imp::open(name);
+        NonNull::new(handle).map(|handle| Self { handle })
+    }
+
+    /// Open a library of the system's by name, from the system's own
+    /// directory alone: never the application's, which a bare name searches
+    /// first.
+    #[cfg(windows)]
+    pub fn open_system(name: &CStr) -> Option<Self> {
+        let handle = imp::open_system(name);
+        NonNull::new(handle).map(|handle| Self { handle })
+    }
+
+    /// Open the first name that loads.
+    ///
+    /// Vendor runtimes are versioned in their file name and the unversioned
+    /// alias is frequently absent on a machine without the development
+    /// package, so a backend needs to try a short list rather than one name.
+    pub fn open_first(names: &[&CStr]) -> Option<Self> {
+        names.iter().find_map(|name| Self::open(name))
+    }
+
+    /// Close a library that was opened only to be asked what it is, before
+    /// anything of it ran.
+    ///
+    /// **The one exception to the module note, and it is narrow for the
+    /// reason the note gives.** Unloading is unsafe for a runtime that keeps
+    /// thread-local storage in the static area, and for one that is not
+    /// built to be reopened; it is safe for a library that carries no such
+    /// segment and of which nothing but a constant-returning entry point has
+    /// been called. The caller has established both -- the codec libraries
+    /// this exists for carry no thread-local segment, checked on every build
+    /// at hand -- and closes a refused library so that it leaves the process
+    /// map rather than staying mapped and unused. A library the process
+    /// already held stays held: the loader counts references.
+    pub fn close(self) {
+        imp::close(self.handle.as_ptr());
+    }
+
+    /// Resolve a symbol, or `None` if the library does not export it.
+    ///
+    /// # Safety
+    ///
+    /// `T` must be a function pointer type whose signature, calling convention
+    /// and lifetime expectations match the symbol as the library actually
+    /// defines it. Nothing here can check that, and getting it wrong is
+    /// undefined behaviour at the first call rather than at resolution.
+    ///
+    /// The returned pointer borrows the library. The mapping behind it stays
+    /// for the process's life, but nothing here promises that to a caller:
+    /// a pointer kept past the `Library` is a pointer nothing accounts for.
+    pub unsafe fn symbol<T: Copy>(&self, name: &CStr) -> Option<T> {
+        const {
+            assert!(
+                size_of::<T>() == size_of::<*mut c_void>(),
+                "symbol type must be pointer sized"
+            );
+        }
+        // SAFETY: the handle is valid for the life of `self`.
+        let address = unsafe { imp::symbol(self.handle.as_ptr(), name) };
+        if address.is_null() {
+            return None;
+        }
+        // SAFETY: `address` is non-null and pointer sized, asserted above. The
+        // caller carries the obligation that `T` describes it correctly.
+        Some(unsafe { core::mem::transmute_copy::<*mut c_void, T>(&address) })
+    }
+}
+
+#[cfg(unix)]
+mod imp {
+    use core::ffi::{CStr, c_void};
+
+    /// Resolve every symbol at open rather than lazily.
+    ///
+    /// A library whose own dependencies are missing then fails here, where the
+    /// caller can fall back to another backend, instead of at the first call
+    /// through a function pointer, where it is a crash.
+    ///
+    /// Local, not global: this ships inside a shared library loaded into other
+    /// people's processes, and adding a vendor runtime's symbols to the global
+    /// namespace can capture lookups that were never meant for us.
+    const FLAGS: i32 = libc::RTLD_NOW | libc::RTLD_LOCAL;
+
+    pub(super) fn open(name: &CStr) -> *mut c_void {
+        // SAFETY: `name` is a valid NUL-terminated string for the call.
+        unsafe { libc::dlopen(name.as_ptr(), FLAGS) }
+    }
+
+    pub(super) unsafe fn symbol(handle: *mut c_void, name: &CStr) -> *mut c_void {
+        // SAFETY: the caller guarantees `handle` is open; `name` is valid.
+        unsafe { libc::dlsym(handle, name.as_ptr()) }
+    }
+
+    pub(super) fn close(handle: *mut c_void) {
+        // SAFETY: the handle came from `open` and is used once here; the
+        // `Library` that held it is consumed by the call.
+        unsafe { libc::dlclose(handle) };
+    }
+}
+
+#[cfg(windows)]
+mod imp {
+    use core::ffi::{CStr, c_void};
+
+    // The system loader is present in every process, so these need no crate
+    // dependency and no link attribute.
+    unsafe extern "system" {
+        fn LoadLibraryExW(name: *const u16, file: *mut c_void, flags: u32) -> *mut c_void;
+        fn GetProcAddress(module: *mut c_void, name: *const u8) -> *mut c_void;
+        fn FreeLibrary(module: *mut c_void) -> i32;
+    }
+
+    /// The directory the named library is in, so its own imports resolve
+    /// beside it. Valid only with a full path.
+    const SEARCH_DLL_LOAD_DIR: u32 = 0x0000_0100;
+    /// The application's directory, the system directory and any directory
+    /// the application added. **Not the current directory and not the
+    /// search path**: this loads into other people's processes, and either
+    /// of those lets whoever writes there choose what runs.
+    const SEARCH_DEFAULT_DIRS: u32 = 0x0000_1000;
+
+    /// The system's own directory alone.
+    const SEARCH_SYSTEM32: u32 = 0x0000_0800;
+
+    pub(super) fn open(name: &CStr) -> *mut c_void {
+        // A name that is not text names nothing the loader could find.
+        let Ok(text) = name.to_str() else {
+            return core::ptr::null_mut();
+        };
+        let flags = if std::path::Path::new(text).is_absolute() {
+            SEARCH_DLL_LOAD_DIR | SEARCH_DEFAULT_DIRS
+        } else {
+            SEARCH_DEFAULT_DIRS
+        };
+        load(text, flags)
+    }
+
+    pub(super) fn open_system(name: &CStr) -> *mut c_void {
+        match name.to_str() {
+            Ok(text) => load(text, SEARCH_SYSTEM32),
+            Err(_) => core::ptr::null_mut(),
+        }
+    }
+
+    fn load(text: &str, flags: u32) -> *mut c_void {
+        // Built once per open, which is setup and never a data path.
+        let wide: Vec<u16> = text.encode_utf16().chain(core::iter::once(0)).collect();
+        // SAFETY: `wide` is NUL-terminated and outlives the call; the file
+        // argument is reserved and must be null.
+        unsafe { LoadLibraryExW(wide.as_ptr(), core::ptr::null_mut(), flags) }
+    }
+
+    pub(super) unsafe fn symbol(handle: *mut c_void, name: &CStr) -> *mut c_void {
+        // SAFETY: the caller guarantees `handle` is open; `name` is valid.
+        unsafe { GetProcAddress(handle, name.as_ptr().cast()) }
+    }
+
+    pub(super) fn close(handle: *mut c_void) {
+        // SAFETY: the handle came from `open` and is used once here.
+        unsafe { FreeLibrary(handle) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Present on any glibc system. Versioned, because the unversioned alias
+    /// is a linker script rather than an object and will not load.
+    #[cfg(unix)]
+    const LIBC: &CStr = c"libc.so.6";
+    /// The C runtime every supported Windows carries.
+    #[cfg(windows)]
+    const LIBC: &CStr = c"ucrtbase.dll";
+
+    #[test]
+    fn opens_a_library_and_resolves_a_symbol() {
+        let library = Library::open(LIBC).expect("libc did not open");
+        // SAFETY: the signature is not called, only resolved, and the test
+        // asserts resolution rather than invocation.
+        let symbol: Option<unsafe extern "C" fn(usize) -> *mut c_void> =
+            unsafe { library.symbol(c"malloc") };
+        assert!(symbol.is_some(), "a symbol libc certainly exports");
+    }
+
+    /// A full path loads too, and takes the directory search that lets the
+    /// library's own imports resolve beside it.
+    #[cfg(windows)]
+    #[test]
+    fn opens_a_library_by_full_path() {
+        let system = std::env::var("SystemRoot").expect("the system root");
+        let path = std::ffi::CString::new(format!("{system}\\System32\\ucrtbase.dll"))
+            .expect("a path without a NUL");
+        assert!(Library::open(&path).is_some());
+    }
+
+    /// The counterpart that proves the test above is not vacuous: the same
+    /// call against a name no library exports must report absence rather than
+    /// hand back something.
+    #[test]
+    fn an_absent_symbol_reports_none() {
+        let library = Library::open(LIBC).expect("libc did not open");
+        // SAFETY: as above; resolution only.
+        let symbol: Option<unsafe extern "C" fn()> =
+            unsafe { library.symbol(c"lowlat_no_such_symbol_exists") };
+        assert!(symbol.is_none());
+    }
+
+    #[test]
+    fn an_absent_library_reports_none() {
+        assert!(Library::open(c"liblowlat-no-such-library.so.999").is_none());
+    }
+
+    /// A backend hands over a short list because the versioned name is the one
+    /// that exists on a machine without the development package. The first
+    /// entry failing must not abandon the search.
+    #[test]
+    fn open_first_skips_names_that_do_not_load() {
+        let library = Library::open_first(&[c"liblowlat-absent.so.999", LIBC]);
+        assert!(library.is_some(), "the fallback name was never tried");
+        assert!(Library::open_first(&[c"liblowlat-absent.so.999"]).is_none());
+        assert!(Library::open_first(&[]).is_none());
+    }
+
+    /// A closed library leaves the process map, which is what closing a
+    /// refused codec library is for. The premise -- that the library was
+    /// not mapped before the open -- is asserted, so a library the runtime
+    /// happens to hold cannot make the check vacuous.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_closed_library_leaves_the_process() {
+        const NAME: &CStr = c"libresolv.so.2";
+        let mapped = || {
+            std::fs::read_to_string("/proc/self/maps")
+                .expect("the process map")
+                .contains("libresolv")
+        };
+        assert!(!mapped(), "libresolv was mapped before the open");
+        let library = Library::open(NAME).expect("libresolv did not open");
+        assert!(mapped(), "the open did not map it");
+        library.close();
+        assert!(!mapped(), "the close left it mapped");
+    }
+
+    #[test]
+    fn a_handle_crosses_threads() {
+        let library = Library::open(LIBC).expect("libc did not open");
+        std::thread::spawn(move || {
+            // SAFETY: resolution only, on the other thread.
+            let symbol: Option<unsafe extern "C" fn(usize) -> *mut c_void> =
+                unsafe { library.symbol(c"malloc") };
+            assert!(symbol.is_some());
+        })
+        .join()
+        .expect("the handle did not survive the move");
+    }
+}

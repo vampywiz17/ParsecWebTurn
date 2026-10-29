@@ -1,4 +1,6 @@
 //! Editable Settings state and rules without window/control APIs.
+// Parts of this shared model serve only the Windows decoder and controls.
+#![cfg_attr(not(windows), allow(dead_code))]
 use crate::connection_settings::{full_chroma_vendor_allowed, GpuPreference, Manager, Settings};
 use anyhow::{Context, Result};
 use zeroize::Zeroizing;
@@ -58,6 +60,9 @@ impl AiUpscaler {
         }
     }
 }
+pub const INPUT_MODE_HINT: &str = "Standard input or experimental USB HID over BUD.\nMouse and keyboard can be selected independently.";
+pub const HID_REQUIREMENTS_HINT: &str = "Enable USB/Yubikey passthrough on the host.\nHID mouse uses the primary display only.\nUse the same keyboard layout on host and client.";
+pub const HID_COMPATIBILITY_HINT: &str = "Absolute desktop and relative camera movement.\nCamera mode follows the host cursor state.\nKeyboard layout is not switched automatically.";
 pub const DISPLAY_TIMING_HINT: &str = "Experimental: normal GPU rendering; reconnect to apply.\nVRR needs an enabled compatible monitor and driver.\nZero copy keeps Windows-managed timing.";
 
 #[derive(Clone, Copy, PartialEq, Eq)]

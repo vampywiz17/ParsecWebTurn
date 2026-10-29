@@ -29,7 +29,7 @@ pub(crate) fn session(
 }
 
 pub struct Media {
-    video: crate::video_windows::Pipeline,
+    video: crate::video_platform::Pipeline,
     audio: Arc<crate::audio_stream::Pipeline>,
     audio_sender: crate::audio_stream::Sender,
     inspector: crate::video_stream::Inspector,
@@ -63,7 +63,7 @@ impl Media {
         surround: bool,
     ) -> Result<(Self, Session)> {
         let layout = if surround {
-            crate::audio_windows::device_layout().unwrap_or(crate::audio_layout::Layout::STEREO)
+            crate::audio_platform::device_layout().unwrap_or(crate::audio_layout::Layout::STEREO)
         } else {
             crate::audio_layout::Layout::STEREO
         };
@@ -75,7 +75,7 @@ impl Media {
         let audio_sender = audio
             .sender()
             .ok_or_else(|| anyhow::anyhow!("native audio sender unavailable"))?;
-        let video = crate::video_windows::Pipeline::start(
+        let video = crate::video_platform::Pipeline::start(
             window,
             crate::video_output::DisplayCatchUpPolicy::Fixed,
         );

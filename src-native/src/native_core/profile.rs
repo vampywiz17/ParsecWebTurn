@@ -217,7 +217,7 @@ mod tests {
         queue.set_last_packet(1, true);
         let frame = queue.pop().unwrap();
         assert_eq!((frame.timestamp_100ns, frame.rotation), (42, 1));
-        let source = crate::video_windows::display_extents(1920, 1080, frame.rotation);
+        let source = crate::video_platform::display_extents(1920, 1080, frame.rotation);
         assert_eq!(source, (1080, 1920));
         let viewport = crate::viewport::Viewport {
             source,
@@ -225,7 +225,7 @@ mod tests {
         };
         assert_eq!(viewport.map(270, 480), Some((540, 960)));
         assert_eq!(
-            crate::video_windows::display_extents(1920, 1080, 2),
+            crate::video_platform::display_extents(1920, 1080, 2),
             (1920, 1080)
         );
     }

@@ -5,7 +5,7 @@ edition = "2021"
 rust-version = "1.90"
 publish = false
 
-# Native Windows application.
+# Native Windows and macOS application.
 [features]
 default = ["native-core", "vendor-video"]
 vendor-video = ["dep:evoparseq-video"]
@@ -18,8 +18,6 @@ anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0.154"
 sha2 = "0.10"
-# Already present through PNG; also decode the pinned optional NVIDIA SDK payload.
-flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 getrandom = "0.3"
 bytes = "1"
 zeroize = { version = "1", optional = true }
@@ -45,11 +43,23 @@ lto = "thin"
 codegen-units = 1
 opt-level = "s"
 
-[target.'cfg(windows)'.dependencies]
-windows-core = "=0.62.2"
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
 evoparseq-bud = { path = "crates/bud", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+# Already present through PNG; also decode the pinned optional NVIDIA SDK payload.
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+windows-core = "=0.62.2"
 windows = { version = "=0.62.2", features = ["Wdk_Graphics_Direct3D", "Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D_Fxc", "Win32_Graphics_Direct3D10", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_Media_MediaFoundation", "Win32_Media_Audio", "Win32_System_Threading", "Win32_System_Performance", "Win32_System_ProcessStatus", "Win32_Security", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Ole", "Win32_System_Variant"] }
 windows-sys = { version = "0.61", features = [ "Win32_Foundation", "Win32_Devices_Display", "Win32_Graphics_Gdi", "Win32_System_Power", "Win32_System_LibraryLoader", "Win32_UI_WindowsAndMessaging", "Win32_UI_Controls", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Com", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_UI_Shell"] }
+
+# Documented AppKit, Core Animation and Security framework bindings.
+[target.'cfg(target_os = "macos")'.dependencies]
+dispatch2 = "0.3"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["std", "NSString", "NSArray", "NSData", "NSDate", "NSRunLoop", "NSThread", "NSGeometry", "NSObject", "NSURL", "NSValue"] }
+objc2-app-kit = { version = "0.3", features = ["std", "NSApplication", "NSWindow", "NSView", "NSResponder", "NSEvent", "NSMenu", "NSMenuItem", "NSColor", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSCursor", "NSPasteboard", "NSAlert", "NSButton", "NSButtonCell", "NSControl", "NSTextField", "NSSecureTextField", "NSPopUpButton", "NSScreen", "NSFont", "NSText", "NSTextView", "NSScrollView", "NSClipView", "NSRunningApplication", "NSGraphics", "NSCell", "NSActionCell", "NSTabView", "NSTabViewItem", "NSStackView", "NSLayoutConstraint", "NSWorkspace", "NSTextStorage", "NSAttributedString"] }
+ring = "0.17"
 
 # Isolated DTLS curve upgrade and SCTP-only corrections; preserve upstream RTP behavior.
 [patch.crates-io]
@@ -61,6 +71,7 @@ turn = { path = "vendor/turn-0.11.0" }
 [patch."https://github.com/nomi-san/lowlat"]
 lowlat-drivers = { path = "vendor/lowlat-drivers" }
 lowlat-core = { path = "crates/bud/vendor/lowlat-core" }
+lowlat-common = { path = "crates/bud/vendor/lowlat-common" }
 
 [target.'cfg(windows)'.dependencies.evoparseq-video]
 path = "crates/video"

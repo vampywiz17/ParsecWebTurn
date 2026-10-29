@@ -65,6 +65,12 @@ improve enlarged video but uses more GPU resources and may add latency.
 The animation illustrates processing order, not measured speed. Check
 **Connection stats** for the mode actually in use.
 
+## macOS (experimental)
+
+A native macOS build shares the same Rust core and replaces only the platform
+adapters (AppKit, VideoToolbox, Core Audio, Keychain). See
+[docs/macos.md](docs/macos.md) for building, packaging and current limits.
+
 ## Download and run
 
 1. Download `EvoParseq-v0.9.5-dev.2-win64.zip` from the
