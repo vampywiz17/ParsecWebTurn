@@ -1,0 +1,15 @@
+[package]
+name = "lowlat-crypto"
+version = "0.0.0"
+publish = false
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/nomi-san/lowlat"
+authors = ["Nguyen Duy <wuuyi123@gmail.com>"]
+
+[dependencies]
+# Same entropy and record-cipher providers as the pinned upstream revision.
+getrandom = "0.2"
+ring = { version = "0.17", default-features = false }
+lowlat-core = { path = "../lowlat-core" }

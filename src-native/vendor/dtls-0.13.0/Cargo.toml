@@ -43,9 +43,6 @@ version = "0.10"
 [dependencies.async-trait]
 version = "0.1"
 
-[dependencies.bincode]
-version = "1"
-
 [dependencies.byteorder]
 version = "1"
 

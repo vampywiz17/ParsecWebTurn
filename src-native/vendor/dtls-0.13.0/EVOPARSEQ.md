@@ -18,12 +18,30 @@ Local changes:
 - Tests compare wire-format points and shared secrets with ring for P-256,
   P-384 and X25519, and reject malformed/off-curve NIST public keys.
 
-The public DTLS 0.13 API, record ciphers, certificate/fingerprint validation,
+The active DTLS 0.13 connection API, record ciphers, certificate/fingerprint validation,
 curve identifiers/order, ICE integration, SCTP, retransmission timers and
 queues are unchanged. AES/SHA/HMAC record processing keeps its existing
 versions. This is not a dimpl migration and makes no throughput/latency claim.
 
-The application and isolated TURN tests both select this patch. The separate
-BUD `lowlat-crypto` dependency is unchanged and still resolves its older
-P-256/elliptic-curve/crypto-bigint chain; the whole application must not be
-described as free of that advisory solely because DTLS was updated.
+The application and isolated TURN tests both select this patch.
+
+## Omitted binary state export/import
+
+`State::marshal_binary` and `State::unmarshal_binary` have no callers in the
+application, vendored WebRTC transport or retained DTLS sources/tests. They
+export/import a local connection snapshot; they are not DTLS record/handshake
+parsers. Those two unused methods and their exclusive `bincode` dependency
+are omitted, together with the unused serde derives on `SerializedState`.
+This is a deliberate reduction of the vendored API, not a serialization-format
+migration. External binary-state export consumers cannot use this patch.
+
+The internal `State::clone` -> `serialize`/`deserialize` snapshot remains
+unchanged: `DTLSConn::connection_state` uses it, including during the WebRTC
+remote-certificate/fingerprint checks. `init_cipher_suite`, key export and
+`KeyLogData` serialization also remain. A regression test verifies snapshot
+identity, exported key material and independent sequence/certificate storage.
+
+The BUD dependency now uses the same pinned lowlat credentials/record source
+without its unrelated browser-certificate module. See
+`src-native/crates/bud/vendor/lowlat-crypto/EVOPARSEQ.md`. No advisory exception
+or replacement crypto implementation is added.

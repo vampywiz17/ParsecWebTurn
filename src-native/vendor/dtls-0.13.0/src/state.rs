@@ -17,7 +17,8 @@ use super::handshake::handshake_random::*;
 use super::prf::*;
 use crate::error::*;
 
-// State holds the dtls connection state and implements both encoding.BinaryMarshaler and encoding.BinaryUnmarshaler
+// State holds the DTLS connection state. Internal snapshots are still used by
+// DTLSConn::connection_state; unused binary state export/import is omitted.
 pub struct State {
     pub(crate) local_epoch: Arc<AtomicU16>,
     pub(crate) remote_epoch: Arc<AtomicU16>,
@@ -50,7 +51,7 @@ pub struct State {
     //pub(crate) replay_detector: Vec<Box<dyn ReplayDetector + Send + Sync>>,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
+#[derive(PartialEq, Debug)]
 struct SerializedState {
     local_epoch: u16,
     remote_epoch: u16,
@@ -235,28 +236,6 @@ impl State {
         }
     }
 
-    // marshal_binary is a binary.BinaryMarshaler.marshal_binary implementation
-    pub async fn marshal_binary(&self) -> Result<Vec<u8>> {
-        let serialized = self.serialize().await?;
-
-        match bincode::serialize(&serialized) {
-            Ok(enc) => Ok(enc),
-            Err(err) => Err(Error::Other(err.to_string())),
-        }
-    }
-
-    // unmarshal_binary is a binary.BinaryUnmarshaler.unmarshal_binary implementation
-    pub async fn unmarshal_binary(&mut self, data: &[u8]) -> Result<()> {
-        let serialized: SerializedState = match bincode::deserialize(data) {
-            Ok(dec) => dec,
-            Err(err) => return Err(Error::Other(err.to_string())),
-        };
-        self.deserialize(&serialized).await?;
-        self.init_cipher_suite().await?;
-
-        Ok(())
-    }
-
     /// key_log_data returns the key log data for the current state.
     pub fn key_log_data(&self) -> Result<KeyLogData> {
         let mut local_random = vec![];
@@ -329,5 +308,50 @@ impl KeyingMaterialExporter for State {
         } else {
             Err(CipherSuiteUnset)
         }
+    }
+}
+
+#[cfg(test)]
+mod snapshot_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn connection_state_snapshot_preserves_identity_keys_and_independent_counters() {
+        let mut state = State {
+            local_epoch: Arc::new(AtomicU16::new(1)),
+            remote_epoch: Arc::new(AtomicU16::new(1)),
+            local_sequence_number: Arc::new(Mutex::new(vec![3, 7])),
+            master_secret: vec![0x42; 48],
+            cipher_suite: Arc::new(Mutex::new(Some(
+                cipher_suite_for_id(CipherSuiteId::Tls_Ecdhe_Ecdsa_With_Aes_128_Gcm_Sha256)
+                    .unwrap(),
+            ))),
+            peer_certificates: vec![vec![1, 2, 3]],
+            identity_hint: vec![4, 5, 6],
+            is_client: true,
+            ..Default::default()
+        };
+        let mut snapshot = state.clone().await;
+        assert_eq!(
+            state.serialize().await.unwrap(),
+            snapshot.serialize().await.unwrap()
+        );
+        assert!(!Arc::ptr_eq(&state.cipher_suite, &snapshot.cipher_suite));
+        state.init_cipher_suite().await.unwrap();
+        snapshot.init_cipher_suite().await.unwrap();
+        assert_eq!(
+            state
+                .export_keying_material("snapshot-fixture", &[], 32)
+                .await
+                .unwrap(),
+            snapshot
+                .export_keying_material("snapshot-fixture", &[], 32)
+                .await
+                .unwrap()
+        );
+        snapshot.local_sequence_number.lock().await[1] = 99;
+        assert_eq!(state.local_sequence_number.lock().await[1], 7);
+        snapshot.peer_certificates[0][0] = 9;
+        assert_eq!(state.peer_certificates[0][0], 1);
     }
 }

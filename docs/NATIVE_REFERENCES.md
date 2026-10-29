@@ -36,7 +36,9 @@ that every compressed stream will decode successfully.
   retain their upstream licenses and document changes in `EVOPARSEQ.md`.
   The DTLS 0.13 patch upgrades its NIST curve dependencies without replacing
   the protocol engine; see `src-native/vendor/dtls-0.13.0/EVOPARSEQ.md` for the
-  exact scope and the unchanged older BUD cryptography dependency.
+  exact scope and omitted, unused binary state export/import. The pinned BUD
+  crypto subset retains its credentials and ring record code while omitting
+  lowlat's unrelated browser-certificate generator; see its `EVOPARSEQ.md`.
 - Vendor codec documentation and runtime capability queries. Device vendor
   names alone never establish an implemented decoder/output format.
 

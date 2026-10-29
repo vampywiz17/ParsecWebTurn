@@ -1,0 +1,361 @@
+//! Credentials and key material: the only entropy source in the workspace.
+//!
+//! It exists as its own crate for one reason. `lowlat-core` must never contain
+//! a random number generator, because determinism is what makes replay and
+//! simulation testing possible, and that rule is enforced by `no_std` rather
+//! than by review. Everything above the core still needs entropy -- a session
+//! key, a check password, the seed a transaction identifier is derived from --
+//! and putting it in whichever crate happened to need it first would scatter
+//! the one thing worth keeping in a single audited place.
+//!
+//! Nothing here invents a primitive. Randomness comes from the platform, and
+//! the encodings below are encodings, not cryptography. The record cipher
+//! ([`record`]) lives here for the core's sake too: the library it comes from
+//! carries a random source, so the core borrows it rather than holding it.
+
+#![forbid(unsafe_code)]
+
+pub mod record;
+
+pub use record::Record;
+
+use core::fmt;
+
+/// A credential set for one attempt, in the form signaling carries.
+///
+/// Sizes are not arbitrary and are not ours to choose: a peer reads these as
+/// opaque strings, so they must match what one produces or they will be
+/// rejected on length before anything looks at their contents.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Credentials {
+    /// base64 of 6 bytes, 8 characters and no padding: `=` is not a
+    /// character a peer's credential grammar admits.
+    pub ufrag: String,
+    /// base64 of 24 bytes, 32 characters.
+    pub pwd: String,
+    /// hex of 32 bytes, 64 characters.
+    pub fingerprint: String,
+    /// hex of 127 bytes, 254 characters. Far longer than the cipher consumes;
+    /// see [`key_material`].
+    pub aes256: String,
+}
+
+/// Never renders the material it holds.
+///
+/// A credential set reaches a log only by accident, and the accident is worth
+/// making impossible rather than unlikely.
+impl fmt::Debug for Credentials {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Credentials")
+            .field("ufrag", &"<redacted>")
+            .field("pwd", &"<redacted>")
+            .field("fingerprint", &"<redacted>")
+            .field("aes256", &"<redacted>")
+            .finish()
+    }
+}
+
+/// What went wrong.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Error {
+    /// The platform would not supply entropy. Not recoverable by retrying.
+    Entropy,
+    /// Key material was too short or not hexadecimal.
+    Material,
+    /// The process certificate could not be made.
+    Certificate,
+    /// A fingerprint that is not a SHA-256 digest.
+    Fingerprint,
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Entropy => write!(f, "the platform supplied no entropy"),
+            Self::Material => write!(f, "key material is malformed"),
+            Self::Certificate => write!(f, "the certificate could not be made"),
+            Self::Fingerprint => write!(f, "the fingerprint is not a sha-256 digest"),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+/// Bytes of key the cipher takes.
+pub const KEY_LEN: usize = 32;
+
+/// Bytes of nonce prefix ahead of the counter.
+///
+/// **Not zeros.** The prefix is credential material, and a nonce built from
+/// four zero bytes and a counter authenticates nothing a peer will accept.
+pub const NONCE_PREFIX_LEN: usize = 4;
+
+/// Random bytes the media credential carries.
+///
+/// Only the leading key-plus-prefix bytes are ever used. The field is this
+/// long because that is what a peer emits, and a host that emits a shorter one
+/// is proposing material a peer may reject on length alone.
+const AES_MATERIAL: usize = 127;
+
+/// Fill a buffer with platform entropy.
+pub fn fill(buf: &mut [u8]) -> Result<(), Error> {
+    getrandom::getrandom(buf).map_err(|_| Error::Entropy)
+}
+
+/// A fresh credential set.
+pub fn credentials() -> Result<Credentials, Error> {
+    let mut ufrag = [0u8; 6];
+    let mut pwd = [0u8; 24];
+    let mut fingerprint = [0u8; 32];
+    let mut aes = [0u8; AES_MATERIAL];
+    fill(&mut ufrag)?;
+    fill(&mut pwd)?;
+    fill(&mut fingerprint)?;
+    fill(&mut aes)?;
+    Ok(Credentials {
+        ufrag: base64(&ufrag),
+        pwd: base64(&pwd),
+        fingerprint: hex(&fingerprint),
+        aes256: hex(&aes),
+    })
+}
+
+/// An identifier for one application on one machine: HMAC-SHA256 keyed by the
+/// machine's own identifier, over the application's. The same for the pair at
+/// every run, and nothing of the machine's identifier can be read back from it,
+/// which is the only form such an identifier may leave the machine in.
+pub fn app_specific(machine: &[u8], application: &[u8]) -> [u8; 32] {
+    let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, machine);
+    let tag = ring::hmac::sign(&key, application);
+    let mut out = [0u8; 32];
+    for (slot, byte) in out.iter_mut().zip(tag.as_ref()) {
+        *slot = *byte;
+    }
+    out
+}
+
+/// The seed a connectivity attempt derives its transaction identifiers from.
+///
+/// The core takes this rather than reading a generator, which is what lets a
+/// failing punch be replayed from one value.
+pub fn transaction_seed() -> Result<[u8; 16], Error> {
+    let mut seed = [0u8; 16];
+    fill(&mut seed)?;
+    Ok(seed)
+}
+
+/// Decode the key and nonce prefix a session is encrypted with.
+///
+/// **Only the leading bytes of the credential are consumed**, and the rest is
+/// ignored. A check written to the length of the key rather than the length of
+/// the field rejects every real credential, because the field is far longer.
+///
+/// **The prefix follows the key, so its offset moves with the cipher.**
+/// `key_len` is the cipher's: 32 takes the media key, and 16 takes the
+/// 64-character fingerprint the legacy path keys from, whose prefix sits at
+/// byte 16. Only the first `key_len` bytes of the returned key are the key;
+/// the rest stay zero.
+pub fn key_material(
+    material: &str,
+    key_len: usize,
+) -> Result<([u8; KEY_LEN], [u8; NONCE_PREFIX_LEN]), Error> {
+    if key_len > KEY_LEN {
+        return Err(Error::Material);
+    }
+    let consumed = key_len + NONCE_PREFIX_LEN;
+    let bytes = material.as_bytes();
+    if bytes.len() < consumed * 2 {
+        return Err(Error::Material);
+    }
+    let mut key = [0u8; KEY_LEN];
+    let mut prefix = [0u8; NONCE_PREFIX_LEN];
+    for index in 0..consumed {
+        let high = nibble(bytes[index * 2])?;
+        let low = nibble(bytes[index * 2 + 1])?;
+        let byte = (high << 4) | low;
+        if index < key_len {
+            key[index] = byte;
+        } else {
+            prefix[index - key_len] = byte;
+        }
+    }
+    Ok((key, prefix))
+}
+
+pub(crate) fn nibble(c: u8) -> Result<u8, Error> {
+    match c {
+        b'0'..=b'9' => Ok(c - b'0'),
+        b'a'..=b'f' => Ok(c - b'a' + 10),
+        b'A'..=b'F' => Ok(c - b'A' + 10),
+        _ => Err(Error::Material),
+    }
+}
+
+/// Lowercase hex, which is the case a peer emits.
+pub fn hex(bytes: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push(char::from(DIGITS[usize::from(byte >> 4)]));
+        out.push(char::from(DIGITS[usize::from(byte & 0x0F)]));
+    }
+    out
+}
+
+/// Standard base64 with padding, per RFC 4648 section 4.
+pub fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = u32::from(chunk[0]);
+        let b1 = chunk.get(1).copied().map_or(0, u32::from);
+        let b2 = chunk.get(2).copied().map_or(0, u32::from);
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        for slot in 0..4 {
+            if slot <= chunk.len() {
+                let index = (triple >> (18 - slot * 6)) & 0x3F;
+                out.push(char::from(ALPHABET[index as usize]));
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Bytes of the credential the 256-bit cipher consumes.
+    const CONSUMED: usize = KEY_LEN + NONCE_PREFIX_LEN;
+
+    /// RFC 4648 section 10. An encoder that is wrong at a padding boundary
+    /// produces a fragment a peer rejects, and only the boundaries show it.
+    #[test]
+    fn base64_matches_the_published_vectors() {
+        for (input, expected) in [
+            ("", ""),
+            ("f", "Zg=="),
+            ("fo", "Zm8="),
+            ("foo", "Zm9v"),
+            ("foob", "Zm9vYg=="),
+            ("fooba", "Zm9vYmE="),
+            ("foobar", "Zm9vYmFy"),
+        ] {
+            assert_eq!(base64(input.as_bytes()), expected, "input {input:?}");
+        }
+    }
+
+    /// RFC 4231's second case, the one whose key is shorter than a block.
+    #[test]
+    fn an_app_specific_identifier_is_the_published_hmac() {
+        assert_eq!(
+            hex(&app_specific(b"Jefe", b"what do ya want for nothing?")),
+            "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+        );
+    }
+
+    #[test]
+    fn hex_is_lowercase_and_fixed_width() {
+        assert_eq!(hex(&[0x00, 0x0f, 0xa5, 0xff]), "000fa5ff");
+    }
+
+    /// The wire lengths are what a peer reads. They are asserted here because
+    /// a credential of the wrong length is refused before anything inspects it.
+    #[test]
+    fn credentials_have_the_lengths_a_peer_expects() {
+        let creds = credentials().expect("entropy");
+        assert_eq!(creds.ufrag.len(), 8);
+        assert_eq!(creds.pwd.len(), 32);
+        for text in [&creds.ufrag, &creds.pwd] {
+            assert!(
+                text.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/'),
+                "{text}"
+            );
+        }
+        assert_eq!(creds.fingerprint.len(), 64);
+        assert_eq!(creds.aes256.len(), 254);
+    }
+
+    /// Two sets in a row must differ, or the generator is not generating.
+    /// A constant passes every length check above.
+    #[test]
+    fn credentials_are_not_constant() {
+        let first = credentials().expect("entropy");
+        let second = credentials().expect("entropy");
+        assert_ne!(first.aes256, second.aes256);
+        assert_ne!(first.pwd, second.pwd);
+        assert_ne!(transaction_seed().unwrap(), transaction_seed().unwrap());
+    }
+
+    /// The credential is far longer than the cipher consumes, and the leading
+    /// portion is the whole of it. *Named regression test.*
+    #[test]
+    fn only_the_leading_material_is_consumed() {
+        let creds = credentials().expect("entropy");
+        let (key, prefix) = key_material(&creds.aes256, KEY_LEN).expect("material");
+
+        let leading = &creds.aes256[..(KEY_LEN + NONCE_PREFIX_LEN) * 2];
+        assert_eq!(hex(&key), leading[..KEY_LEN * 2]);
+        assert_eq!(hex(&prefix), leading[KEY_LEN * 2..]);
+
+        // Anything past the consumed prefix may differ without changing the key.
+        let mut altered = creds.aes256.clone();
+        altered.replace_range(CONSUMED * 2.., &"0".repeat(altered.len() - CONSUMED * 2));
+        let (same_key, same_prefix) = key_material(&altered, KEY_LEN).expect("material");
+        assert_eq!(same_key, key);
+        assert_eq!(same_prefix, prefix);
+    }
+
+    /// The prefix is credential material, not zeros. A nonce built from four
+    /// zero bytes authenticates nothing a peer accepts. *Named regression test.*
+    #[test]
+    fn the_nonce_prefix_comes_from_the_credential() {
+        let material = format!("{}aabbccdd{}", "11".repeat(KEY_LEN), "ff".repeat(64));
+        let (key, prefix) = key_material(&material, KEY_LEN).expect("material");
+        assert_eq!(key, [0x11u8; KEY_LEN]);
+        assert_eq!(prefix, [0xaa, 0xbb, 0xcc, 0xdd]);
+    }
+
+    /// The legacy path: a 64-character fingerprint is 16 bytes of key with
+    /// the prefix at byte 16, and the trailing 12 bytes are ignored.
+    #[test]
+    fn a_fingerprint_decodes_under_the_legacy_key_length() {
+        let material = format!("{}aabbccdd{}", "22".repeat(16), "ee".repeat(12));
+        assert_eq!(material.len(), 64);
+
+        let (key, prefix) = key_material(&material, 16).expect("material");
+        assert_eq!(&key[..16], &[0x22u8; 16]);
+        assert_eq!(&key[16..], &[0u8; 16], "bytes past the key must stay zero");
+        assert_eq!(prefix, [0xaa, 0xbb, 0xcc, 0xdd]);
+
+        // The same string is too short for the 256-bit form, exactly as
+        // before: the cipher is never inferred from the length.
+        assert_eq!(
+            key_material(&material, KEY_LEN).unwrap_err(),
+            Error::Material
+        );
+    }
+
+    #[test]
+    fn short_or_non_hex_material_is_refused() {
+        assert_eq!(key_material("abcd", KEY_LEN).unwrap_err(), Error::Material);
+        assert_eq!(key_material("abcd", 16).unwrap_err(), Error::Material);
+        assert_eq!(
+            key_material(&"zz".repeat(CONSUMED), KEY_LEN).unwrap_err(),
+            Error::Material
+        );
+    }
+
+    /// Credentials must not render their contents, however they are formatted.
+    #[test]
+    fn credentials_do_not_print_their_material() {
+        let creds = credentials().expect("entropy");
+        let rendered = format!("{creds:?}");
+        assert!(!rendered.contains(&creds.aes256), "{rendered}");
+        assert!(!rendered.contains(&creds.pwd), "{rendered}");
+    }
+}

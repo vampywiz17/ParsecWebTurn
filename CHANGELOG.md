@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Omit lowlat's unused browser-certificate generator and DTLS binary state
+  export/import from the native client dependencies. Preserve the pinned BUD
+  credential/ring AES-GCM code and WebRTC's in-memory connection snapshots;
+  remove the old crypto-bigint and bincode chains without advisory exceptions.
+
 - Resolve strict Clippy findings with behavior-preserving source/test cleanup;
   document intentionally unread platform-event payloads without removing their
   contract. Update only the isolated TURN test's rustls/webpki lock entries to
