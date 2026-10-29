@@ -128,6 +128,60 @@ fails; disable the option and reconnect to restore normal input. Local menus
 remain accessible, and focus loss/disconnect releases held inputs.
 See [HID behavior and scope](docs/usb-hid-input.md).
 
+## TURN relay: connect through restrictive networks
+
+![Animated TURN relay: video and audio travel from the host through Cloudflare to the client; input travels back.](assets/turn-relay.gif)
+
+TURN forwards encrypted session traffic when NAT or a firewall prevents a direct
+connection. The stock Parsec host stays unmodified. The client-to-relay leg can
+use UDP, TLS or TCP; the relay-to-host leg uses UDP. Direct connections remain
+available unless **Force TURN relay** is enabled.
+
+**A relay does not necessarily mean higher latency.** When the route through
+the relay is better than the available direct or VPN route, TURN can deliver
+comparable or even lower round-trip time (RTT). This depends on ISP peering,
+relay location and congestion; it is not a guaranteed improvement. Compare the
+actual routes in **Connection stats**. Cloudflare describes its routing in
+[TURN and anycast](https://blog.cloudflare.com/webrtc-turn-using-anycast/).
+**No separate VPN, tunnel client, driver or relay helper needs to be installed
+on the client PC:** TURN support is built into the application.
+
+**Cloudflare Realtime TURN is our recommended relay.** A free Cloudflare account
+is sufficient, including an account already used for Zero Trust Free. TURN is a
+separate **Realtime** service: no paid Zero Trust plan or Cloudflare Tunnel is
+required.
+
+1. Sign in to the [Cloudflare dashboard](https://dash.cloudflare.com/), select
+   your account, and open **Realtime → TURN Server → Create** (or search for
+   **TURN Server** in the dashboard).
+2. Give the TURN key a name and create it. Copy its **TURN Key ID / Token ID**
+   and **API Token** from the resulting credentials panel.
+3. In the client's **Settings → Network**, select **Cloudflare TURN**, enter
+   the key ID and API token, then save and reconnect. The client generates
+   temporary TURN credentials automatically. Enable **Force TURN relay** if you
+   want to require the relay; **Connection stats** shows the route actually used.
+
+Keep the API token private; do not attach it or `settings.json` to issues.
+See Cloudflare's [setup guide](https://developers.cloudflare.com/realtime/turn/generate-credentials/)
+and [dashboard example](https://github.com/cloudflare/speedtest/tree/main/example/turn-worker#creating-a-new-realtime-turn-app).
+
+**Free allowance: 1 TB (1,000 GB) per month**, shared with Realtime SFU.
+At a constant average relayed bitrate, this is approximately:
+
+| Average relayed traffic | Hours/month | Hours/day over 30 days |
+| --- | ---: | ---: |
+| 10 Mbit/s | 222 | 7.4 |
+| 20 Mbit/s | 111 | 3.7 |
+| 30 Mbit/s | 74 | 2.5 |
+| 50 Mbit/s | 44 | 1.5 |
+
+Estimates use decimal GB and exclude audio/control/protocol overhead, which
+reduces the available streaming time. Actual usage varies with the stream;
+direct traffic does not consume TURN allowance. Cloudflare meters traffic sent
+from its edge to the TURN client. Usage above the shared allowance is currently
+**$0.05/GB**; check [current pricing](https://developers.cloudflare.com/realtime/sfu/platform/pricing/)
+and the [TURN billing FAQ](https://developers.cloudflare.com/realtime/turn/faq/).
+
 ## Statistics and troubleshooting
 
 **Connection stats** shows route, RTT, incoming/outgoing traffic, decoded FPS,
