@@ -35,10 +35,12 @@ use webrtc::{
     },
 };
 
+type Publish = dyn Fn(Option<&Description>) -> Result<bool> + Send + Sync;
+
 #[derive(Clone)]
-pub struct Output(Arc<dyn Fn(Option<&Description>) -> Result<bool> + Send + Sync>);
+pub struct Output(Arc<Publish>);
 impl Output {
-    pub fn new(publish: Arc<dyn Fn(Option<&Description>) -> Result<bool> + Send + Sync>) -> Self {
+    pub fn new(publish: Arc<Publish>) -> Self {
         Self(publish)
     }
     pub fn finish(&self, credentials: Option<&Description>) -> Result<bool> {

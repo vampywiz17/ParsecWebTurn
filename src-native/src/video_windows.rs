@@ -3195,6 +3195,14 @@ impl Renderer {
     }
 }
 
+pub(crate) fn display_extents(width: u32, height: u32, rotation: u8) -> (u32, u32) {
+    if rotation & 1 != 0 {
+        (height, width)
+    } else {
+        (width, height)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3396,13 +3404,5 @@ mod tests {
         let error = presentation_status(DXGI_ERROR_DEVICE_REMOVED).unwrap_err();
         assert_eq!(error.stage, "video-present");
         assert!(error.hresult.is_some());
-    }
-}
-
-pub(crate) fn display_extents(width: u32, height: u32, rotation: u8) -> (u32, u32) {
-    if rotation & 1 != 0 {
-        (height, width)
-    } else {
-        (width, height)
     }
 }

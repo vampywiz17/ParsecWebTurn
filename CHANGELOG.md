@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Resolve strict Clippy findings with behavior-preserving source/test cleanup;
+  document intentionally unread platform-event payloads without removing their
+  contract. Update only the isolated TURN test's rustls/webpki lock entries to
+  0.23.46/0.103.16; production dependency locks remain unchanged.
+
 - Add read-only Session display/FPS advice, showing configured client refresh,
   requested and host-reported FPS, and measured decoded FPS separately. Suggest
   compatible Windows-listed client refresh rates without changing display modes

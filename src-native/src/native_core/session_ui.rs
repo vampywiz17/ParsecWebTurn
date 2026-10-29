@@ -745,7 +745,7 @@ pub unsafe fn toggle(
         "STATIC",
         "Decode CPU N/A | Encode N/A\nRTT N/A | RX N/A | FPS N/A",
         METRICS as usize,
-        SS_OWNERDRAW as u32,
+        SS_OWNERDRAW,
         [24, 66, 370, 82],
     );
     control(

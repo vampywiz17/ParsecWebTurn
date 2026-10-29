@@ -185,7 +185,7 @@ unsafe fn open_page(parent: HWND, pages: Arc<Pages>, mode: Mode) -> HWND {
         .handle(mode)
         .store(hwnd as usize, Ordering::Release);
     add(hwnd, "STATIC", mode.heading(), 1, 0, page.heading);
-    let mark = add(hwnd, "STATIC", "", 6, SS_ICON as u32, page.font);
+    let mark = add(hwnd, "STATIC", "", 6, SS_ICON, page.font);
     SendMessageW(
         mark,
         STM_SETICON,

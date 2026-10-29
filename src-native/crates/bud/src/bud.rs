@@ -375,6 +375,15 @@ pub struct Snapshot {
     pub input_drops: u32,
 }
 
+#[cfg(feature = "native-core")]
+pub fn cursor_message(bytes: &[u8]) -> Result<lowlat_core::cursor::Message<'_>> {
+    let control =
+        lowlat_core::control::parse(bytes).map_err(|_| anyhow!("Invalid cursor control"))?;
+    lowlat_core::cursor::parse(&control).map_err(|_| anyhow!("Invalid host cursor"))
+}
+#[cfg(feature = "native-core")]
+pub use lowlat_core::cursor::Flags as CursorFlags;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -451,12 +460,3 @@ mod tests {
         );
     }
 }
-
-#[cfg(feature = "native-core")]
-pub fn cursor_message(bytes: &[u8]) -> Result<lowlat_core::cursor::Message<'_>> {
-    let control =
-        lowlat_core::control::parse(bytes).map_err(|_| anyhow!("Invalid cursor control"))?;
-    lowlat_core::cursor::parse(&control).map_err(|_| anyhow!("Invalid host cursor"))
-}
-#[cfg(feature = "native-core")]
-pub use lowlat_core::cursor::Flags as CursorFlags;

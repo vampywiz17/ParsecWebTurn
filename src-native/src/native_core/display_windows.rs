@@ -37,12 +37,14 @@ unsafe fn refresh(device: &[u16; 32]) -> Option<f64> {
         }
         let mut found: Option<f64> = None;
         for path in paths.iter().take(path_count as usize) {
-            let mut source = DISPLAYCONFIG_SOURCE_DEVICE_NAME::default();
-            source.header = DISPLAYCONFIG_DEVICE_INFO_HEADER {
-                r#type: DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
-                size: size_of::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>() as u32,
-                adapterId: path.sourceInfo.adapterId,
-                id: path.sourceInfo.id,
+            let mut source = DISPLAYCONFIG_SOURCE_DEVICE_NAME {
+                header: DISPLAYCONFIG_DEVICE_INFO_HEADER {
+                    r#type: DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
+                    size: size_of::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>() as u32,
+                    adapterId: path.sourceInfo.adapterId,
+                    id: path.sourceInfo.id,
+                },
+                ..Default::default()
             };
             if DisplayConfigGetDeviceInfo(&mut source.header) != 0
                 || source.viewGdiDeviceName != *device

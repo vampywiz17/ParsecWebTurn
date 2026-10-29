@@ -380,7 +380,7 @@ unsafe extern "system" fn proc(hwnd: HWND, message: u32, wp: WPARAM, lp: LPARAM)
                 layout_tabs(hwnd, page);
                 return 0;
             }
-            WM_DRAWITEM if wp >= TAB_BASE && wp < TAB_BASE + 5 => {
+            WM_DRAWITEM if (TAB_BASE..TAB_BASE + 5).contains(&wp) => {
                 draw_tab(&*(lp as *const DRAWITEMSTRUCT), page);
                 return 1;
             }

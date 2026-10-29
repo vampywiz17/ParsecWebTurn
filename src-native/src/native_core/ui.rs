@@ -959,7 +959,7 @@ pub(crate) unsafe fn capture_fixture(hwnd: HWND, path: &std::path::Path) -> Resu
     SelectObject(dc, old);
     DeleteObject(bitmap);
     DeleteDC(dc);
-    for p in bytes.chunks_exact_mut(4) {
+    for p in bytes.as_chunks_mut::<4>().0 {
         p.swap(0, 2);
         p[3] = 255;
     }

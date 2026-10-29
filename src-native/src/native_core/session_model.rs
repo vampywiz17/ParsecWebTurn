@@ -15,6 +15,12 @@ use std::sync::{
 pub enum Event {
     NativeSession(Command),
     Shortcut(crate::input::Shortcut),
+    // Keep the platform event payload; host-size matching queries the current
+    // viewport rather than using possibly stale dimensions from the input FIFO.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "resize handling reads the current viewport")
+    )]
     Size(i32, i32),
     Focus(bool),
     Clipboard,
@@ -26,6 +32,12 @@ pub enum Event {
     RelativeMotion(i32, i32),
     RelativeMode(bool),
     Button(bool, i32, i32, i32),
+    // Character events remain part of the platform contract and its UTF-16
+    // tests. Remote typing uses physical USB usages and the host's layout.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "remote typing uses physical key events")
+    )]
     Text(u32),
     Key(bool, &'static str, i32),
     Scroll(i32, i32),

@@ -205,6 +205,17 @@ async fn relay(
     consumer.unpark();
 }
 
+impl Drop for Socket {
+    fn drop(&mut self) {
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -306,15 +317,5 @@ mod tests {
             UpgradeFailure::from_error(&io).to_string(),
             "network_or_tls"
         );
-    }
-}
-impl Drop for Socket {
-    fn drop(&mut self) {
-        if let Some(stop) = self.stop.take() {
-            let _ = stop.send(());
-        }
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
     }
 }

@@ -79,7 +79,7 @@ fn reuse_from(root: &Path, candidates: &[PathBuf]) -> Result<bool> {
             continue;
         }
         verify(&source, DLL_SIZE, DLL_HASH)?;
-        std::fs::create_dir_all(&root)?;
+        std::fs::create_dir_all(root)?;
         let temporary = Temporary(root.join("runtime.tmp"));
         std::fs::copy(&source, &temporary.0)?;
         verify(&temporary.0, DLL_SIZE, DLL_HASH)?;
@@ -184,7 +184,7 @@ mod tests {
         let target = directory_under(&fixture.join("local-app-data"));
         std::fs::create_dir_all(&old).unwrap();
         std::fs::write(old.join("nvngx_vsr.dll"), b"not NVIDIA code").unwrap();
-        assert!(reuse_from(&target, &[old.clone()]).is_err());
+        assert!(reuse_from(&target, std::slice::from_ref(&old)).is_err());
         assert!(!target.exists());
         assert!(old.join("nvngx_vsr.dll").exists());
         std::fs::remove_dir_all(fixture).unwrap();
@@ -215,7 +215,7 @@ mod tests {
         let previous = path.with_extension("old");
         std::fs::create_dir_all(&previous).unwrap();
         std::fs::rename(&path, previous.join("nvngx_vsr.dll")).unwrap();
-        assert!(reuse_from(&migrated, &[previous.clone()]).unwrap());
+        assert!(reuse_from(&migrated, std::slice::from_ref(&previous)).unwrap());
         verify(&migrated.join("nvngx_vsr.dll"), DLL_SIZE, DLL_HASH).unwrap();
         assert!(previous.join("nvngx_vsr.dll").exists());
         std::fs::remove_dir_all(previous).unwrap();

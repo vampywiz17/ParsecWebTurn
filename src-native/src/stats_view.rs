@@ -743,7 +743,7 @@ mod tests {
         };
         let all = make().rows;
         let pages: Vec<_> = Tab::ALL.into_iter().map(|t| make().select(t)).collect();
-        assert!(pages[0].cards.len() > 0);
+        assert!(!pages[0].cards.is_empty());
         assert!(pages[1..].iter().all(|p| p.cards.is_empty()));
         for row in all {
             assert!(
