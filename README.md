@@ -130,7 +130,7 @@ See [HID behavior and scope](docs/usb-hid-input.md).
 
 ## TURN relay: connect through restrictive networks
 
-![Animated TURN relay: video and audio travel from the host through Cloudflare to the client; input travels back.](assets/turn-relay.gif)
+![Animated TURN relay: video and audio travel from the host through Cloudflare to the client; input travels back.](assets/parsecwebturn-turn-relay.gif)
 
 TURN forwards encrypted session traffic when NAT or a firewall prevents a direct
 connection. The stock Parsec host stays unmodified. The client-to-relay leg can
