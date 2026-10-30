@@ -109,6 +109,7 @@ struct Progress {
     channel_messages_received: [u64; 3],
     channel_bytes_received: [u64; 3],
     channel_max_message_bytes: [usize; 3],
+    empty_channel_messages: [u64; 3],
     failure_channel: Option<u16>,
     read_error: Option<&'static str>,
     failure_elapsed_ms: Option<u64>,
@@ -155,6 +156,7 @@ struct Completion {
 
 enum Delivery {
     Queued,
+    EmptyMessage,
     #[cfg(windows)]
     Timing(Option<(Arc<crate::stats::Shared>, u64)>),
     Audio(Option<crate::audio_stream::Sender>),
@@ -168,6 +170,7 @@ impl Delivery {
     fn submit(self, bytes: &[u8]) -> Option<bool> {
         match self {
             Self::Queued => None,
+            Self::EmptyMessage => Some(false),
             #[cfg(windows)]
             Self::Timing(link) => {
                 if let Some((bus, generation)) = link {
@@ -220,6 +223,7 @@ impl Completion {
             "failure_elapsed_ms":p.failure_elapsed_ms,"states":states,
             "received_bytes":p.channel_bytes_received,"received_messages":p.channel_messages_received,
             "max_message_bytes":p.channel_max_message_bytes,
+            "empty_messages":p.empty_channel_messages,
             "queued_control_messages":self.messages.len(),"queued_control_bytes":self.message_bytes,
         })
     }
@@ -285,11 +289,18 @@ impl Completion {
             self.progress.channel_bytes_received[i].saturating_add(bytes.len() as u64);
         self.progress.channel_max_message_bytes[i] =
             self.progress.channel_max_message_bytes[i].max(bytes.len());
+        if bytes.is_empty() {
+            self.progress.empty_channel_messages[i] =
+                self.progress.empty_channel_messages[i].saturating_add(1);
+            if self.discard_unavailable_media {
+                return Some(Delivery::EmptyMessage);
+            }
+        }
         #[cfg(windows)]
         if channel == 0 && self.discard_unavailable_media && crate::frame_timing::is_report(bytes) {
             return Some(Delivery::Timing(self.telemetry.clone()));
         }
-        if channel != 0 && self.discard_unavailable_media {
+        if self.discard_unavailable_media {
             if channel == 1 {
                 return Some(Delivery::Video {
                     inspector: self.video_stream.clone(),
@@ -354,15 +365,19 @@ async fn read_channel(
         .discard_unavailable_media;
     let queue_receipts = id == 0 || !native_mode;
     loop {
-        let read = channel.read_data_channel(&mut buffer).await;
-        let len = read.as_ref().map_or(0, |(len, _)| *len);
+        let read = read_data_message(&channel, &mut buffer).await;
+        let len = read
+            .as_ref()
+            .ok()
+            .and_then(|m| *m)
+            .map_or(0, |(len, _)| len);
         let delivery = match read {
-            Ok((0, _)) => {
+            Ok(None) => {
                 let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
                 state.fail_channel(FailureStage::DataChannelClosed, id);
                 None
             }
-            Ok((len, text)) => {
+            Ok(Some((len, text))) => {
                 #[cfg(windows)]
                 let timing =
                     native_mode && id == 0 && crate::frame_timing::is_report(&buffer[..len]);
@@ -404,6 +419,19 @@ async fn read_channel(
             break;
         }
     }
+}
+
+/// The detached API returns zero for both a valid empty message (RFC 8831)
+/// and a reset stream. Its public message counter advances only for a message.
+/// This channel has one reader, so an empty message is distinguishable from EOF
+/// without private SCTP state, extra buffering, retries or changing ordering.
+pub(crate) async fn read_data_message(
+    channel: &webrtc::data::data_channel::DataChannel,
+    buffer: &mut [u8],
+) -> std::result::Result<Option<(usize, bool)>, webrtc::data::Error> {
+    let before = channel.messages_received();
+    let message = channel.read_data_channel(buffer).await?;
+    Ok((message.0 != 0 || channel.messages_received() != before).then_some(message))
 }
 
 // Fixed categories only: library error strings can contain remote text or
@@ -1917,6 +1945,24 @@ mod tests {
             ));
             assert_eq!(state.progress.failure_channel, Some(channel));
         }
+    }
+
+    #[test]
+    fn empty_native_media_messages_are_accounted_without_codec_submission_or_close() {
+        let mut state = empty_completion();
+        state.discard_unavailable_media = true;
+        for channel in [0, 1, 2] {
+            assert!(matches!(
+                state.prepare_receive(channel, false, &[]),
+                Some(Delivery::EmptyMessage)
+            ));
+        }
+        assert!(!state.progress.failed);
+        assert_eq!(state.progress.empty_channel_messages, [1, 1, 1]);
+        assert!(state.messages.is_empty());
+        assert!(state.receive(1, false, b"nonempty-media-after-empty"));
+        assert!(!state.progress.failed);
+        assert_eq!(state.progress.channel_messages_received, [1, 2, 1]);
     }
 
     #[test]

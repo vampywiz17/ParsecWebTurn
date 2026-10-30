@@ -81,6 +81,7 @@ internal fun StreamScreen(model: TvModel, host: Host, close: () -> Unit) {
                 Text("ICE ${states?.optString("ice") ?: "unknown"} · DTLS ${states?.optString("dtls") ?: "unknown"} · RX ${"%.1f".format(network.optDouble("received_mbps"))} Mbit/s", color = Color(0xFFA8BED7))
                 if (error.isNotEmpty()) Text("Stage ${network.optString("failure_stage")} · channel ${network.optString("failure_channel")} · ${network.optString("read_error")}\n" +
                     "Control queue ${network.optInt("queued_control_messages")} · max message C/V/A ${network.optJSONArray("max_message_bytes")}", color = Color(0xFFFFB4AB))
+                Text("Empty messages C/V/A ${network.optJSONArray("empty_messages")}", color = Color(0xFFA8BED7))
             }
             if (video != null && (!video.isNull("error") || video.optLong("submitted") == 0L)) {
                 Text("${video.optString("stage")} · ${video.optString("decoder")}\n" +

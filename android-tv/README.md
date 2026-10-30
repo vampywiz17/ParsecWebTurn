@@ -44,6 +44,14 @@ The stream overlay now preserves the first WebRTC failure category/channel,
 sanitized SCTP read-error category and native ICE/DTLS states before teardown.
 RX is the sampled rate of complete data-channel payloads, excluding network
 headers/retransmissions; it is not a link-speed or available-bandwidth test.
+The latest 50 Mbps capture showed a zero-byte read on the video channel while
+ICE/DTLS remained connected (largest completed video message: 135121 bytes).
+The detached receive adapter now distinguishes RFC 8831 empty messages from EOF
+using the library's public accepted-message counter, and counts empty messages
+without sending them to codecs. An isolated native-peer test checks subsequent
+delivery and genuine stream reset. The live high-bitrate delay/closure remains
+under investigation; an empty decoded queue does not prove spare CPU/network
+capacity or locate backlog inside SCTP, the OS or the sender.
 Test sound, Back, Home/background, reconnect, resolution changes and host failure.
 No HDR, 4:4:4 or AI upscaling is advertised.
 

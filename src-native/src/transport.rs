@@ -30,7 +30,11 @@ mod diagnostics {
         channels: Vec<Arc<RTCDataChannel>>,
     }
 
-    type Receipt = (usize, u16, bool, Bytes);
+    enum Receipt {
+        Message(usize, u16, bool, Bytes),
+        Closed(usize, u16),
+        ReadError,
+    }
 
     #[derive(Serialize)]
     pub struct ProbeReport {
@@ -57,11 +61,14 @@ mod diagnostics {
         pub bidirectional_verified: bool,
     }
 
-    async fn peer(side: usize, received: mpsc::Sender<Receipt>) -> Result<Peer> {
+    async fn peer(side: usize, received: mpsc::Sender<Receipt>, detached: bool) -> Result<Peer> {
         let mut settings = SettingEngine::default();
         // Use regular host candidates, not the nonstandard loopback-candidate
         // option. Both peers run on this machine; no server URLs are configured.
         settings.set_network_types(vec![NetworkType::Udp4]);
+        if detached {
+            settings.detach_data_channels();
+        }
         let api = APIBuilder::new().with_setting_engine(settings).build();
         let connection = Arc::new(api.new_peer_connection(RTCConfiguration::default()).await?);
         let mut channels = Vec::new();
@@ -84,12 +91,53 @@ mod diagnostics {
                 }
             };
             let tx = received.clone();
-            channel.on_message(Box::new(move |message: DataChannelMessage| {
-                let tx = tx.clone();
-                Box::pin(async move {
-                    let _ = tx.send((side, id, message.is_string, message.data)).await;
-                })
-            }));
+            if detached {
+                let weak = Arc::downgrade(&channel);
+                channel.on_open(Box::new(move || {
+                    let weak = weak.clone();
+                    let tx = tx.clone();
+                    Box::pin(async move {
+                        let channel = weak.upgrade().unwrap();
+                        let detached = channel.detach().await.unwrap();
+                        tokio::spawn(async move {
+                            let mut buffer = vec![0; crate::attempt::MAX_CHANNEL_MESSAGE];
+                            loop {
+                                let receipt =
+                                    match crate::attempt::read_data_message(&detached, &mut buffer)
+                                        .await
+                                    {
+                                        Ok(Some((len, text))) => Receipt::Message(
+                                            side,
+                                            id,
+                                            text,
+                                            Bytes::copy_from_slice(&buffer[..len]),
+                                        ),
+                                        Ok(None) => {
+                                            let _ = tx.send(Receipt::Closed(side, id)).await;
+                                            break;
+                                        }
+                                        Err(_) => {
+                                            let _ = tx.send(Receipt::ReadError).await;
+                                            break;
+                                        }
+                                    };
+                                if tx.send(receipt).await.is_err() {
+                                    break;
+                                }
+                            }
+                        });
+                    })
+                }));
+            } else {
+                channel.on_message(Box::new(move |message: DataChannelMessage| {
+                    let tx = tx.clone();
+                    Box::pin(async move {
+                        let _ = tx
+                            .send(Receipt::Message(side, id, message.is_string, message.data))
+                            .await;
+                    })
+                }));
+            }
             channels.push(channel);
         }
         Ok(Peer {
@@ -203,7 +251,11 @@ mod diagnostics {
         }
         let mut verified = 0;
         while !expected.is_empty() {
-            let (side, id, is_string, bytes) = rx.recv().await.context("receipt channel closed")?;
+            let Receipt::Message(side, id, is_string, bytes) =
+                rx.recv().await.context("receipt channel closed")?
+            else {
+                bail!("data channel closed during exchange");
+            };
             let sent = expected
                 .remove(&(side, id))
                 .context("unexpected or duplicate receipt")?;
@@ -220,7 +272,11 @@ mod diagnostics {
             bail!("ICE/DTLS peer connection not confirmed");
         }
         crate::attempt::send_disconnect(&a.channels[0]).await?;
-        let (side, id, text, notice) = rx.recv().await.context("disconnect notice missing")?;
+        let Receipt::Message(side, id, text, notice) =
+            rx.recv().await.context("disconnect notice missing")?
+        else {
+            bail!("data channel closed before disconnect notice");
+        };
         if side != 1
             || id != 0
             || text
@@ -283,8 +339,8 @@ mod diagnostics {
             .build()?;
         runtime.block_on(async {
             let (tx, mut rx) = mpsc::channel(16);
-            let a = peer(0, tx.clone()).await?;
-            let b = match peer(1, tx).await {
+            let a = peer(0, tx.clone(), false).await?;
+            let b = match peer(1, tx, false).await {
                 Ok(peer) => peer,
                 Err(error) => {
                     let _ = a.connection.close().await;
@@ -316,6 +372,62 @@ mod diagnostics {
 
     #[cfg(test)]
     mod tests {
+        #[test]
+        fn detached_empty_messages_preserve_delivery_and_real_shutdown_is_eof() {
+            use super::*;
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .unwrap();
+            runtime.block_on(async {
+                let (tx, mut rx) = mpsc::channel(16);
+                let a = peer(0, tx.clone(), true).await.unwrap();
+                let b = peer(1, tx, true).await.unwrap();
+                let outcome = timeout(Duration::from_secs(20), async {
+                    exchange(&a, &b, &mut rx, false).await?;
+                    for (side, source) in [(0, &a), (1, &b)] {
+                        for id in [0, 1, 2] {
+                            for expected in [Bytes::new(), Bytes::from_static(b"after-empty")] {
+                                source.channels[id].send(&expected).await?;
+                                let Receipt::Message(target, channel, text, actual) =
+                                    rx.recv().await.context("fixture closed")?
+                                else {
+                                    bail!("empty message was mistaken for EOF");
+                                };
+                                anyhow::ensure!(
+                                    target == 1 - side
+                                        && channel == id as u16
+                                        && !text
+                                        && actual == expected,
+                                    "empty/nonempty message changed"
+                                );
+                            }
+                        }
+                    }
+                    a.channels[1].close().await?;
+                    let mut closed = std::collections::BTreeSet::new();
+                    while closed.len() < 2 {
+                        match rx.recv().await.context("close receipt missing")? {
+                            Receipt::Closed(side, 1) => {
+                                closed.insert(side);
+                            }
+                            _ => bail!("real shutdown did not produce EOF on the video stream"),
+                        }
+                    }
+                    Ok::<(), anyhow::Error>(())
+                })
+                .await;
+                let cleanup = timeout(Duration::from_secs(5), async {
+                    tokio::join!(a.connection.close(), b.connection.close())
+                })
+                .await
+                .unwrap();
+                cleanup.0.unwrap();
+                cleanup.1.unwrap();
+                outcome.unwrap().unwrap();
+            });
+        }
         #[test]
         fn compact_parameters_establish_real_dtls_sctp_channels() {
             let report = super::signaling_probe().unwrap();
