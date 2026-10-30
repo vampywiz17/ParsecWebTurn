@@ -1,0 +1,67 @@
+name: EvoParseq Android TV preview
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/android-tv]
+    paths: ['android-tv/**', '.github/workflows/android-tv.yml', 'src-native/src/native_core/account.rs', 'src-native/src/event_log.rs']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-tv-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi
+          components: clippy,rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: android-tv/native
+      - name: Verify shared Rust account core
+        run: |
+          cargo fmt --manifest-path android-tv/native/Cargo.toml -- --check
+          cargo test --locked --manifest-path android-tv/native/Cargo.toml
+          cargo clippy --locked --manifest-path android-tv/native/Cargo.toml --all-targets -- -D warnings
+      - name: Prepare Android toolchain
+        run: |
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;28.2.13676358'
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+          cargo install cargo-ndk --version 4.1.2 --locked
+      - name: Build ARM64 and ARMv7 Rust adapters
+        working-directory: android-tv/native
+        run: |
+          cargo ndk -t arm64-v8a -t armeabi-v7a --platform 29 -o ../app/src/main/jniLibs build --locked --release
+          cargo ndk -t arm64-v8a --platform 29 clippy --locked -- -D warnings
+      - name: Build and lint TV application
+        working-directory: android-tv
+        run: gradle --no-daemon assembleDebug lintDebug
+      - name: Describe preview artifact
+        run: |
+          mkdir -p dist/android-tv
+          cp android-tv/app/build/outputs/apk/debug/app-debug.apk dist/android-tv/EvoParseq-TV-preview.apk
+          cp android-tv/README.md LICENSE dist/android-tv/
+          cp src-native/crates/bud/vendor/lowlat-client/LICENSE dist/android-tv/LOWLAT-LICENSE.txt
+          git rev-parse HEAD > dist/android-tv/SOURCE.txt
+          sha256sum dist/android-tv/EvoParseq-TV-preview.apk > dist/android-tv/SHA256.txt
+          cp android-tv/app/build/reports/lint-results-debug.html dist/android-tv/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EvoParseq-Android-TV-preview
+          path: dist/android-tv/*
+          if-no-files-found: error

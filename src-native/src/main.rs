@@ -60,6 +60,8 @@ mod platform;
 mod platform_windows;
 mod secure_storage;
 #[cfg(windows)]
+mod session_preferences;
+#[cfg(windows)]
 mod settings_model;
 mod signaling;
 #[cfg(windows)]

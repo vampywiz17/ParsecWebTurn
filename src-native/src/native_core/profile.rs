@@ -3,8 +3,7 @@ use anyhow::{ensure, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 
-pub const MAX_BANDWIDTH_MBPS: u32 = 100;
-pub const MAX_FPS: u32 = 240;
+pub use crate::session_preferences::{Resolution, Video, MAX_BANDWIDTH_MBPS, MAX_FPS};
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -16,67 +15,7 @@ pub struct Profile {
     pub video: Video,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Resolution {
-    #[default]
-    Host,
-    Client,
-    Fixed(u32, u32),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, rename_all = "camelCase")]
-pub struct Video {
-    pub resolution: Resolution,
-    /// None preserves the current host setting; Some is a request, not telemetry.
-    pub bandwidth_mbps: Option<u32>,
-    pub fps: Option<u32>,
-    pub constant_fps: Option<bool>,
-    pub rotated: Option<bool>,
-    pub immersive: u8,
-    pub fullscreen: bool,
-}
-impl Default for Video {
-    fn default() -> Self {
-        Self {
-            resolution: Resolution::Host,
-            bandwidth_mbps: None,
-            fps: None,
-            constant_fps: None,
-            rotated: None,
-            immersive: 0,
-            fullscreen: false,
-        }
-    }
-}
 impl Video {
-    pub fn has_host_settings(&self) -> bool {
-        self.resolution != Resolution::Host
-            || self.bandwidth_mbps.is_some()
-            || self.fps.is_some()
-            || self.constant_fps.is_some()
-            || self.rotated.is_some()
-    }
-
-    pub fn validate(&self) -> Result<()> {
-        if let Resolution::Fixed(w, h) = self.resolution {
-            ensure!(
-                (320..=8192).contains(&w) && (200..=8192).contains(&h),
-                "Resolution is outside supported limits"
-            );
-        }
-        ensure!(
-            self.bandwidth_mbps
-                .is_none_or(|n| (1..=MAX_BANDWIDTH_MBPS).contains(&n)),
-            "Bandwidth must be 1–{MAX_BANDWIDTH_MBPS} Mbps"
-        );
-        ensure!(
-            self.fps.is_none_or(|n| (1..=MAX_FPS).contains(&n)),
-            "FPS must be 1–{MAX_FPS}"
-        );
-        ensure!(self.immersive <= 3, "Invalid immersive mode");
-        Ok(())
-    }
     pub fn mode(&self) -> crate::input_state::Mode {
         crate::input_state::Mode {
             mouse: matches!(self.immersive, 1 | 3),

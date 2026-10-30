@@ -26,3 +26,10 @@ The user requires continuing the incremental separation established on the nativ
 - Preserve the working decoding/presentation/audio paths, ordering, bounds and wakeups. Architectural separation must not add decoded-frame copies, CPU readback, per-frame work, unnecessary buffers, threads or timers. Keep CPU and memory use low; do not claim a speedup without measurement.
 - Preserve and test focus-loss releases, immersive capture, relative camera transitions, HID synchronization and clipboard permissions/echo suppression when modifying these boundaries. Use isolated fixtures and the existing native lifecycle tests, followed by live user validation for hardware/session behavior.
 - Review each completed step for duplicated policy, unused helpers and incomplete experiments. Retain necessary protocol validation and platform backends; do not remove them merely because a future port will replace them. Port actual media/storage backends when a concrete target platform requires it.
+
+### Android TV port
+
+- Maximize common Rust source with Windows. Do not reimplement authentication, discovery, protocol, validation, session policy or diagnostics in Kotlin. Reuse the existing Rust models before adding a target adapter; move OS-free rules to shared modules where needed.
+- Kotlin/Compose for TV is a thin TV presentation and Android API adapter only. Keep UI/request boundaries outside the video hot path. MediaCodec/Surface, platform audio/input, Android lifecycle and Keystore are legitimate target-specific operations.
+- Follow Google Android TV / Google TV design and D-pad navigation, including usable 2FA/IME and settings focus restoration; no Xiaomi-specific skin. First live target: Xiaomi TV Box S (3rd Gen) EU on Android 14. Controller session input is a separate later milestone.
+- Decoder Surface output must not be advertised as verified zero copy or direct scanout. Preserve the strict project definition and distinguish documented app behavior from unverified driver/compositor work.

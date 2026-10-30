@@ -1,0 +1,26 @@
+[package]
+name = "evoparseq-tv"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+rust-version = "1.90"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+anyhow = "1"
+serde_json = "1.0.154"
+serde = { version = "1", features = ["derive"] }
+zeroize = "1"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = { version = "0.21.1", default-features = false }
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1
+opt-level = "s"

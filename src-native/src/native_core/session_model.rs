@@ -4,7 +4,8 @@ use super::{
     host_displays::Displays,
     profile::{Resolution, Video, MAX_BANDWIDTH_MBPS, MAX_FPS},
 };
-use anyhow::{ensure, Result};
+#[cfg(test)]
+use crate::session_preferences::{number, resolution};
 use serde_json::Value;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -106,89 +107,10 @@ impl Status {
     }
 }
 
-pub const HOST_RESOLUTION: &str = "Keep host";
-pub const CLIENT_RESOLUTION: &str = "Match client display";
-// Stock Windows UI presets, not a host hardware capability declaration.
-// Current stock output/settings replies do not contain supported-mode lists.
-pub const RESOLUTION_CHOICES: &[&str] = &[
-    HOST_RESOLUTION,
-    CLIENT_RESOLUTION,
-    "3840 x 2160",
-    "3840 x 1600",
-    "3440 x 1440",
-    "2560 x 1600",
-    "2560 x 1440",
-    "2560 x 1080",
-    "1920 x 1200",
-    "1920 x 1080",
-    "1680 x 1050",
-    "1600 x 1200",
-    "1366 x 768",
-    "1280 x 1024",
-    "1280 x 800",
-    "1280 x 720",
-    "1024 x 768",
-];
-pub const BANDWIDTH_CHOICES: &[&str] = &[
-    "3", "5", "7", "10", "15", "20", "25", "30", "35", "40", "45", "50",
-];
-pub const FPS_CHOICES: &[&str] = &["30", "60", "100", "120", "144", "240"];
-pub fn current_choice(value: &str) -> String {
-    format!("Keep current: {value}")
-}
-pub fn resolution_text(resolution: Resolution) -> String {
-    match resolution {
-        Resolution::Host => HOST_RESOLUTION.into(),
-        Resolution::Client => CLIENT_RESOLUTION.into(),
-        Resolution::Fixed(w, h) => format!("{w} x {h}"),
-    }
-}
-/// Native views read their widgets; every view uses the same parsing and
-/// validation before producing an owned video-settings command.
-pub struct PanelFields<'a> {
-    pub resolution: &'a str,
-    pub bandwidth: &'a str,
-    pub fps: &'a str,
-    pub constant_fps: bool,
-    pub rotated: bool,
-    pub immersive: u8,
-    pub fullscreen: bool,
-}
-impl PanelFields<'_> {
-    pub fn parse(&self) -> Result<Video> {
-        let video = Video {
-            resolution: resolution(self.resolution)?,
-            bandwidth_mbps: number(self.bandwidth, MAX_BANDWIDTH_MBPS)?,
-            fps: number(self.fps, MAX_FPS)?,
-            constant_fps: Some(self.constant_fps),
-            rotated: Some(self.rotated),
-            immersive: self.immersive,
-            fullscreen: self.fullscreen,
-        };
-        video.validate()?;
-        Ok(video)
-    }
-}
-fn number(text: &str, max: u32) -> Result<Option<u32>> {
-    let n: u32 = text
-        .trim()
-        .parse()
-        .map_err(|_| anyhow::anyhow!("Enter a number."))?;
-    ensure!((1..=max).contains(&n), "Value must be 1–{max}.");
-    Ok(Some(n))
-}
-fn resolution(text: &str) -> Result<Resolution> {
-    match text.trim() {
-        HOST_RESOLUTION => Ok(Resolution::Host),
-        CLIENT_RESOLUTION => Ok(Resolution::Client),
-        s => {
-            let (w, h) = s
-                .split_once(['x', '×'])
-                .ok_or_else(|| anyhow::anyhow!("Enter resolution as width x height."))?;
-            Ok(Resolution::Fixed(w.trim().parse()?, h.trim().parse()?))
-        }
-    }
-}
+pub use crate::session_preferences::{
+    current_choice, resolution_text, PanelFields, BANDWIDTH_CHOICES, CLIENT_RESOLUTION,
+    FPS_CHOICES, HOST_RESOLUTION, RESOLUTION_CHOICES,
+};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Notification {
     Status(Status),
