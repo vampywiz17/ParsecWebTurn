@@ -75,64 +75,64 @@ private fun TvApp(model: TvModel) {
         }
         Spacer(Modifier.height(20.dp))
         Box(Modifier.weight(1f).fillMaxWidth()) {
-        when {
-            settingsOpen -> TvSettings(model, first) { settingsOpen = false }
-            diagnostics -> {
-                Column(Modifier.fillMaxSize()) {
-                Button(onClick = { diagnostics = false }, modifier = Modifier.focusRequester(first)) {
-                    Text("Back")
+            when {
+                settingsOpen -> TvSettings(model, first) { settingsOpen = false }
+                diagnostics -> {
+                    Column(Modifier.fillMaxSize()) {
+                        Button(onClick = { diagnostics = false }, modifier = Modifier.focusRequester(first)) {
+                            Text("Back")
+                        }
+                        Spacer(Modifier.height(16.dp))
+                        Text(model.inventory.ifEmpty { "Reading decoder capabilities…" },
+                        modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                        style = MaterialTheme.typography.bodyLarge)
+                    }
                 }
-                Spacer(Modifier.height(16.dp))
-                Text(model.inventory.ifEmpty { "Reading decoder capabilities…" },
-                    modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
-                    style = MaterialTheme.typography.bodyLarge)
+                selected != null -> {
+                    Column(Modifier.fillMaxSize()) {
+                        Text(selected!!.name, style = MaterialTheme.typography.headlineMedium)
+                        Spacer(Modifier.height(16.dp))
+                        Text("The Android TV streaming backend is not connected yet.\n" +
+                        "This build validates TV navigation, native account access and device capabilities.")
+                        Spacer(Modifier.height(24.dp))
+                        Button(onClick = { selected = null }, modifier = Modifier.focusRequester(first)) {
+                            Text("Back to computers")
+                        }
+                    }
                 }
-            }
-            selected != null -> {
-                Column(Modifier.fillMaxSize()) {
-                Text(selected!!.name, style = MaterialTheme.typography.headlineMedium)
-                Spacer(Modifier.height(16.dp))
-                Text("The Android TV streaming backend is not connected yet.\n" +
-                    "This build validates TV navigation, native account access and device capabilities.")
-                Spacer(Modifier.height(24.dp))
-                Button(onClick = { selected = null }, modifier = Modifier.focusRequester(first)) {
-                    Text("Back to computers")
-                }
-                }
-            }
-            !model.signedIn -> SignIn(model, first,
+                !model.signedIn -> SignIn(model, first,
                 inspect = { diagnostics = true; model.inspectDecoders() },
                 settings = { settingsOpen = true })
-            else -> {
-                Column(Modifier.fillMaxSize()) {
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Button(onClick = model::refresh, enabled = !model.busy,
-                        modifier = Modifier.focusRequester(first)) { Text("Refresh computers") }
-                    Button(onClick = { diagnostics = true; model.inspectDecoders() },
-                        enabled = !model.busy) { Text("Device capabilities") }
-                    Button(onClick = { settingsOpen = true }, enabled = !model.busy) { Text("Settings") }
-                    Button(onClick = model::signOut, enabled = !model.busy) { Text("Sign out") }
-                }
-                Spacer(Modifier.height(20.dp))
-                Text("Your computers", style = MaterialTheme.typography.headlineSmall)
-                Spacer(Modifier.height(12.dp))
-                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp),
-                    contentPadding = PaddingValues(8.dp)) {
-                    items(model.hosts, key = { it.peer }) { host ->
-                        Card(onClick = { selected = host }, modifier = Modifier.fillMaxWidth()) {
-                            Column(Modifier.padding(20.dp)) {
-                                Text(host.name, style = MaterialTheme.typography.titleLarge)
-                                Text("Inspect computer", color = Color(0xFFA8BED7))
+                else -> {
+                    Column(Modifier.fillMaxSize()) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Button(onClick = model::refresh, enabled = !model.busy,
+                            modifier = Modifier.focusRequester(first)) { Text("Refresh computers") }
+                            Button(onClick = { diagnostics = true; model.inspectDecoders() },
+                            enabled = !model.busy) { Text("Device capabilities") }
+                            Button(onClick = { settingsOpen = true }, enabled = !model.busy) { Text("Settings") }
+                            Button(onClick = model::signOut, enabled = !model.busy) { Text("Sign out") }
+                        }
+                        Spacer(Modifier.height(20.dp))
+                        Text("Your computers", style = MaterialTheme.typography.headlineSmall)
+                        Spacer(Modifier.height(12.dp))
+                        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp),
+                        contentPadding = PaddingValues(8.dp)) {
+                            items(model.hosts, key = { it.peer }) { host ->
+                                Card(onClick = { selected = host }, modifier = Modifier.fillMaxWidth()) {
+                                    Column(Modifier.padding(20.dp)) {
+                                        Text(host.name, style = MaterialTheme.typography.titleLarge)
+                                        Text("Inspect computer", color = Color(0xFFA8BED7))
+                                    }
+                                }
+                            }
+                            if (model.hosts.isEmpty() && !model.busy) item {
+                                Text("No computers returned. Check that your host is online.")
                             }
                         }
                     }
-                    if (model.hosts.isEmpty() && !model.busy) item {
-                        Text("No computers returned. Check that your host is online.")
-                    }
-                }
                 }
             }
-        }
         }
         if (model.busy) Text("Working…", color = Color(0xFFA8BED7))
         if (model.message.isNotEmpty()) Text(model.message, color = Color(0xFFFFC6A0))
@@ -158,7 +158,7 @@ private fun SignIn(model: TvModel, first: FocusRequester, inspect: () -> Unit, s
         AccountField("Password", password, { if (it.length <= 4096) password = it },
             KeyboardType.Password, secret = true)
         AccountField("Two-factor code (if enabled)", code, { if (it.length <= 32) code = it },
-            KeyboardType.NumberPassword, secret = true)
+            KeyboardType.NumberPassword, secret = true, done = true)
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Button(onClick = {
                 model.signIn(email, password, code)
@@ -174,7 +174,7 @@ private fun SignIn(model: TvModel, first: FocusRequester, inspect: () -> Unit, s
 
 @Composable
 private fun AccountField(label: String, value: String, change: (String) -> Unit,
-    type: KeyboardType, secret: Boolean = false, modifier: Modifier = Modifier) {
+    type: KeyboardType, secret: Boolean = false, done: Boolean = false, modifier: Modifier = Modifier) {
     var focused by remember { mutableStateOf(false) }
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -183,8 +183,11 @@ private fun AccountField(label: String, value: String, change: (String) -> Unit,
         Text(label, style = MaterialTheme.typography.labelLarge)
         BasicTextField(value, change, singleLine = true,
             textStyle = TextStyle(color = Color.White, fontSize = 18.sp),
-            keyboardOptions = KeyboardOptions(keyboardType = type, imeAction = ImeAction.Next),
+            keyboardOptions = KeyboardOptions(keyboardType = type,
+                imeAction = if (done) ImeAction.Done else ImeAction.Next),
             keyboardActions = KeyboardActions(onNext = {
+                keyboard?.hide(); focus.moveFocus(FocusDirection.Down)
+            }, onDone = {
                 keyboard?.hide(); focus.moveFocus(FocusDirection.Down)
             }),
             visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,

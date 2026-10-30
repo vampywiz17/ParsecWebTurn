@@ -26,7 +26,9 @@ android {
 }
 
 dependencies {
-    implementation(platform("androidx.compose:compose-bom:2026.09.00"))
+    // Stable Compose 1.10.5 matches TV Material 1.1's 1.10.x API baseline.
+    // Newer Compose 1.12 requires the separate API 37 / AGP 9 toolchain.
+    implementation(platform("androidx.compose:compose-bom:2026.03.00"))
     implementation("androidx.activity:activity-compose:1.11.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.4")
     implementation("androidx.compose.foundation:foundation")
