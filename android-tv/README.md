@@ -26,9 +26,11 @@ D-pad navigation, two-factor sign-in and shared Rust account/session logic.
 
 Live video playback is confirmed on the box for H.264 and HEVC 8-bit, and for
 HEVC Main10 with an NVIDIA host encoder. The AMD host test returned 8-bit;
-requesting Main10 alone is not proof of a 10-bit stream. Continuous audio still
-needs validation: the initial sound was audible but later playback was silent.
-The next preview uses AAudio's real-time callback with a bounded, wait-free PCM
+requesting Main10 alone is not proof of a 10-bit stream. Continuous audio is
+confirmed at a 20 Mbps host request. At 50 Mbps the user observed delay followed
+by a WebRTC failure; the captured decoder queue was empty and AAudio had zero
+device underruns. The exact transport failure still needs identification.
+The preview uses AAudio's real-time callback with a bounded, wait-free PCM
 ownership handoff replacing the mutex PCM queue. The small Rust `rtrb` dependency
 provides this handoff; it moves existing blocks without copying samples into an
 intermediate buffer. The callback does not allocate, free blocks, take a mutex,
@@ -38,6 +40,10 @@ When multiple decoded pictures await release, only the newest is sent to the
 Surface; all output indices are released exactly once. This adds no image copy
 and does not discard compressed reference pictures. Higher-bitrate behavior
 still requires live validation; the bitrate setting is a host request/ceiling.
+The stream overlay now preserves the first WebRTC failure category/channel,
+sanitized SCTP read-error category and native ICE/DTLS states before teardown.
+RX is the sampled rate of complete data-channel payloads, excluding network
+headers/retransmissions; it is not a link-speed or available-bandwidth test.
 Test sound, Back, Home/background, reconnect, resolution changes and host failure.
 No HDR, 4:4:4 or AI upscaling is advertised.
 

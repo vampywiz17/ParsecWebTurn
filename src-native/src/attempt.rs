@@ -110,6 +110,7 @@ struct Progress {
     channel_bytes_received: [u64; 3],
     channel_max_message_bytes: [usize; 3],
     failure_channel: Option<u16>,
+    read_error: Option<&'static str>,
     failure_elapsed_ms: Option<u64>,
     last_send_elapsed_ms: Option<u64>,
     last_sent_control_kind: Option<u8>,
@@ -205,6 +206,23 @@ impl Drop for Completion {
     }
 }
 impl Completion {
+    #[cfg(any(target_os = "android", test))]
+    fn network_diagnostics(&self) -> serde_json::Value {
+        let p = &self.progress;
+        let states = if p.failed && p.transport_states_at_failure.is_object() {
+            &p.transport_states_at_failure
+        } else {
+            &p.transport_states
+        };
+        serde_json::json!({
+            "failure_stage":p.failed.then_some(p.failure_stage.unwrap_or(FailureStage::Worker)),
+            "failure_channel":p.failure_channel,"read_error":p.read_error,
+            "failure_elapsed_ms":p.failure_elapsed_ms,"states":states,
+            "received_bytes":p.channel_bytes_received,"received_messages":p.channel_messages_received,
+            "max_message_bytes":p.channel_max_message_bytes,
+            "queued_control_messages":self.messages.len(),"queued_control_bytes":self.message_bytes,
+        })
+    }
     fn queue_local_sync(&mut self, marker: Option<serde_json::Value>) {
         if let Some(marker) = marker {
             if self.events.len() >= 64 {
@@ -241,6 +259,7 @@ impl Completion {
         }
         self.progress.failed = true;
         if self.progress.failure_stage.is_none() {
+            self.progress.transport_states_at_failure = self.progress.transport_states.clone();
             self.progress.failure_stage = Some(stage);
             self.progress.failure_channel = Some(channel);
             self.progress.failure_elapsed_ms = Some(self.elapsed_ms());
@@ -361,8 +380,11 @@ async fn read_channel(
                     delivery => delivery,
                 }
             }
-            Err(_) => {
+            Err(error) => {
                 let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
+                if !state.cancelled && !state.closing && state.progress.failure_stage.is_none() {
+                    state.progress.read_error = Some(classify_channel_read_error(&error));
+                }
                 state.fail_channel(FailureStage::DataChannelRead, id);
                 None
             }
@@ -381,6 +403,21 @@ async fn read_channel(
         if !keep_reading {
             break;
         }
+    }
+}
+
+// Fixed categories only: library error strings can contain remote text or
+// addresses. Do not serialize those strings or private connection credentials.
+fn classify_channel_read_error(error: &webrtc::data::Error) -> &'static str {
+    use webrtc::{data::Error as D, sctp::Error as S};
+    match error {
+        D::Sctp(S::ErrShortBuffer { .. }) => "message-exceeds-read-buffer",
+        D::Sctp(S::ErrNetConnReadError) => "sctp-network-read",
+        D::Sctp(S::ErrEof) => "sctp-eof",
+        D::Sctp(S::ErrStreamClosed) | D::ErrStreamClosed => "stream-closed",
+        D::Sctp(_) => "sctp-error",
+        D::Util(_) => "transport-io",
+        _ => "datachannel-error",
     }
 }
 
@@ -573,6 +610,14 @@ impl Attempt {
             .progress
             .failed
             .then_some(state.progress.failure_stage.unwrap_or(FailureStage::Worker))
+    }
+
+    #[cfg(target_os = "android")]
+    pub fn network_diagnostics(&self) -> serde_json::Value {
+        self.completion
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .network_diagnostics()
     }
 
     #[cfg(windows)]
@@ -1639,6 +1684,48 @@ mod tests {
         assert!(full.progress.failed);
         assert!(!full.progress.local_sync_queued);
         assert_eq!(full.events.len(), 64);
+    }
+
+    #[test]
+    fn network_diagnostics_keep_first_failure_states_and_exclude_control_payloads() {
+        let mut state = empty_completion();
+        state.progress.transport_states = serde_json::json!({"ice":"connected","dtls":"connected"});
+        state.progress.channel_bytes_received = [10, 1_000_000, 50_000];
+        state.progress.channel_max_message_bytes = [10, 900_000, 200];
+        state.messages.push_back((
+            0,
+            false,
+            Bytes::from_static(b"private-fixture-control-text"),
+        ));
+        state.fail_channel(FailureStage::DataChannelRead, 1);
+        state.progress.read_error = Some("message-exceeds-read-buffer");
+        state.progress.transport_states = serde_json::json!({"ice":"closed","dtls":"closed"});
+        state.fail_channel(FailureStage::DataChannelClosed, 2);
+        let report = state.network_diagnostics();
+        assert_eq!(report["failure_stage"], "data-channel-read");
+        assert_eq!(report["failure_channel"], 1);
+        assert_eq!(report["states"]["ice"], "connected");
+        assert_eq!(report["max_message_bytes"][1], 900_000);
+        assert_eq!(report["queued_control_messages"], 1);
+        assert!(!report.to_string().contains("private-fixture-control-text"));
+    }
+
+    #[test]
+    fn channel_read_categories_do_not_expose_library_error_strings() {
+        use webrtc::{data::Error as D, sctp::Error as S};
+        assert_eq!(
+            classify_channel_read_error(&D::Sctp(S::ErrShortBuffer { size: 1_048_576 })),
+            "message-exceeds-read-buffer"
+        );
+        assert_eq!(
+            classify_channel_read_error(&D::Sctp(S::ErrNetConnReadError)),
+            "sctp-network-read"
+        );
+        assert_eq!(classify_channel_read_error(&D::Sctp(S::ErrEof)), "sctp-eof");
+        assert_eq!(
+            classify_channel_read_error(&D::new("private-fixture-error-text".into())),
+            "datachannel-error"
+        );
     }
 
     fn empty_completion() -> Completion {

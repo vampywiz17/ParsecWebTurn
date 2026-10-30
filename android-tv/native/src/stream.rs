@@ -206,6 +206,8 @@ fn run(request: Request, stop: &AtomicBool, status: &Mutex<Value>) -> Result<()>
     let mut signaling_closed = false;
     let started = Instant::now();
     let mut update = Instant::now();
+    let mut previous_received_bytes = 0u64;
+    let mut received_mbps = 0.;
     while !stop.load(Ordering::Acquire) {
         if !signaling_closed {
             for _ in 0..64 {
@@ -264,10 +266,18 @@ fn run(request: Request, stop: &AtomicBool, status: &Mutex<Value>) -> Result<()>
         if let Some(code) = connection.attempt.host_status().filter(|c| *c != 0) {
             anyhow::bail!("The host ended the stream (status {code}). Check the host encoder and requested video format.");
         }
-        ensure!(
-            connection.attempt.failure_stage().is_none(),
-            "WebRTC connection failed"
-        );
+        if let Some(stage) = connection.attempt.failure_stage() {
+            let mut network = connection.attempt.network_diagnostics();
+            network["received_mbps"] = received_mbps.into();
+            // Retain the failure evidence before Connection::drop closes the
+            // peer and changes its native state enums to Closed.
+            let mut report = status.lock().unwrap_or_else(|e| e.into_inner());
+            report["network"] = network;
+            report["video"] = serde_json::to_value(connection.video.snapshot())?;
+            report["audio"] = serde_json::to_value(receiver.snapshot())?;
+            report["audio_output"] = serde_json::to_value(audio.snapshot())?;
+            anyhow::bail!("WebRTC connection failed: {stage}");
+        }
         if connection.attempt.control_ready() && !queried {
             connection
                 .attempt
@@ -306,8 +316,18 @@ fn run(request: Request, stop: &AtomicBool, status: &Mutex<Value>) -> Result<()>
         audio.check()?;
         if update.elapsed() >= Duration::from_millis(500) {
             let snapshot = connection.video.snapshot();
+            let mut network = connection.attempt.network_diagnostics();
+            let bytes = network["received_bytes"]
+                .as_array()
+                .map(|v| v.iter().filter_map(Value::as_u64).sum::<u64>())
+                .unwrap_or(0);
+            received_mbps = bytes.saturating_sub(previous_received_bytes) as f64 * 8.
+                / update.elapsed().as_secs_f64()
+                / 1_000_000.;
+            previous_received_bytes = bytes;
+            network["received_mbps"] = received_mbps.into();
             *status.lock().unwrap_or_else(|e| e.into_inner()) = json!({"state":if snapshot.submitted>0 {"Streaming"} else {"Connecting…"},"ended":false,"video":snapshot,"settings_confirmed":settings_confirmed,
-                "audio":receiver.snapshot(),"audio_output":audio.snapshot()});
+                "audio":receiver.snapshot(),"audio_output":audio.snapshot(),"network":network});
             if let Some(error) = snapshot.error.as_ref() {
                 anyhow::bail!("{error}");
             }
