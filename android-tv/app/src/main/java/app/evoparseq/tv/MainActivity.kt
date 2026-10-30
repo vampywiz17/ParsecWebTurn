@@ -74,9 +74,11 @@ private fun TvApp(model: TvModel) {
             }
         }
         Spacer(Modifier.height(20.dp))
+        Box(Modifier.weight(1f).fillMaxWidth()) {
         when {
             settingsOpen -> TvSettings(model, first) { settingsOpen = false }
             diagnostics -> {
+                Column(Modifier.fillMaxSize()) {
                 Button(onClick = { diagnostics = false }, modifier = Modifier.focusRequester(first)) {
                     Text("Back")
                 }
@@ -84,8 +86,10 @@ private fun TvApp(model: TvModel) {
                 Text(model.inventory.ifEmpty { "Reading decoder capabilities…" },
                     modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
                     style = MaterialTheme.typography.bodyLarge)
+                }
             }
             selected != null -> {
+                Column(Modifier.fillMaxSize()) {
                 Text(selected!!.name, style = MaterialTheme.typography.headlineMedium)
                 Spacer(Modifier.height(16.dp))
                 Text("The Android TV streaming backend is not connected yet.\n" +
@@ -94,11 +98,13 @@ private fun TvApp(model: TvModel) {
                 Button(onClick = { selected = null }, modifier = Modifier.focusRequester(first)) {
                     Text("Back to computers")
                 }
+                }
             }
             !model.signedIn -> SignIn(model, first,
                 inspect = { diagnostics = true; model.inspectDecoders() },
                 settings = { settingsOpen = true })
             else -> {
+                Column(Modifier.fillMaxSize()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     Button(onClick = model::refresh, enabled = !model.busy,
                         modifier = Modifier.focusRequester(first)) { Text("Refresh computers") }
@@ -124,7 +130,9 @@ private fun TvApp(model: TvModel) {
                         Text("No computers returned. Check that your host is online.")
                     }
                 }
+                }
             }
+        }
         }
         if (model.busy) Text("Working…", color = Color(0xFFA8BED7))
         if (model.message.isNotEmpty()) Text(model.message, color = Color(0xFFFFC6A0))
