@@ -300,7 +300,7 @@ impl Completion {
         if channel == 0 && self.discard_unavailable_media && crate::frame_timing::is_report(bytes) {
             return Some(Delivery::Timing(self.telemetry.clone()));
         }
-        if self.discard_unavailable_media {
+        if channel != 0 && self.discard_unavailable_media {
             if channel == 1 {
                 return Some(Delivery::Video {
                     inspector: self.video_stream.clone(),
