@@ -24,10 +24,14 @@ D-pad navigation, two-factor sign-in and shared Rust account/session logic.
 - Secrets remain in memory; non-secret requests are stored privately on the TV.
   Persistent sign-in is absent until Android Keystore integration exists.
 
-Initial playback needs live validation on the box. Start with H.264, 1080p60 and
-20 Mbps, then HEVC 8-bit, then Main10. Test sound, Back, Home/background, reconnect,
-resolution changes and host failure. Hardware capability declarations alone are
-not successful playback evidence. No HDR, 4:4:4 or AI upscaling is advertised.
+Live video playback is confirmed on the box for H.264 and HEVC 8-bit, and for
+HEVC Main10 with an NVIDIA host encoder. The AMD host test returned 8-bit;
+requesting Main10 alone is not proof of a 10-bit stream. Continuous audio still
+needs validation: the initial sound was audible but later playback was silent.
+The next preview primes AAudio before starting and drains ready PCM without
+idle gaps, with decoder/output counters to locate remaining failures.
+Test sound, Back, Home/background, reconnect, resolution changes and host failure.
+No HDR, 4:4:4 or AI upscaling is advertised.
 
 ## Shared architecture
 

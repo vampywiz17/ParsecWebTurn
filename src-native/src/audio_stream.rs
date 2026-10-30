@@ -168,6 +168,7 @@ fn snapshot(shared: &Mutex<State>) -> Snapshot {
 }
 
 impl NativeReceiver {
+    #[cfg(not(windows))]
     pub fn snapshot(&self) -> Snapshot {
         snapshot(&self.state)
     }
