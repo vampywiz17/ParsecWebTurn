@@ -62,6 +62,7 @@ pub struct Choices {
 #[derive(Default)]
 struct Counters {
     input_callbacks: AtomicU64,
+    output_callbacks: AtomicU64,
     inputs: AtomicU64,
     outputs: AtomicU64,
     stage: AtomicU32,
@@ -91,6 +92,7 @@ impl Counters {
 #[derive(Serialize)]
 pub struct Snapshot {
     pub input_callbacks: u64,
+    pub output_callbacks: u64,
     pub inputs: u64,
     pub submitted: u64,
     pub stage: &'static str,
@@ -193,6 +195,7 @@ impl Pipeline {
         let error = native_error.or_else(|| queue.report.failure_stage.map(str::to_owned));
         Snapshot {
             input_callbacks: c.input_callbacks.load(Ordering::Relaxed),
+            output_callbacks: c.output_callbacks.load(Ordering::Relaxed),
             inputs: c.inputs.load(Ordering::Relaxed),
             submitted: c.outputs.load(Ordering::Relaxed),
             stage: match c.stage.load(Ordering::Relaxed) {
@@ -201,6 +204,7 @@ impl Pipeline {
                 3 => "starting codec",
                 4 => "waiting for input buffer",
                 5 => "submitting compressed input",
+                6 => "releasing output to Surface",
                 _ => "waiting for stream parameters",
             },
             decoder: c.decoder.lock().unwrap_or_else(|e| e.into_inner()).clone(),
@@ -227,6 +231,7 @@ impl Drop for Pipeline {
 
 struct Callbacks {
     slots: Mutex<VecDeque<usize>>,
+    outputs: Mutex<crate::decode_state::OutputIndices>,
     thread: thread::Thread,
     counters: Arc<Counters>,
     stopping: AtomicBool,
@@ -247,26 +252,33 @@ unsafe extern "C" fn input(_codec: *mut ndk::AMediaCodec, data: *mut c_void, ind
     c.thread.unpark();
 }
 unsafe extern "C" fn output(
-    codec: *mut ndk::AMediaCodec,
+    _codec: *mut ndk::AMediaCodec,
     data: *mut c_void,
     index: i32,
     info: *mut ndk::AMediaCodecBufferInfo,
 ) {
     let c = unsafe { &*data.cast::<Callbacks>() };
-    if index < 0 || info.is_null() {
-        c.counters.fail("video-output-index", index);
+    if c.stopping.load(Ordering::Acquire) {
         return;
     }
-    let render = !c.stopping.load(Ordering::Acquire)
-        && unsafe { (*info).flags } & ndk::AMEDIACODEC_BUFFER_FLAG_CODEC_CONFIG == 0;
-    let result = unsafe { ndk::AMediaCodec_releaseOutputBuffer(codec, index as usize, render).0 };
-    if result != 0 {
-        if !c.stopping.load(Ordering::Acquire) {
-            c.counters.fail("video-surface-release", result);
-        }
-    } else if render {
-        c.counters.outputs.fetch_add(1, Ordering::Relaxed);
+    c.counters.output_callbacks.fetch_add(1, Ordering::Relaxed);
+    if index < 0 || info.is_null() {
+        c.counters.fail("video-output-index", index);
+        c.thread.unpark();
+        return;
     }
+    let render = unsafe { (*info).flags } & ndk::AMEDIACODEC_BUFFER_FLAG_CODEC_CONFIG == 0;
+    if !c
+        .outputs
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push(index as usize, render)
+    {
+        c.counters.fail("video-output-index-capacity", index);
+    }
+    // No synchronous MediaCodec API on its internal callback looper. In
+    // particular, releaseOutputBuffer waits for work on that same looper.
+    c.thread.unpark();
 }
 unsafe extern "C" fn format(
     _codec: *mut ndk::AMediaCodec,
@@ -348,6 +360,7 @@ impl Decoder {
             geometry: config.geometry,
             callbacks: Box::new(Callbacks {
                 slots: Mutex::new(VecDeque::with_capacity(128)),
+                outputs: Mutex::default(),
                 thread: thread::current(),
                 counters: counters.clone(),
                 stopping: AtomicBool::new(false),
@@ -427,6 +440,25 @@ impl Decoder {
         counters.check("video-codec-start", result)?;
         counters.stage.store(4, Ordering::Relaxed);
         Ok(decoder)
+    }
+    fn present(&self) -> Result<()> {
+        crate::decode_state::drain_outputs(&self.callbacks.outputs, |output| {
+            self.callbacks.counters.stage.store(6, Ordering::Relaxed);
+            let result = unsafe {
+                ndk::AMediaCodec_releaseOutputBuffer(self.codec, output.index, output.render).0
+            };
+            self.callbacks
+                .counters
+                .check("video-surface-release", result)?;
+            if output.render {
+                self.callbacks
+                    .counters
+                    .outputs
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            self.callbacks.counters.stage.store(4, Ordering::Relaxed);
+            Ok(())
+        })
     }
     fn feed(&mut self, frame: &crate::video_output::Frame) -> Result<bool> {
         let Some(index) = self
@@ -529,6 +561,9 @@ fn run(state: &State, window: &NativeWindow, choices: Choices) -> Result<()> {
     let mut previous_codec = None;
     let mut generation = 0;
     loop {
+        if let Some(decoder) = decoder.as_ref() {
+            decoder.present()?;
+        }
         {
             let mut queue = state.queue.lock().unwrap_or_else(|e| e.into_inner());
             if queue.stopped || queue.report.failure_stage.is_some() {

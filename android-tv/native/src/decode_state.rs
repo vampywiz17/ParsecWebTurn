@@ -1,5 +1,46 @@
 //! Compressed-input ownership across the existing bounded queue's resets.
 use crate::video_output::{Frame, Queue};
+use std::{collections::VecDeque, sync::Mutex};
+
+/// Native buffer ownership tokens only, never pixel data or copied surfaces.
+pub struct OutputIndex {
+    pub index: usize,
+    pub render: bool,
+}
+pub struct OutputIndices(VecDeque<OutputIndex>);
+impl Default for OutputIndices {
+    fn default() -> Self {
+        Self(VecDeque::with_capacity(128))
+    }
+}
+impl OutputIndices {
+    pub fn push(&mut self, index: usize, render: bool) -> bool {
+        if self.0.len() == 128 {
+            return false;
+        }
+        self.0.push_back(OutputIndex { index, render });
+        true
+    }
+}
+
+/// The NDK callback and the codec command handler share a looper. The caller's
+/// existing worker must make synchronous release/render calls, after releasing
+/// the index mutex, so the NDK callback can return and service those commands.
+pub fn drain_outputs(
+    queue: &Mutex<OutputIndices>,
+    mut release: impl FnMut(OutputIndex) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    loop {
+        let next = {
+            let mut indices = queue.lock().unwrap_or_else(|e| e.into_inner());
+            indices.0.pop_front()
+        };
+        let Some(next) = next else {
+            return Ok(());
+        };
+        release(next)?;
+    }
+}
 
 pub fn retire_pending(
     queue: &mut Queue,
@@ -21,6 +62,60 @@ mod tests {
     use super::*;
     use crate::video_stream::Codec;
     use std::time::Instant;
+
+    #[test]
+    fn output_callbacks_remain_unblocked_while_worker_releases_a_surface() {
+        use std::sync::{mpsc, Arc};
+        let indices = Arc::new(Mutex::new(OutputIndices::default()));
+        assert!(indices.lock().unwrap().push(1, true));
+        let callback = indices.clone();
+        let (start, go) = mpsc::sync_channel(1);
+        let (done, returned) = mpsc::sync_channel(1);
+        let producer = std::thread::spawn(move || {
+            go.recv().unwrap();
+            let accepted = callback.lock().unwrap().push(2, true);
+            let _ = done.send(accepted);
+        });
+        let mut released = Vec::new();
+        let result = drain_outputs(&indices, |output| {
+            if output.index == 1 {
+                start.send(()).unwrap();
+                anyhow::ensure!(
+                    returned
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or(false),
+                    "Callback was blocked by synchronous release"
+                );
+            }
+            released.push(output.index);
+            assert!(output.render);
+            Ok(())
+        });
+        producer.join().unwrap();
+        result.unwrap();
+        assert_eq!(released, vec![1, 2]);
+    }
+
+    #[test]
+    fn output_token_bounds_preserve_order_and_each_ownership_index_exactly_once() {
+        let mut indices = OutputIndices::default();
+        for index in 0..128 {
+            assert!(indices.push(index, index % 2 == 0));
+        }
+        assert!(!indices.push(128, true));
+        let queue = Mutex::new(indices);
+        let mut released = Vec::new();
+        drain_outputs(&queue, |output| {
+            released.push((output.index, output.render));
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(
+            released,
+            (0..128).map(|i| (i, i % 2 == 0)).collect::<Vec<_>>()
+        );
+        drain_outputs(&queue, |_| panic!("Already released an output index")).unwrap();
+    }
 
     #[test]
     fn a_pending_input_slot_cannot_keep_a_retired_reference_picture() {
