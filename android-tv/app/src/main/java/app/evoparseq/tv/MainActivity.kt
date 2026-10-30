@@ -64,7 +64,7 @@ private fun TvApp(model: TvModel) {
     LaunchedEffect(model.signedIn, diagnostics, settingsOpen, selected?.peer) { first.requestFocus() }
     LaunchedEffect(model.signedIn) { if (model.signedIn) model.refresh() }
 
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).imePadding()
         .padding(horizontal = 48.dp, vertical = 28.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Image(painterResource(R.drawable.evoparseq_icon), null, Modifier.size(48.dp))
@@ -162,7 +162,9 @@ private fun SignIn(model: TvModel, first: FocusRequester, inspect: () -> Unit, s
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Button(onClick = {
                 model.signIn(email, password, code)
-                password = ""; code = ""
+                // Keep the password only in this unsaved form while retrying an
+                // expired 2FA code. Leaving the form/signing in drops the fields.
+                code = ""
             }, enabled = !model.busy && email.isNotBlank() && password.isNotEmpty()) { Text("Sign in") }
             Button(onClick = inspect, enabled = !model.busy) { Text("Device capabilities") }
             Button(onClick = settings, enabled = !model.busy) { Text("Settings") }

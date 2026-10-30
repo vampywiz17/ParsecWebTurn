@@ -2,6 +2,11 @@
   <img src="assets/evoparseq-wordmark.svg" width="360" alt="EvoParseq">
 </p>
 
+> **Android TV development branch:** this branch starts the TV-specific interface
+> with the existing shared Rust account and video-request models. It is not yet
+> a streaming Android release. See [Android TV status and build](android-tv/README.md).
+> The Windows features below describe the existing client retained on this branch.
+
 <p align="center"><strong>An independent Windows Parsec client with a native Rust core.</strong></p>
 
 EvoParseq connects to existing, **unmodified Parsec hosts**. Native Rust handles

@@ -2,7 +2,6 @@
 //! not a second implementation. No media, SDK, host or browser runtime is linked.
 #[path = "../../../src-native/src/native_core/account.rs"]
 pub mod account;
-#[allow(dead_code)]
 #[path = "../../../src-native/src/event_log.rs"]
 mod event_log;
 pub mod preferences;
