@@ -561,9 +561,6 @@ fn run(state: &State, window: &NativeWindow, choices: Choices) -> Result<()> {
     let mut previous_codec = None;
     let mut generation = 0;
     loop {
-        if let Some(decoder) = decoder.as_ref() {
-            decoder.present()?;
-        }
         {
             let mut queue = state.queue.lock().unwrap_or_else(|e| e.into_inner());
             if queue.stopped || queue.report.failure_stage.is_some() {
@@ -577,6 +574,11 @@ fn run(state: &State, window: &NativeWindow, choices: Choices) -> Result<()> {
                 pending = queue.pop();
                 prepared = false;
             }
+        }
+        // Drain even when no new compressed input arrived, but honor local
+        // cancellation before rendering any remaining native output indices.
+        if let Some(decoder) = decoder.as_ref() {
+            decoder.present()?;
         }
         if state
             .counters
