@@ -435,6 +435,18 @@ mod tests {
         session
             .offer("user-data-routing", Route::Direct { stun: vec![] })
             .unwrap();
+        let theirs = lowlat_crypto::credentials().unwrap();
+        session
+            .answer(
+                "user-data-routing",
+                Peer {
+                    ufrag: theirs.ufrag,
+                    pwd: theirs.pwd,
+                    fingerprint: theirs.fingerprint,
+                    aes256: Some(theirs.aes256),
+                },
+            )
+            .unwrap();
         let query = text(9, b"");
         assert!(session.send_frame(&query).is_ok());
         let settings = text(
