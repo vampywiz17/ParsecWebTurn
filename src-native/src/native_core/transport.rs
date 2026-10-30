@@ -2,7 +2,7 @@
 //! decoders and renderer; WebRTC owns ICE/DTLS/SCTP, BUD keeps its HID adapter.
 use crate::{connection_settings::Manager, window::Window};
 use anyhow::{ensure, Context, Result};
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -52,22 +52,7 @@ pub(super) struct WebRtc {
     writer: crate::bud_attempt::SignalingWrite,
     failed: AtomicBool,
 }
-fn envelope(action: &str, peer: &str, id: &str, data: Value) -> Value {
-    json!({"version":1,"action":action,"payload":{"to":peer,"attempt_id":id,"data":data}})
-}
-fn offer(peer: &str, id: &str, credentials: &crate::signaling::Credentials) -> String {
-    let mut value = envelope(
-        "offer",
-        peer,
-        id,
-        json!({
-            "ver_data":1,"mode":2,"versions":{"p2p":1,"bud":1,"init":1,"video":1,"audio":1,"control":1},
-            "creds":{"ice_ufrag":credentials.ufrag,"ice_pwd":credentials.password,"fingerprint":credentials.fingerprint}
-        }),
-    );
-    value["payload"]["secret"] = json!("");
-    value.to_string()
-}
+use crate::native_wire::{envelope, offer};
 
 impl Attempt {
     pub fn spawn_native(
@@ -133,61 +118,8 @@ impl Attempt {
             }
             return Ok(());
         };
-        let value: Value = serde_json::from_str(text)
-            .map_err(|_| anyhow::anyhow!("Invalid account signaling message"))?;
-        let payload = &value["payload"];
-        if payload["attempt_id"].as_str() != Some(web.id.as_str()) {
-            return Ok(());
-        }
-        let data = &payload["data"];
-        match value["action"].as_str() {
-            Some("answer_relay") => {
-                ensure!(
-                    payload["approved"] == true,
-                    "The host declined the connection"
-                );
-                let creds = &data["creds"];
-                let field = |key| {
-                    creds[key]
-                        .as_str()
-                        .map(str::to_owned)
-                        .context("Host credentials are incomplete")
-                };
-                web.transport.begin(
-                    &web.id,
-                    crate::signaling::Credentials {
-                        ufrag: field("ice_ufrag")?,
-                        password: field("ice_pwd")?,
-                        fingerprint: field("fingerprint")?,
-                    }
-                    .normalize_compact(),
-                )?;
-            }
-            Some("candex_relay") => {
-                if data["sync"] == true {
-                    web.transport.sync(&web.id)?;
-                } else {
-                    let ip = data["ip"]
-                        .as_str()
-                        .context("Host candidate address missing")?;
-                    let port = data["port"]
-                        .as_u64()
-                        .and_then(|n| u16::try_from(n).ok())
-                        .context("Host candidate port invalid")?;
-                    web.transport.candidate(
-                        &web.id,
-                        crate::signaling::Candidate::new(
-                            ip,
-                            port,
-                            data["from_stun"].as_bool().unwrap_or(false),
-                        )?,
-                    )?;
-                }
-            }
-            Some("close") => {
-                web.failed.store(true, Ordering::Release);
-            }
-            _ => {}
+        if crate::native_wire::incoming(text, &web.id, &web.transport)? {
+            web.failed.store(true, Ordering::Release);
         }
         Ok(())
     }
@@ -200,9 +132,7 @@ impl Attempt {
                     if event["type"] != 8 {
                         return Some(event);
                     }
-                    let data = json!({"ver_data":1,"versions":{"p2p":1,"bud":1,"init":1,"video":1,"audio":1,"control":1},
-                        "ip":event["ip"],"port":event["port"],"lan":event["lan"],"from_stun":event["fromStun"],"sync":event["sync"]});
-                    if !(web.writer)(envelope("candex", &web.peer, &web.id, data).to_string()) {
+                    if !(web.writer)(crate::native_wire::candidate(&event, &web.peer, &web.id)) {
                         web.failed.store(true, Ordering::Release);
                         break;
                     }

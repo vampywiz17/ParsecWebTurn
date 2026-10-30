@@ -47,7 +47,6 @@ impl Config {
     }
     /// Pinned private opcode, corroborated by lowlat's WebRTC client. Preserve
     /// the negotiated flags; the third argument requests an encoder refresh.
-    #[cfg(windows)]
     pub fn keyframe_request(&self) -> Bytes {
         header(13, 0, self.video_flags() as i32, 1)
     }

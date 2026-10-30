@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [codex/android-tv]
-    paths: ['android-tv/**', '.github/workflows/android-tv.yml', 'src-native/src/native_core/account.rs', 'src-native/src/event_log.rs']
+    paths: ['android-tv/**', '.github/workflows/android-tv.yml', 'src-native/src/**', 'src-native/vendor/**']
 
 permissions:
   contents: read
@@ -36,7 +36,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: android-tv/native
-      - name: Verify shared Rust account core
+      - name: Verify shared Rust account and streaming core
         run: |
           cargo fmt --manifest-path android-tv/native/Cargo.toml -- --check
           cargo test --locked --manifest-path android-tv/native/Cargo.toml --target x86_64-unknown-linux-gnu
@@ -49,8 +49,13 @@ jobs:
       - name: Build ARM64 and ARMv7 Rust adapters
         working-directory: android-tv/native
         run: |
-          cargo ndk -t arm64-v8a -t armeabi-v7a --platform 29 -o ../app/src/main/jniLibs build --locked --release
-          cargo ndk -t arm64-v8a --platform 29 clippy --locked -- -D warnings
+          for abi in arm64-v8a armeabi-v7a; do
+            mkdir -p "$RUNNER_TEMP/opus-$abi"
+            export CMAKE_TOOLCHAIN_FILE="$RUNNER_TEMP/opus-$abi/android.toolchain.cmake"
+            printf 'set(ANDROID_ABI "%s" CACHE STRING "")\nset(ANDROID_PLATFORM android-29 CACHE STRING "")\ninclude("%s/build/cmake/android.toolchain.cmake")\n' "$abi" "$ANDROID_NDK_HOME" > "$CMAKE_TOOLCHAIN_FILE"
+            cargo ndk -t "$abi" --platform 29 -o ../app/src/main/jniLibs build --locked --release
+            cargo ndk -t "$abi" --platform 29 clippy --locked -- -D warnings
+          done
       - name: Build and lint TV application
         working-directory: android-tv
         run: gradle --no-daemon assembleDebug lintDebug

@@ -4,6 +4,24 @@ import android.media.MediaCodecInfo
 import android.media.MediaCodecList
 
 internal object DecoderInventory {
+    fun choices(): String {
+        val codecs = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
+        fun choose(mime: String): MediaCodecInfo? = codecs.firstOrNull { !it.isEncoder &&
+            it.isHardwareAccelerated && it.supportedTypes.any { type -> type.equals(mime, true) } }
+        fun choice(codec: MediaCodecInfo, mime: String) = org.json.JSONObject().apply {
+            put("name", codec.name)
+            put("low_latency", android.os.Build.VERSION.SDK_INT >= 30 &&
+                codec.getCapabilitiesForType(mime).isFeatureSupported(MediaCodecInfo.CodecCapabilities.FEATURE_LowLatency))
+        }
+        val avc = choose("video/avc") ?: error("No hardware AVC decoder")
+        val hevc = choose("video/hevc")
+        return org.json.JSONObject().apply {
+            put("avc", choice(avc, "video/avc"))
+            put("hevc", hevc?.let { choice(it, "video/hevc") } ?: org.json.JSONObject.NULL)
+            put("main10", hevc?.getCapabilitiesForType("video/hevc")?.profileLevels?.any {
+                it.profile == MediaCodecInfo.CodecProfileLevel.HEVCProfileMain10 } == true)
+        }.toString()
+    }
     /** Enumerate once on demand. A declaration is not a successful live decode. */
     fun describe(): String = buildString {
         appendLine("Android ${android.os.Build.VERSION.RELEASE} · API ${android.os.Build.VERSION.SDK_INT}")

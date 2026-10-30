@@ -247,19 +247,34 @@ impl ParameterCache {
             if (unit[0] >> 1) & 63 != 34 {
                 return true;
             }
-            let mut bits = HevcBits {
-                bytes: &unit[2..],
-                offset: 0,
-                zeros: 0,
-                byte: 0,
-                left: 0,
-            };
+            let mut bits = ParameterBits::new(&unit[2..]);
             let referenced = bits.ue().and_then(|_| bits.ue());
             referenced.is_none_or(|id| id < 16 && sps_ids & (1u16 << id) != 0)
         });
         // PPS parsing can reference SPS metadata even in a header-only packet.
         self.units.sort_by_key(|unit| (unit[0] >> 1) & 63);
         self.bytes = self.units.iter().map(|unit| unit.len() + 4).sum();
+    }
+    #[cfg(target_os = "android")]
+    pub fn decoder_initialization(
+        &mut self,
+        codec: Codec,
+    ) -> Option<crate::codec_initialization::Initialization> {
+        if self.overflowed {
+            return None;
+        }
+        if codec == Codec::Hevc {
+            let latest = self
+                .units
+                .iter()
+                .rev()
+                .find(|u| (u[0] >> 1) & 63 == 33)
+                .and_then(|u| hevc_sps(u));
+            if let Some(config) = latest {
+                self.retain_hevc_configuration(config);
+            }
+        }
+        crate::codec_initialization::initialize(&self.units, codec)
     }
     pub fn bytes(&self) -> Option<Vec<u8>> {
         if self.overflowed || self.units.is_empty() {
@@ -350,22 +365,31 @@ pub struct HevcConfiguration {
     pub bit_depth: u32,
 }
 
-#[cfg(any(windows, test))]
 pub fn hevc_configuration(bytes: &[u8]) -> Option<HevcConfiguration> {
     hevc_annex_b(bytes, true)?.hevc_configuration
 }
 
 // H.265 SPS syntax through bit_depth_chroma_minus8. Read only bounded metadata;
 // emulation-prevention bytes are removed as bits are read, without copying NALs.
-struct HevcBits<'a> {
+pub(crate) struct ParameterBits<'a> {
     bytes: &'a [u8],
     offset: usize,
     zeros: u8,
     byte: u8,
     left: u8,
 }
-impl HevcBits<'_> {
-    fn read(&mut self, count: u32) -> Option<u32> {
+impl<'a> ParameterBits<'a> {
+    pub(crate) fn new(bytes: &'a [u8]) -> Self {
+        Self {
+            bytes,
+            offset: 0,
+            zeros: 0,
+            byte: 0,
+            left: 0,
+        }
+    }
+
+    pub(crate) fn read(&mut self, count: u32) -> Option<u32> {
         if count > 32 {
             return None;
         }
@@ -394,7 +418,7 @@ impl HevcBits<'_> {
         }
         Some(value)
     }
-    fn skip(&mut self, mut count: u32) -> Option<()> {
+    pub(crate) fn skip(&mut self, mut count: u32) -> Option<()> {
         while count != 0 {
             let step = count.min(32);
             self.read(step)?;
@@ -402,7 +426,7 @@ impl HevcBits<'_> {
         }
         Some(())
     }
-    fn ue(&mut self) -> Option<u32> {
+    pub(crate) fn ue(&mut self) -> Option<u32> {
         let mut zeros = 0;
         while self.read(1)? == 0 {
             zeros += 1;
@@ -418,13 +442,7 @@ fn hevc_sps(nal: &[u8]) -> Option<HevcConfiguration> {
 }
 
 fn hevc_sps_with_id(nal: &[u8]) -> Option<(u32, HevcConfiguration)> {
-    let mut bits = HevcBits {
-        bytes: nal.get(2..)?,
-        offset: 0,
-        zeros: 0,
-        byte: 0,
-        left: 0,
-    };
+    let mut bits = ParameterBits::new(nal.get(2..)?);
     bits.skip(4)?;
     let layers = bits.read(3)?;
     if layers > 6 {

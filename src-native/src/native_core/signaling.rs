@@ -60,7 +60,7 @@ impl std::fmt::Display for UpgradeFailure {
 }
 
 pub struct Socket {
-    pub writer: crate::bud_attempt::SignalingWrite,
+    pub writer: crate::native_wire::SignalingWrite,
     pub incoming: mpsc::Receiver<String>,
     stop: Option<tokio::sync::oneshot::Sender<()>>,
     worker: Option<std::thread::JoinHandle<()>>,

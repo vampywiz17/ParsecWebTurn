@@ -1,5 +1,9 @@
 //! Native WebRTC offer creation and managed connection lifecycle.
 //! Host signaling translation is isolated from the ICE/DTLS/SCTP engine.
+#[cfg(target_os = "android")]
+use crate::video_android as native_video;
+#[cfg(windows)]
+use crate::video_windows as native_video;
 use crate::{
     signaling::{Candidate, CandidateGate, Credentials, Description, LocalCandidateSync},
     transport::CHANNELS,
@@ -144,8 +148,8 @@ struct Completion {
     media_ingress: crate::media_ingress::Ingress,
     video_stream: Arc<Mutex<crate::video_stream::Inspector>>,
     audio_stream: Option<crate::audio_stream::Pipeline>,
-    #[cfg(windows)]
-    video_output: Option<Arc<crate::video_windows::Pipeline>>,
+    #[cfg(any(windows, target_os = "android"))]
+    video_output: Option<Arc<native_video::Pipeline>>,
 }
 
 enum Delivery {
@@ -155,8 +159,8 @@ enum Delivery {
     Audio(Option<crate::audio_stream::Sender>),
     Video {
         inspector: Arc<Mutex<crate::video_stream::Inspector>>,
-        #[cfg(windows)]
-        pipeline: Option<Arc<crate::video_windows::Pipeline>>,
+        #[cfg(any(windows, target_os = "android"))]
+        pipeline: Option<Arc<native_video::Pipeline>>,
     },
 }
 impl Delivery {
@@ -173,18 +177,18 @@ impl Delivery {
             Self::Audio(audio) => Some(!audio.is_some_and(|sender| sender.submit(bytes))),
             Self::Video {
                 inspector,
-                #[cfg(windows)]
+                #[cfg(any(windows, target_os = "android"))]
                 pipeline,
             } => {
                 let info = inspector
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .receive(bytes);
-                #[cfg(windows)]
+                #[cfg(any(windows, target_os = "android"))]
                 if let (Some(pipeline), Some(info)) = (pipeline, info) {
                     return Some(!pipeline.submit(bytes, info));
                 }
-                #[cfg(not(windows))]
+                #[cfg(not(any(windows, target_os = "android")))]
                 let _ = info;
                 Some(true)
             }
@@ -270,7 +274,7 @@ impl Completion {
             if channel == 1 {
                 return Some(Delivery::Video {
                     inspector: self.video_stream.clone(),
-                    #[cfg(windows)]
+                    #[cfg(any(windows, target_os = "android"))]
                     pipeline: self.video_output.clone(),
                 });
             }
@@ -425,7 +429,7 @@ impl Attempt {
         config: Option<crate::control::Config>,
         stun_provider: StunProvider,
         legacy_rsa_1024: bool,
-        connection_settings: Option<Arc<crate::connection_settings::Manager>>,
+        connection_settings: Option<Arc<dyn crate::rtc_configuration::NetworkSettings>>,
     ) -> Result<Self> {
         CandidateGate::new(id)?;
         let mut active = ACTIVE_WORKERS.load(Ordering::SeqCst);
@@ -471,7 +475,7 @@ impl Attempt {
             discard_unavailable_media: config.is_some(),
             media_ingress: Default::default(),
             video_stream: Arc::new(Mutex::new(video_stream)),
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "android"))]
             video_output: None,
             audio_stream: None,
         }));
@@ -543,7 +547,7 @@ impl Attempt {
         // prevents the old worker from writing into retired output callbacks.
         let mut state = self.completion.lock().unwrap_or_else(|e| e.into_inner());
         state.cancelled = true;
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "android"))]
         if let Some(pipeline) = &state.video_output {
             pipeline.stop();
         }
@@ -632,6 +636,13 @@ impl Attempt {
         }
         state.telemetry = Some((window.stats.clone(), generation));
         state.audio_stream = Some(audio);
+        state.video_output = Some(video);
+    }
+
+    #[cfg(target_os = "android")]
+    pub fn start_android_media(&self, video: Arc<crate::video_android::Pipeline>) {
+        let mut state = self.completion.lock().unwrap_or_else(|e| e.into_inner());
+        state.audio_stream = Some(crate::audio_stream::Pipeline::start_with_budget(Some(100)));
         state.video_output = Some(video);
     }
 
@@ -751,7 +762,7 @@ impl Drop for Attempt {
 struct NetworkOptions {
     stun_provider: StunProvider,
     legacy_rsa_1024: bool,
-    connection_settings: Option<Arc<crate::connection_settings::Manager>>,
+    connection_settings: Option<Arc<dyn crate::rtc_configuration::NetworkSettings>>,
 }
 
 fn worker(
@@ -771,9 +782,7 @@ fn worker(
         // Capability work stays on this worker, outside the connection lock.
         #[cfg(windows)]
         {
-            let gpu = connection_settings
-                .as_ref()
-                .and_then(|m| m.view().0.video_gpu);
+            let gpu = connection_settings.as_ref().and_then(|m| m.video_gpu());
             config.allow_hevc =
                 config.allow_hevc && crate::video_windows::hevc_available(gpu.as_ref());
             config.chroma_444 = config.allow_hevc
@@ -783,7 +792,7 @@ fn worker(
                 && config.ten_bit
                 && crate::video_windows::hevc_ten_bit_available(gpu.as_ref());
         }
-        #[cfg(not(windows))]
+        #[cfg(not(any(windows, target_os = "android")))]
         {
             config.allow_hevc = false;
         }
@@ -821,10 +830,10 @@ fn worker(
     // thread. Snapshot settings once; a save affects only the next attempt.
     let mut ice = ice_configuration(stun_provider);
     if let Some(manager) = connection_settings {
-        settings.set_turn_tcp_qos(manager.view().0.experimental_tcp_qos);
+        settings.set_turn_tcp_qos(manager.tcp_qos());
         ice = runtime.block_on(async {
             tokio::select! {
-                result = manager.resolve_configuration() => result,
+                result = manager.resolve() => result,
                 _ = async {
                     loop {
                         if shared.lock().unwrap_or_else(|e| e.into_inner()).cancelled { break; }
@@ -1649,7 +1658,7 @@ mod tests {
             discard_unavailable_media: false,
             media_ingress: Default::default(),
             video_stream: Default::default(),
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "android"))]
             video_output: None,
             audio_stream: None,
         }

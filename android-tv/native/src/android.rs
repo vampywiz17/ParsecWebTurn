@@ -5,12 +5,12 @@ use jni::{
     JNIEnv,
 };
 use serde_json::{json, Value};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use zeroize::Zeroizing;
 
 // JNI calls run on the view model's single worker, never Android's UI thread.
 // Only one foreground account is supported. No token crosses JNI or goes to disk.
-static SESSION: Mutex<Option<Session>> = Mutex::new(None);
+static SESSION: Mutex<Option<Arc<Session>>> = Mutex::new(None);
 
 fn reply(env: &mut JNIEnv<'_>, value: Value) -> jstring {
     match env.new_string(value.to_string()) {
@@ -41,7 +41,7 @@ pub extern "system" fn Java_app_evoparseq_tv_NativeCore_signIn(
             .lock()
             .map_err(|_| anyhow::anyhow!("Account unavailable."))?;
         anyhow::ensure!(slot.is_none(), "Sign out before signing in again.");
-        *slot = Some(account::login(&login)?);
+        *slot = Some(Arc::new(account::login(&login)?));
         Ok(json!({"ok":true}))
     })();
     reply(
@@ -75,10 +75,73 @@ pub extern "system" fn Java_app_evoparseq_tv_NativeCore_hosts(
 
 #[no_mangle]
 pub extern "system" fn Java_app_evoparseq_tv_NativeCore_signOut(_env: JNIEnv, _object: JObject) {
+    crate::stream::stop();
     if let Ok(mut slot) = SESSION.lock() {
         // Drop follows the existing bounded remote revocation and zeroization.
         drop(slot.take());
     }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_app_evoparseq_tv_NativeCore_startStream(
+    mut env: JNIEnv,
+    _object: JObject,
+    surface: JObject,
+    peer: JString,
+    preferences: JString,
+    choices: JString,
+    width: jni::sys::jint,
+    height: jni::sys::jint,
+) -> jstring {
+    let result = (|| -> anyhow::Result<Value> {
+        let session = SESSION
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Account unavailable"))?
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("Sign in first"))?;
+        let peer = text(&mut env, &peer)?;
+        let prefs = crate::preferences::Preferences::parse(&text(&mut env, &preferences)?)?;
+        let choices = text(&mut env, &choices)?;
+        anyhow::ensure!(choices.len() <= 4096, "Decoder choices exceed limit");
+        let choices: crate::video_android::Choices = serde_json::from_str(&choices)?;
+        let size = (u32::try_from(width)?, u32::try_from(height)?);
+        anyhow::ensure!(
+            (1..=16384).contains(&size.0) && (1..=16384).contains(&size.1),
+            "Invalid Surface size"
+        );
+        // Acquires a reference independent of this JNI local object. The decoder
+        // worker retains it through MediaCodec stop/delete, even on UI teardown.
+        let window = unsafe {
+            ndk_sys::ANativeWindow_fromSurface(env.get_raw().cast(), surface.as_raw().cast())
+        };
+        anyhow::ensure!(!window.is_null(), "Video Surface unavailable");
+        crate::stream::start(
+            session,
+            peer,
+            prefs,
+            crate::video_android::NativeWindow(window),
+            choices,
+            size,
+        )?;
+        Ok(json!({"ok":true}))
+    })();
+    reply(
+        &mut env,
+        result.unwrap_or_else(|e| json!({"error":e.to_string()})),
+    )
+}
+
+#[no_mangle]
+pub extern "system" fn Java_app_evoparseq_tv_NativeCore_stopStream(_env: JNIEnv, _object: JObject) {
+    crate::stream::stop();
+}
+
+#[no_mangle]
+pub extern "system" fn Java_app_evoparseq_tv_NativeCore_streamStatus(
+    mut env: JNIEnv,
+    _object: JObject,
+) -> jstring {
+    reply(&mut env, crate::stream::status())
 }
 
 #[no_mangle]

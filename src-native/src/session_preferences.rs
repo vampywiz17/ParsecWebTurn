@@ -68,6 +68,39 @@ impl Video {
     }
 }
 
+impl Video {
+    pub fn request(&self, client_size: (u32, u32)) -> Result<bytes::Bytes> {
+        self.validate()?;
+        let mut values = serde_json::Map::new();
+        let (w, h) = match self.resolution {
+            Resolution::Host => (0, 0),
+            Resolution::Client => client_size,
+            Resolution::Fixed(w, h) => (w, h),
+        };
+        ensure!(
+            w <= 16384 && h <= 16384,
+            "Client display dimensions exceed limit"
+        );
+        values.insert("resolutionX".into(), w.into());
+        values.insert("resolutionY".into(), h.into());
+        if let Some(n) = self.bandwidth_mbps {
+            values.insert("encoderMaxBitrate".into(), n.into());
+        }
+        if let Some(n) = self.fps {
+            values.insert("encoderFPS".into(), n.into());
+        }
+        if let Some(n) = self.constant_fps {
+            values.insert("fullFPS".into(), n.into());
+        }
+        if let Some(n) = self.rotated {
+            values.insert("rotated".into(), n.into());
+        }
+        // Same owner-video contract used by the existing core and lowlat daemon.
+        // No codec flags here: the BUD adapter preserves its negotiated capability.
+        crate::control::text(17, 11, &serde_json::json!({"video":[values]}).to_string())
+    }
+}
+
 pub const HOST_RESOLUTION: &str = "Keep host";
 pub const CLIENT_RESOLUTION: &str = "Match client display";
 // Stock Windows UI presets, not a host hardware capability declaration.

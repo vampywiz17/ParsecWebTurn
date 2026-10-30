@@ -28,6 +28,9 @@ internal class TvModel(application: Application) : AndroidViewModel(application)
         private set
     var settings by mutableStateOf<JSONObject?>(null)
         private set
+    var streamStatus by mutableStateOf<JSONObject?>(null)
+        private set
+    private var streamGeneration = 0
     private val preferences = application.getSharedPreferences("tv-requests", Context.MODE_PRIVATE)
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
@@ -97,9 +100,48 @@ internal class TvModel(application: Application) : AndroidViewModel(application)
             if (reply.optBoolean("ok") && !saved) feedback = "Could not save TV settings."
             return@request {
                 if (saved) settings = reply
-                message = if (saved) "Saved on this TV. Streaming is not connected in this preview." else feedback
+                message = if (saved) "Saved on this TV. Applies to the next connection." else feedback
             }
         }
+    }
+
+    fun startStream(surface: android.view.Surface, host: Host, width: Int, height: Int) {
+        val current = settings?.getJSONObject("settings")?.toString() ?: return
+        val generation = ++streamGeneration
+        streamStatus = JSONObject().put("state", "Connecting…")
+        worker.execute {
+            val reply = runCatching {
+                JSONObject(NativeCore.startStream(surface, host.peer, current, DecoderInventory.choices(), width, height))
+            }.getOrElse { JSONObject().put("error", "Could not start hardware streaming on this device.") }
+            main.post {
+                if (generation == streamGeneration && !disposed.get()) {
+                    streamStatus = if (reply.has("error")) reply.put("ended", true) else streamStatus
+                    if (!reply.has("error")) pollStream(generation)
+                }
+            }
+        }
+    }
+
+    private fun pollStream(generation: Int) {
+        if (generation != streamGeneration || disposed.get()) return
+        worker.execute {
+            val status = runCatching { JSONObject(NativeCore.streamStatus()) }.getOrElse {
+                JSONObject().put("error", "Stream status unavailable").put("ended", true)
+            }
+            main.post {
+                if (generation == streamGeneration && !disposed.get()) {
+                    streamStatus = status
+                    if (!status.optBoolean("ended")) main.postDelayed({ pollStream(generation) }, 500)
+                }
+            }
+        }
+    }
+
+    fun stopStream() {
+        ++streamGeneration
+        // Serialized after any pending JNI start: a destroyed Surface cannot
+        // leave a late session alive. This stop only signals, never joins UI.
+        worker.execute { runCatching { NativeCore.stopStream() } }
     }
 
     override fun onCleared() {

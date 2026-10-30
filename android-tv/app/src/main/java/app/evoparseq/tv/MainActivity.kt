@@ -46,12 +46,14 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.tv.material3.*
 
 class MainActivity : ComponentActivity() {
+    private val model: TvModel get() = androidx.lifecycle.ViewModelProvider(this)[TvModel::class.java]
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            TvTheme { TvApp(viewModel()) }
+            TvTheme { TvApp(model) }
         }
     }
+    override fun onStop() { model.stopStream(); super.onStop() }
 }
 
 @Composable
@@ -59,6 +61,10 @@ private fun TvApp(model: TvModel) {
     var diagnostics by rememberSaveable { mutableStateOf(false) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Host?>(null) }
+    if (selected != null) {
+        StreamScreen(model, selected!!) { selected = null }
+        return
+    }
     BackHandler(diagnostics || settingsOpen || selected != null) {
         diagnostics = false; settingsOpen = false; selected = null
     }
@@ -91,18 +97,6 @@ private fun TvApp(model: TvModel) {
                         style = MaterialTheme.typography.bodyLarge)
                     }
                 }
-                selected != null -> {
-                    Column(Modifier.fillMaxSize()) {
-                        Text(selected!!.name, style = MaterialTheme.typography.headlineMedium)
-                        Spacer(Modifier.height(16.dp))
-                        Text("The Android TV streaming backend is not connected yet.\n" +
-                        "This build validates TV navigation, native account access and device capabilities.")
-                        Spacer(Modifier.height(24.dp))
-                        Button(onClick = { selected = null }, modifier = Modifier.focusRequester(first)) {
-                            Text("Back to computers")
-                        }
-                    }
-                }
                 !model.signedIn -> SignIn(model, first,
                 inspect = { diagnostics = true; model.inspectDecoders() },
                 settings = { settingsOpen = true })
@@ -125,7 +119,7 @@ private fun TvApp(model: TvModel) {
                                 Card(onClick = { selected = host }, modifier = Modifier.fillMaxWidth()) {
                                     Column(Modifier.padding(20.dp)) {
                                         Text(host.name, style = MaterialTheme.typography.titleLarge)
-                                        Text("Inspect computer", color = LocalContentColor.current.copy(alpha = 0.8f))
+                                        Text("Connect · view and audio", color = LocalContentColor.current.copy(alpha = 0.8f))
                                     }
                                 }
                             }
@@ -142,7 +136,7 @@ private fun TvApp(model: TvModel) {
         val feedback = when {
             model.busy -> "Working…"
             model.message.isNotEmpty() -> model.message
-            else -> "Android TV preview · streaming not yet available"
+            else -> "Android TV streaming preview · controller input is not connected yet"
         }
         Text(feedback,
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
@@ -245,7 +239,7 @@ private fun TvSettings(model: TvModel, first: FocusRequester, back: () -> Unit) 
         Button(onClick = back, modifier = Modifier.focusRequester(first)) { Text("Back") }
         Text("Settings", style = MaterialTheme.typography.headlineSmall)
         Text("Saved requests for the next session. The host chooses the actual format.\n" +
-            "This preview does not start a stream; these choices are not active playback settings.")
+            "WebRTC direct/STUN streaming preview. BUD and custom TURN settings follow later.")
         if (model.settings == null) {
             Button(onClick = model::readSettings, enabled = !model.busy) { Text("Reload settings") }
         }
@@ -264,9 +258,10 @@ private fun TvSettings(model: TvModel, first: FocusRequester, back: () -> Unit) 
             val selected = choice.getInt("selected")
             repeat(choices.length()) { index ->
                 Button(onClick = { model.selectSetting(choice.getString("key"), index); choosing = null },
-                    enabled = !model.busy,
+                    enabled = !model.busy && !(choice.getString("key") == "transport" && index == 1),
                     modifier = if (index == selected) Modifier.focusRequester(optionFocus) else Modifier) {
-                    Text((if (index == selected) "✓  " else "") + choices.getString(index))
+                    Text((if (index == selected) "✓  " else "") + choices.getString(index) +
+                        (if (choice.getString("key") == "transport" && index == 1) " · not available yet" else ""))
                 }
             }
         }

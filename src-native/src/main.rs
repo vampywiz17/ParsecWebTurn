@@ -52,12 +52,15 @@ mod media_scheduling;
 #[cfg(windows)]
 mod native_core;
 #[cfg(windows)]
+mod native_wire;
+#[cfg(windows)]
 mod nvidia_vsr;
 #[cfg(windows)]
 mod performance;
 mod platform;
 #[cfg(windows)]
 mod platform_windows;
+mod rtc_configuration;
 mod secure_storage;
 #[cfg(windows)]
 mod session_preferences;
