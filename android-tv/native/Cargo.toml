@@ -30,6 +30,7 @@ rtrb = "=0.4.1"
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni = { version = "0.21.1", default-features = false }
+evoparseq-bud = { path = "../../src-native/crates/bud" }
 ndk-sys = { version = "0.6", features = ["media", "audio"] }
 
 [patch.crates-io]
@@ -43,3 +44,7 @@ strip = true
 lto = "thin"
 codegen-units = 1
 opt-level = "s"
+
+[patch."https://github.com/nomi-san/lowlat"]
+lowlat-core = { path = "../../src-native/crates/bud/vendor/lowlat-core" }
+lowlat-crypto = { path = "../../src-native/crates/bud/vendor/lowlat-crypto" }

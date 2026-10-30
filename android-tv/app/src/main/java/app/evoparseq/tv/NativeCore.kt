@@ -4,8 +4,11 @@ package app.evoparseq.tv
 internal object NativeCore {
     init { System.loadLibrary("evoparseq_tv") }
     external fun signIn(email: String, password: String, tfa: String): String
+    external fun rememberSession(vault: SessionVault): String
+    external fun restoreSession(token: ByteArray): String
     external fun hosts(): String
     external fun signOut()
+    external fun releaseSession()
     external fun settings(current: String, field: String, index: Int): String
     external fun startStream(surface: android.view.Surface, peer: String, preferences: String,
         decoders: String, width: Int, height: Int): String

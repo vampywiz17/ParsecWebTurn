@@ -33,7 +33,6 @@ pub struct CallbackReader {
 #[derive(Default)]
 pub struct Rendered {
     pub frames: usize,
-    pub peak: u16,
     pub invalid_layout: bool,
 }
 pub(super) fn new() -> (Publisher, CallbackReader) {
@@ -153,11 +152,6 @@ impl CallbackReader {
             self.shared.queued.fetch_sub(count, Ordering::Relaxed);
         }
         result.frames = filled / 2;
-        result.peak = output[..filled]
-            .iter()
-            .map(|v| v.unsigned_abs())
-            .max()
-            .unwrap_or(0);
         self.shared
             .consumed
             .fetch_add(result.frames as u64, Ordering::Relaxed);
@@ -172,7 +166,7 @@ mod tests {
         assert!(p.push(values.to_vec(), Layout::STEREO, 9600).is_ok());
     }
     #[test]
-    fn partial_blocks_keep_order_peak_and_recycle_original_allocations() {
+    fn partial_blocks_keep_order_and_recycle_original_allocations() {
         let (mut publisher, mut reader) = new();
         let first = vec![1, -1, 2, -2];
         let pointer = first.as_ptr();
@@ -185,7 +179,6 @@ mod tests {
         let report = reader.render(&mut output);
         assert_eq!(output, [2, -2, i16::MIN, i16::MAX, 0, 0]);
         assert_eq!(report.frames, 2);
-        assert_eq!(report.peak, 32768);
         let recycled = publisher.recycled().unwrap();
         assert_eq!(recycled.as_ptr(), pointer);
         let mut snapshot = Snapshot::default();

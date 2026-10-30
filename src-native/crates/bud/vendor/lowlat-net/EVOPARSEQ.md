@@ -61,3 +61,9 @@ The 2026-10-26 dependency refresh raises the webpki-roots minimum to 1.0.10
 (RUSTSEC-2026-0381). Application and BUD lockfiles also select rustls-webpki
 0.103.16 (RUSTSEC-2026-0382) and Tokio 1.53.3 (RUSTSEC-2026-0386).
 Rustls remains 0.23.46 with the same providers and certificate policy.
+
+Android TV reuses the Linux socket/poll/eventfd and batched UDP implementation
+through explicit Android cfg gates, with libc's Android ABI declarations (API 29+).
+Windows cfg selection and IO remain unchanged. No new network implementation,
+frame copy or media decoder is added. Direct UDP is the first exposed Android
+route; the application has not exposed Android TURN configuration yet.

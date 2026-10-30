@@ -19,7 +19,7 @@ rustls-native-certs = { version = "0.8", optional = true }
 lowlat-common = { git = "https://github.com/nomi-san/lowlat", rev = "5f8db5689e55de0d396b0520824caa9fc053dd86" }
 lowlat-core = { path = "../lowlat-core" }
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
 libc = "0.2"
 
 # The system's own declarations for the socket, the completion port and the

@@ -1,6 +1,6 @@
 use crate::account::{self, Session};
 use jni::{
-    objects::{JObject, JString},
+    objects::{JByteArray, JObject, JString, JValue},
     sys::jstring,
     JNIEnv,
 };
@@ -9,7 +9,8 @@ use std::sync::{Arc, Mutex};
 use zeroize::Zeroizing;
 
 // JNI calls run on the view model's single worker, never Android's UI thread.
-// Only one foreground account is supported. No token crosses JNI or goes to disk.
+// Only one foreground account is supported. Tokens cross JNI only as transient
+// byte arrays for the Android Keystore adapter, never UI strings or diagnostics.
 static SESSION: Mutex<Option<Arc<Session>>> = Mutex::new(None);
 
 fn reply(env: &mut JNIEnv<'_>, value: Value) -> jstring {
@@ -51,6 +52,57 @@ pub extern "system" fn Java_app_evoparseq_tv_NativeCore_signIn(
 }
 
 #[no_mangle]
+pub extern "system" fn Java_app_evoparseq_tv_NativeCore_rememberSession(
+    mut env: JNIEnv,
+    _object: JObject,
+    vault: JObject,
+) -> jstring {
+    let result = (|| -> anyhow::Result<Value> {
+        let slot = SESSION
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Account unavailable"))?;
+        let session = slot
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Sign in first"))?;
+        let token = env.byte_array_from_slice(session.token().as_bytes())?;
+        env.call_method(&vault, "save", "([B)V", &[JValue::Object(token.as_ref())])?;
+        session.remembered();
+        Ok(json!({"ok":true}))
+    })();
+    // Clear pending platform exceptions; never return their text or token data.
+    if env.exception_check().unwrap_or(false) {
+        let _ = env.exception_clear();
+    }
+    reply(&mut env, result.unwrap_or_else(|_| json!({"error":"Signed in, but secure storage failed. Sign-in will not be remembered."})))
+}
+
+#[no_mangle]
+pub extern "system" fn Java_app_evoparseq_tv_NativeCore_restoreSession(
+    mut env: JNIEnv,
+    _object: JObject,
+    token: JByteArray,
+) -> jstring {
+    let result = (|| -> anyhow::Result<Value> {
+        anyhow::ensure!(
+            env.get_array_length(&token)? <= 4096,
+            "Invalid saved sign-in"
+        );
+        let bytes = Zeroizing::new(env.convert_byte_array(&token)?);
+        let session = Session::from_token(std::str::from_utf8(&bytes)?)?;
+        let mut slot = SESSION
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Account unavailable"))?;
+        anyhow::ensure!(slot.is_none(), "Already signed in");
+        *slot = Some(Arc::new(session));
+        Ok(json!({"ok":true}))
+    })();
+    reply(
+        &mut env,
+        result.unwrap_or_else(|_| json!({"error":"Saved sign-in unavailable. Sign in again."})),
+    )
+}
+
+#[no_mangle]
 pub extern "system" fn Java_app_evoparseq_tv_NativeCore_hosts(
     mut env: JNIEnv,
     _object: JObject,
@@ -69,7 +121,7 @@ pub extern "system" fn Java_app_evoparseq_tv_NativeCore_hosts(
     })();
     reply(
         &mut env,
-        result.unwrap_or_else(|e| json!({"error":e.to_string()})),
+        result.unwrap_or_else(|e| json!({"error":e.to_string(),"expired":e.downcast_ref::<account::ExpiredSession>().is_some()})),
     )
 }
 
@@ -77,8 +129,10 @@ pub extern "system" fn Java_app_evoparseq_tv_NativeCore_hosts(
 pub extern "system" fn Java_app_evoparseq_tv_NativeCore_signOut(_env: JNIEnv, _object: JObject) {
     crate::stream::stop();
     if let Ok(mut slot) = SESSION.lock() {
-        // Drop follows the existing bounded remote revocation and zeroization.
-        drop(slot.take());
+        // Explicit logout revokes remembered sessions too; process exit does not.
+        if let Some(session) = slot.take() {
+            session.revoke();
+        }
     }
 }
 
@@ -170,4 +224,15 @@ pub extern "system" fn Java_app_evoparseq_tv_NativeCore_settings(
         &mut env,
         result.unwrap_or_else(|_| json!({"error":"Could not read or change TV settings."})),
     )
+}
+
+#[no_mangle]
+pub extern "system" fn Java_app_evoparseq_tv_NativeCore_releaseSession(
+    _env: JNIEnv,
+    _object: JObject,
+) {
+    crate::stream::stop();
+    if let Ok(mut slot) = SESSION.lock() {
+        drop(slot.take());
+    }
 }

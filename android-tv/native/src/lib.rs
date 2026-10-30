@@ -44,6 +44,8 @@ mod audio_android;
 #[cfg(target_os = "android")]
 mod stream;
 #[cfg(target_os = "android")]
+mod transport_android;
+#[cfg(target_os = "android")]
 pub mod video_android;
 
 #[cfg(target_os = "android")]

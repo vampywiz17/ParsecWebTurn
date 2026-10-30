@@ -6,59 +6,45 @@ D-pad navigation, two-factor sign-in and shared Rust account/session logic.
 
 ## Streaming preview
 
-- Sign in, select a computer, and start a **WebRTC direct/STUN** session with the
-  unmodified official Parsec host. No browser, WASM or stock SDK is bundled.
-- **Hardware MediaCodec → SurfaceView Surface**, using asynchronous NDK callbacks.
+- Connect to an unmodified official Parsec host using **WebRTC direct/STUN**
+  (default) or **BUD direct UDP** (new, awaiting live Android validation).
+  Configurable TURN relays are not yet connected on Android; neither transport
+  silently falls back to the other. No browser, WASM or stock SDK is bundled.
+- Hardware **MediaCodec to SurfaceView Surface**, using asynchronous NDK callbacks.
   Decoded video never crosses JNI, becomes a Bitmap, or is read back to CPU memory.
   This does not prove driver/compositor zero copy or direct scanout.
-- H.264 8-bit 4:2:0 is the default. Hardware-capable HEVC 8/10-bit 4:2:0 can be
-  requested in Settings. The host selects the actual format; Main10 is not HDR.
-- Existing Rust Opus decoding, bounded compressed/PCM queues and keyframe recovery;
-  48 kHz stereo AAudio output with a low-latency device request. Actual latency
-  depends on Android, the TV audio path and the device; no speedup is claimed.
+- H.264 8-bit 4:2:0 is the default. Request HEVC 8/10-bit 4:2:0 in Settings when
+  supported. The host chooses the actual format; Main10 is not HDR.
+- Shared Rust Opus decoder, bounded queues and keyframe recovery; stereo 48 kHz
+  AAudio pull output. The callback never waits on the session worker or allocates.
+- Sign-in is remembered using AES-256-GCM and a non-exportable Android Keystore
+  key. Only the session token is saved, encrypted in app-private no-backup storage;
+  passwords and 2FA codes are never saved. Sign out removes local credentials and
+  requests server-side revocation. Invalid/expired credentials require sign-in.
 - Back/Disconnect, backgrounding, audio focus loss and Surface destruction stop
-  the session. A new Surface requires a deliberate new connection.
-- **View and audio only in this step. Controller forwarding follows separately.**
-  BUD and configurable TURN relays are not yet connected on Android. BUD is
-  disabled and rejected explicitly, never silently replaced by WebRTC.
-- Secrets remain in memory; non-secret requests are stored privately on the TV.
-  Persistent sign-in is absent until Android Keystore integration exists.
+  the stream. Reconnect explicitly when a new Surface is created.
+- View/audio preview only: controller forwarding is the next separate milestone.
+  No HDR, 4:4:4, AI upscaling or rotated BUD output is advertised.
 
-Live video playback is confirmed on the box for H.264 and HEVC 8-bit, and for
-HEVC Main10 with an NVIDIA host encoder. The AMD host test returned 8-bit;
-requesting Main10 alone is not proof of a 10-bit stream. Continuous audio is
-confirmed at a 20 Mbps host request. At 50 Mbps the user observed delay followed
-by a WebRTC failure; the captured decoder queue was empty and AAudio had zero
-device underruns. The exact transport failure still needs identification.
-The preview uses AAudio's real-time callback with a bounded, wait-free PCM
-ownership handoff replacing the mutex PCM queue. The small Rust `rtrb` dependency
-provides this handoff; it moves existing blocks without copying samples into an
-intermediate buffer. The callback does not allocate, free blocks, take a mutex,
-run the decoder or wait on the session worker. Decoder/output counters and a
-half-second PCM peak distinguish received silence from output starvation.
-When multiple decoded pictures await release, only the newest is sent to the
-Surface; all output indices are released exactly once. This adds no image copy
-and does not discard compressed reference pictures. Higher-bitrate behavior
-still requires live validation; the bitrate setting is a host request/ceiling.
-The stream overlay now preserves the first WebRTC failure category/channel,
-sanitized SCTP read-error category and native ICE/DTLS states before teardown.
-RX is the sampled rate of complete data-channel payloads, excluding network
-headers/retransmissions; it is not a link-speed or available-bandwidth test.
-The latest 50 Mbps capture showed a zero-byte read on the video channel while
-ICE/DTLS remained connected (largest completed video message: 135121 bytes).
-The detached receive adapter now distinguishes RFC 8831 empty messages from EOF
-using the library's public accepted-message counter, and counts empty messages
-without sending them to codecs. An isolated native-peer test checks subsequent
-delivery and genuine stream reset. The live high-bitrate delay/closure remains
-under investigation; an empty decoded queue does not prove spare CPU/network
-capacity or locate backlog inside SCTP, the OS or the sender.
-Test sound, Back, Home/background, reconnect, resolution changes and host failure.
-No HDR, 4:4:4 or AI upscaling is advertised.
+Live video is confirmed on the Xiaomi box for H.264 and HEVC 8-bit, and HEVC
+Main10 with NVIDIA encoding. The AMD host test returned 8-bit. The user found
+30 Mbps stable and treats approximately 30-35 Mbps as this setup's practical
+ceiling; sustained 50 Mbps caused growing delay and video-channel closure on
+Ethernet and Wi-Fi. This is not a proven universal decoder/hardware limit.
+A later apparent audio regression was traced to the box's own audio output;
+it was not established as a client regression.
+
+Temporary callback/PCM peak counters and verbose test overlays have been removed.
+Useful errors, bounded recovery and native-peer/queue regression tests remain.
+Decoded-output catch-up still releases every codec index exactly once and never
+skips compressed reference pictures. Empty WebRTC messages remain distinct from
+stream EOF, as required by RFC 8831. Test both transports, audio, reconnect and
+remembered sign-in on the actual device; builds alone do not validate hardware.
 
 ## Shared architecture
 
 The Android crate compiles the existing account, authenticated signaling,
-WebRTC/ICE/DTLS/SCTP, control framing, audio decoder, video inspection/queue and
+WebRTC/ICE/DTLS/SCTP and BUD, control framing, audio decoder, video inspection/queue and
 request-validation sources directly. Android-specific code only handles JNI,
 Surface/MediaCodec, AAudio and TV UI/lifecycle. Windows retains its own media and
 input backends. No decoded-frame conversion/copy layer is added to Windows.

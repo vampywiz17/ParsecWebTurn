@@ -5,17 +5,13 @@ use ndk_sys as ndk;
 use std::{
     cell::UnsafeCell,
     ffi::c_void,
-    sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, Ordering},
+    sync::atomic::{AtomicBool, AtomicI32, Ordering},
 };
 
 struct Callback {
     reader: UnsafeCell<CallbackReader>,
     stopping: AtomicBool,
     error: AtomicI32,
-    callbacks: AtomicU64,
-    pcm_frames: AtomicU64,
-    silent_frames: AtomicU64,
-    peak: AtomicU32,
 }
 impl Callback {
     fn fail(&self, code: i32) {
@@ -44,20 +40,10 @@ unsafe extern "C" fn data(
         output.fill(0);
         return ndk::AAUDIO_CALLBACK_RESULT_STOP as i32;
     }
-    state.callbacks.fetch_add(1, Ordering::Relaxed);
     // AAudio documents serialized callbacks. Only this callback accesses the
     // reader; other threads use atomic counters. No locks, allocation, stream
     // commands, network or decoder work run on this real-time thread.
     let result = (&mut *state.reader.get()).render(output);
-    state
-        .pcm_frames
-        .fetch_add(result.frames as u64, Ordering::Relaxed);
-    state
-        .silent_frames
-        .fetch_add((frames as usize - result.frames) as u64, Ordering::Relaxed);
-    state
-        .peak
-        .fetch_max(u32::from(result.peak), Ordering::Relaxed);
     if result.invalid_layout {
         state.fail(ndk::AAUDIO_ERROR_INVALID_FORMAT);
         return ndk::AAUDIO_CALLBACK_RESULT_STOP as i32;
@@ -81,10 +67,6 @@ pub struct Snapshot {
     xruns: i32,
     buffer_frames: i32,
     capacity_frames: i32,
-    callbacks: u64,
-    pcm_frames: u64,
-    silent_frames: u64,
-    peak: u32,
     device_id: i32,
 }
 impl Output {
@@ -93,10 +75,6 @@ impl Output {
             reader: UnsafeCell::new(receiver.callback_reader()?),
             stopping: AtomicBool::new(false),
             error: AtomicI32::new(0),
-            callbacks: AtomicU64::new(0),
-            pcm_frames: AtomicU64::new(0),
-            silent_frames: AtomicU64::new(0),
-            peak: AtomicU32::new(0),
         });
         unsafe {
             let mut builder = std::ptr::null_mut();
@@ -169,7 +147,6 @@ impl Output {
         Ok(())
     }
     pub fn snapshot(&self) -> Snapshot {
-        let c = self.callback.as_ref().unwrap();
         unsafe {
             Snapshot {
                 state: std::ffi::CStr::from_ptr(ndk::AAudio_convertStreamStateToText(
@@ -182,10 +159,6 @@ impl Output {
                 xruns: ndk::AAudioStream_getXRunCount(self.stream),
                 buffer_frames: ndk::AAudioStream_getBufferSizeInFrames(self.stream),
                 capacity_frames: ndk::AAudioStream_getBufferCapacityInFrames(self.stream),
-                callbacks: c.callbacks.load(Ordering::Relaxed),
-                pcm_frames: c.pcm_frames.load(Ordering::Relaxed),
-                silent_frames: c.silent_frames.load(Ordering::Relaxed),
-                peak: c.peak.swap(0, Ordering::Relaxed),
                 device_id: ndk::AAudioStream_getDeviceId(self.stream),
             }
         }

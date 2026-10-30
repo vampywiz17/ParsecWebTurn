@@ -164,7 +164,7 @@ private fun SignIn(model: TvModel, first: FocusRequester, inspect: () -> Unit, s
         Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Independent client · not affiliated with Parsec/Unity.\n" +
-                "Sign-in stays in memory for this preview; no password or token is saved.")
+                "Sign-in is encrypted on this TV. Your password and two-factor code are not saved.")
             AccountField("Email", email, { if (it.length <= 320) email = it },
                 KeyboardType.Email, modifier = Modifier.focusRequester(first))
             AccountField("Password", password, { if (it.length <= 4096) password = it },

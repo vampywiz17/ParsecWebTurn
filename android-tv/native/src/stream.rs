@@ -2,9 +2,9 @@
 use crate::{
     account::Session,
     account_signaling::Socket,
-    attempt::{Attempt, Output, StunProvider},
     audio_android, native_wire,
     preferences::Preferences,
+    transport_android::Transport,
     video_android::{Choices, NativeWindow, Pipeline},
 };
 use anyhow::{ensure, Context, Result};
@@ -41,10 +41,6 @@ pub fn start(
     choices: Choices,
     size: (u32, u32),
 ) -> Result<()> {
-    ensure!(
-        prefs.transport == 0,
-        "BUD streaming is not yet available on Android TV. Select WebRTC in Settings."
-    );
     ensure!(
         !peer.is_empty() && peer.len() <= 256 && !peer.chars().any(char::is_control),
         "Invalid computer ID"
@@ -123,7 +119,7 @@ pub fn status() -> Value {
         .unwrap_or_else(|| json!({"state":"Disconnected","ended":true}))
 }
 struct Connection {
-    attempt: Attempt,
+    attempt: Transport,
     socket: Socket,
     peer: String,
     id: String,
@@ -158,13 +154,6 @@ fn run(request: Request, stop: &AtomicBool, status: &Mutex<Value>) -> Result<()>
         "tv-{}",
         SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
     );
-    let writer = socket.writer.clone();
-    let target = peer.to_owned();
-    let offer_id = id.clone();
-    let output = Output::new(Arc::new(move |description| {
-        Ok(description
-            .is_some_and(|d| writer(native_wire::offer(&target, &offer_id, &d.credentials))))
-    }));
     let config = crate::control::Config {
         video_protocol: crate::video_stream::VideoProtocol {
             version: 1,
@@ -177,16 +166,15 @@ fn run(request: Request, stop: &AtomicBool, status: &Mutex<Value>) -> Result<()>
         chroma_444: false,
     };
     let video = Pipeline::start(window, choices)?;
-    let attempt = Attempt::spawn_configured(
+    let attempt = Transport::start(
         &id,
-        output,
-        Some(config.clone()),
-        StunProvider::Parsec,
-        true,
-        None,
+        &peer,
+        socket.writer.clone(),
+        &config,
+        prefs.transport == 1,
+        video.clone(),
     )?;
-    attempt.start_android_media(video.clone());
-    let connection = Connection {
+    let mut connection = Connection {
         attempt,
         socket,
         peer,
@@ -212,10 +200,7 @@ fn run(request: Request, stop: &AtomicBool, status: &Mutex<Value>) -> Result<()>
         if !signaling_closed {
             for _ in 0..64 {
                 match connection.socket.next() {
-                    Ok(Some(text)) => ensure!(
-                        !native_wire::incoming(&text, &connection.id, &connection.attempt)?,
-                        "The host closed the connection"
-                    ),
+                    Ok(Some(text)) => connection.attempt.receive(&text, &connection.id)?,
                     Ok(None) => break,
                     Err(error) => {
                         if !connection.attempt.control_ready() {
@@ -227,21 +212,9 @@ fn run(request: Request, stop: &AtomicBool, status: &Mutex<Value>) -> Result<()>
                 }
             }
         }
-        for _ in 0..64 {
-            let Some(event) = connection.attempt.pop_event() else {
-                break;
-            };
-            if event["type"] == 8 {
-                ensure!(
-                    (connection.socket.writer)(native_wire::candidate(
-                        &event,
-                        &connection.peer,
-                        &connection.id
-                    )),
-                    "Could not send a network candidate"
-                );
-            }
-        }
+        connection
+            .attempt
+            .poll(&connection.socket.writer, &connection.peer, &connection.id)?;
         // Reuse the Windows host-settings model: query, preserve other fields,
         // write once after the reply, then verify with bounded read-only polls.
         for _ in 0..64 {
@@ -309,9 +282,7 @@ fn run(request: Request, stop: &AtomicBool, status: &Mutex<Value>) -> Result<()>
             }
         }
         if configured && connection.video.take_keyframe_request() {
-            connection
-                .attempt
-                .send_binary(0, config.keyframe_request())?;
+            connection.attempt.keyframe(&config)?;
         }
         audio.check()?;
         if update.elapsed() >= Duration::from_millis(500) {

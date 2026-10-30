@@ -61,9 +61,6 @@ pub struct Choices {
 
 #[derive(Default)]
 struct Counters {
-    input_callbacks: AtomicU64,
-    output_callbacks: AtomicU64,
-    inputs: AtomicU64,
     outputs: AtomicU64,
     skipped: AtomicU64,
     stage: AtomicU32,
@@ -92,9 +89,6 @@ impl Counters {
 }
 #[derive(Serialize)]
 pub struct Snapshot {
-    pub input_callbacks: u64,
-    pub output_callbacks: u64,
-    pub inputs: u64,
     pub submitted: u64,
     pub stage: &'static str,
     pub decoder: Option<String>,
@@ -197,9 +191,6 @@ impl Pipeline {
         queue.check_native_call(Instant::now());
         let error = native_error.or_else(|| queue.report.failure_stage.map(str::to_owned));
         Snapshot {
-            input_callbacks: c.input_callbacks.load(Ordering::Relaxed),
-            output_callbacks: c.output_callbacks.load(Ordering::Relaxed),
-            inputs: c.inputs.load(Ordering::Relaxed),
             submitted: c.outputs.load(Ordering::Relaxed),
             stage: match c.stage.load(Ordering::Relaxed) {
                 1 => "creating codec",
@@ -246,7 +237,6 @@ unsafe extern "C" fn input(_codec: *mut ndk::AMediaCodec, data: *mut c_void, ind
     if c.stopping.load(Ordering::Acquire) {
         return;
     }
-    c.counters.input_callbacks.fetch_add(1, Ordering::Relaxed);
     let mut slots = c.slots.lock().unwrap_or_else(|e| e.into_inner());
     if index < 0 || slots.len() >= 128 {
         c.counters.fail("video-input-slots", index);
@@ -266,7 +256,6 @@ unsafe extern "C" fn output(
     if c.stopping.load(Ordering::Acquire) {
         return;
     }
-    c.counters.output_callbacks.fetch_add(1, Ordering::Relaxed);
     if index < 0 || info.is_null() {
         c.counters.fail("video-output-index", index);
         c.thread.unpark();
@@ -524,10 +513,6 @@ impl Decoder {
         self.callbacks
             .counters
             .check("video-compressed-input", result)?;
-        self.callbacks
-            .counters
-            .inputs
-            .fetch_add(1, Ordering::Relaxed);
         self.callbacks.counters.stage.store(4, Ordering::Relaxed);
         Ok(true)
     }

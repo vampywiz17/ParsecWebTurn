@@ -36,7 +36,27 @@ internal class TvModel(application: Application) : AndroidViewModel(application)
     private val main = Handler(Looper.getMainLooper())
     private val disposed = AtomicBoolean(false)
 
-    init { readSettings() }
+    private val vault = SessionVault(application)
+    init {
+        request {
+            val saved = preferences.getString("requests", "") ?: ""
+            val reply = JSONObject(NativeCore.settings(saved, "", 0))
+            var restored = false
+            var feedback = reply.optString("error")
+            try {
+                val token = vault.load()
+                if (token != null) {
+                    val auth = try { JSONObject(NativeCore.restoreSession(token)) } finally { token.fill(0) }
+                    restored = auth.optBoolean("ok")
+                    if (!restored) { vault.clear(); feedback = auth.optString("error") }
+                }
+            } catch (_: Exception) {
+                runCatching { vault.clear() }
+                feedback = "Saved sign-in could not be restored. Sign in again."
+            }
+            return@request { if (reply.optBoolean("ok")) settings = reply; signedIn = restored; message = feedback }
+        }
+    }
 
     private fun request(work: () -> (() -> Unit)) {
         if (busy || disposed.get()) return
@@ -58,8 +78,8 @@ internal class TvModel(application: Application) : AndroidViewModel(application)
     fun signIn(email: String, password: String, code: String) = request {
         val reply = JSONObject(NativeCore.signIn(email, password, code))
         val ok = reply.optBoolean("ok")
-        val error = reply.optString("error")
-        return@request { signedIn = ok; message = error }
+        val feedback = if (ok) JSONObject(NativeCore.rememberSession(vault)).optString("error") else reply.optString("error")
+        return@request { signedIn = ok; message = feedback }
     }
 
     fun refresh() = request {
@@ -69,11 +89,14 @@ internal class TvModel(application: Application) : AndroidViewModel(application)
             val host = next.getJSONObject(it)
             Host(host.getString("peer"), host.getString("name"))
         }
+        val expired = reply.optBoolean("expired")
+        if (expired) { vault.clear(); NativeCore.signOut() }
         val error = reply.optString("error")
-        return@request { if (updated != null) hosts = updated; message = error }
+        return@request { if (updated != null) hosts = updated; if (expired) { signedIn = false; hosts = emptyList() }; message = error }
     }
 
     fun signOut() = request {
+        vault.clear()
         NativeCore.signOut()
         return@request { signedIn = false; hosts = emptyList(); message = "" }
     }
@@ -146,8 +169,8 @@ internal class TvModel(application: Application) : AndroidViewModel(application)
 
     override fun onCleared() {
         disposed.set(true)
-        // Runs after any in-flight sign-in, so a late result cannot leak a session.
-        worker.execute { runCatching { NativeCore.signOut() } }
+        // Saved sign-in survives normal Activity/process shutdown; only explicit logout revokes it.
+        worker.execute { runCatching { NativeCore.releaseSession() } }
         worker.shutdown()
     }
 }
