@@ -17,6 +17,8 @@ pub mod control;
 mod event_log;
 #[path = "../../../src-native/src/frame_timing.rs"]
 pub mod frame_timing;
+#[path = "../../../src-native/src/native_core/host_video.rs"]
+pub mod host_video;
 #[path = "../../../src-native/src/media_ingress.rs"]
 pub mod media_ingress;
 #[path = "../../../src-native/src/native_wire.rs"]

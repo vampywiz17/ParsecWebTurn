@@ -1,6 +1,6 @@
 //! Owner settings contract: query sub-ID 9, object reply/update sub-ID 11.
 //! Preserve all streams and untouched settings, as the original UI does.
-use super::profile::{Resolution, Video};
+use crate::session_preferences::{Resolution, Video};
 use anyhow::{ensure, Context, Result};
 use serde_json::Value;
 use std::time::{Duration, Instant};

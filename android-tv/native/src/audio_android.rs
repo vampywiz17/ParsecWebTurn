@@ -22,7 +22,7 @@ impl Output {
                 ndk::AAUDIO_PERFORMANCE_MODE_LOW_LATENCY as i32,
             );
             ndk::AAudioStreamBuilder_setUsage(builder, ndk::AAUDIO_USAGE_GAME as i32);
-            ndk::AAudioStreamBuilder_setFormat(builder, ndk::AAUDIO_FORMAT_PCM_I16 as i32);
+            ndk::AAudioStreamBuilder_setFormat(builder, ndk::AAUDIO_FORMAT_PCM_I16);
             ndk::AAudioStreamBuilder_setChannelCount(builder, 2);
             ndk::AAudioStreamBuilder_setSampleRate(builder, 48000);
             let mut stream = std::ptr::null_mut();
@@ -36,7 +36,7 @@ impl Output {
             ensure!(
                 ndk::AAudioStream_getSampleRate(stream) == 48000
                     && ndk::AAudioStream_getChannelCount(stream) == 2
-                    && ndk::AAudioStream_getFormat(stream) == ndk::AAUDIO_FORMAT_PCM_I16 as i32,
+                    && ndk::AAudioStream_getFormat(stream) == ndk::AAUDIO_FORMAT_PCM_I16,
                 "Audio format not supported"
             );
             let burst = ndk::AAudioStream_getFramesPerBurst(stream);

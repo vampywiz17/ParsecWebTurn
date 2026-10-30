@@ -200,6 +200,10 @@ fn run(request: Request, stop: &AtomicBool, status: &Mutex<Value>) -> Result<()>
     let mut pending_since = Instant::now();
     let mut offset = 0;
     let mut configured = false;
+    let mut queried = false;
+    let mut host_config = crate::host_video::Config::default();
+    let mut confirmation = None;
+    let mut settings_confirmed = false;
     let mut signaling_closed = false;
     let started = Instant::now();
     let mut update = Instant::now();
@@ -237,10 +241,25 @@ fn run(request: Request, stop: &AtomicBool, status: &Mutex<Value>) -> Result<()>
                 );
             }
         }
-        // Control is already inspected by Attempt; drain its bounded UI inbox.
+        // Reuse the Windows host-settings model: query, preserve other fields,
+        // write once after the reply, then verify with bounded read-only polls.
         for _ in 0..64 {
-            if connection.attempt.pop_binary().is_none() {
+            let Some((channel, text, frame)) = connection.attempt.pop_binary() else {
                 break;
+            };
+            ensure!(channel == 0 && !text, "Invalid session control channel");
+            match crate::control::decode(&frame)? {
+                crate::control::Message::Status(code) if code != 0 => {
+                    anyhow::bail!("The host ended the stream (status {code}). Check the host encoder and requested video format.");
+                }
+                crate::control::Message::Buffer {
+                    event,
+                    payload: Some(range),
+                } if event["type"] == 3 && event["id"] == 11 => {
+                    let bytes = &frame[range];
+                    host_config.receive(bytes.strip_suffix(&[0]).unwrap_or(bytes))?;
+                }
+                _ => {}
             }
         }
         if let Some(code) = connection.attempt.host_status().filter(|c| *c != 0) {
@@ -250,11 +269,35 @@ fn run(request: Request, stop: &AtomicBool, status: &Mutex<Value>) -> Result<()>
             connection.attempt.failure_stage().is_none(),
             "WebRTC connection failed"
         );
-        if connection.attempt.control_ready() && !configured {
+        if connection.attempt.control_ready() && !queried {
             connection
                 .attempt
-                .send_binary(0, prefs.host_request()?.request(size)?)?;
+                .send_binary(0, crate::host_video::query()?)?;
+            queried = true;
+        }
+        if connection.attempt.control_ready() && host_config.ready() && !configured {
+            let request = host_config.request(&prefs.host_request()?, size)?;
+            confirmation = Some(crate::host_video::Confirmation::new(
+                &request,
+                Instant::now(),
+            )?);
+            connection.attempt.send_binary(0, request)?;
             configured = true;
+        }
+        if let Some(check) = confirmation.as_mut() {
+            match check.poll(&host_config, Instant::now()) {
+                crate::host_video::Verification::Query => connection
+                    .attempt
+                    .send_binary(0, crate::host_video::query()?)?,
+                crate::host_video::Verification::Confirmed => {
+                    settings_confirmed = true;
+                    confirmation = None;
+                }
+                crate::host_video::Verification::TimedOut => {
+                    confirmation = None;
+                }
+                crate::host_video::Verification::Waiting => {}
+            }
         }
         if configured && connection.video.take_keyframe_request() {
             connection
@@ -284,7 +327,7 @@ fn run(request: Request, stop: &AtomicBool, status: &Mutex<Value>) -> Result<()>
                 snapshot.submitted > 0 || started.elapsed() < Duration::from_secs(30),
                 "No video output received within 30 seconds"
             );
-            *status.lock().unwrap_or_else(|e| e.into_inner()) = json!({"state":if snapshot.submitted>0 {"Streaming"} else {"Connecting…"},"ended":false,"video":snapshot});
+            *status.lock().unwrap_or_else(|e| e.into_inner()) = json!({"state":if snapshot.submitted>0 {"Streaming"} else {"Connecting…"},"ended":false,"video":snapshot,"settings_confirmed":settings_confirmed});
             update = Instant::now();
         }
         thread::park_timeout(Duration::from_millis(if pending.is_some() {
