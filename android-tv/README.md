@@ -54,6 +54,8 @@ Next implementation steps, in order:
    unmodified Parsec host compatibility, including TURN UDP/TLS/TCP.
 2. Add the Android media backend: **MediaCodec hardware decoder → SurfaceView
    Surface → Android compositor**. Supply compressed access units to codec input;
+   prefer Rust's documented NDK MediaCodec/ANativeWindow bindings, attaching the
+   Android Surface at lifecycle boundaries instead of forwarding every frame via JNI.
    do not copy decoded frames to Rust/Java arrays, Bitmap, CPU YUV/RGB buffers or
    a TextureView/OpenGL intermediate. Keep UI composition separate from video.
    Hardware selection and format/rate capabilities must be checked at runtime;

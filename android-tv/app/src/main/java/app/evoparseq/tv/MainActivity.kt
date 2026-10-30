@@ -24,11 +24,14 @@ import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.input.key.*
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.ImeAction
@@ -183,6 +186,7 @@ private fun AccountField(label: String, value: String, change: (String) -> Unit,
         Text(label, style = MaterialTheme.typography.labelLarge)
         BasicTextField(value, change, singleLine = true,
             textStyle = TextStyle(color = Color.White, fontSize = 18.sp),
+            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
             keyboardOptions = KeyboardOptions(keyboardType = type,
                 imeAction = if (done) ImeAction.Done else ImeAction.Next),
             keyboardActions = KeyboardActions(onNext = {
@@ -192,6 +196,7 @@ private fun AccountField(label: String, value: String, change: (String) -> Unit,
             }),
             visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
             modifier = modifier.width(480.dp).onFocusChanged { focused = it.isFocused }
+                .semantics { contentDescription = label }
                 .onPreviewKeyEvent { event ->
                     if (event.type != KeyEventType.KeyDown || keyboardVisible) false
                     else when (event.key) {
