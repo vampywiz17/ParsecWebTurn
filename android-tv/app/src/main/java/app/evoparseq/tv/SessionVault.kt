@@ -62,6 +62,7 @@ internal class SessionVault(context: Context) {
     }
     fun clear() {
         file.delete()
+        check(!file.baseFile.exists() && !File(file.baseFile.path + ".bak").exists())
         KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry(alias) }
     }
 }

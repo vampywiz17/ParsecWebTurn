@@ -90,15 +90,18 @@ internal class TvModel(application: Application) : AndroidViewModel(application)
             Host(host.getString("peer"), host.getString("name"))
         }
         val expired = reply.optBoolean("expired")
-        if (expired) { vault.clear(); NativeCore.signOut() }
+        if (expired) { runCatching { vault.clear() }; NativeCore.signOut() }
         val error = reply.optString("error")
         return@request { if (updated != null) hosts = updated; if (expired) { signedIn = false; hosts = emptyList() }; message = error }
     }
 
     fun signOut() = request {
-        vault.clear()
+        val forgotten = runCatching { vault.clear() }.isSuccess
         NativeCore.signOut()
-        return@request { signedIn = false; hosts = emptyList(); message = "" }
+        return@request {
+            signedIn = false; hosts = emptyList()
+            message = if (forgotten) "" else "Signed out, but local sign-in storage could not be fully cleared."
+        }
     }
 
     fun inspectDecoders() = request {

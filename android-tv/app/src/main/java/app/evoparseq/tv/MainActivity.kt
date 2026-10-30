@@ -239,7 +239,7 @@ private fun TvSettings(model: TvModel, first: FocusRequester, back: () -> Unit) 
         Button(onClick = back, modifier = Modifier.focusRequester(first)) { Text("Back") }
         Text("Settings", style = MaterialTheme.typography.headlineSmall)
         Text("Saved requests for the next session. The host chooses the actual format.\n" +
-            "WebRTC direct/STUN streaming preview. BUD and custom TURN settings follow later.")
+            "WebRTC direct/STUN or BUD direct UDP preview. Custom TURN settings are not available yet.")
         if (model.settings == null) {
             Button(onClick = model::readSettings, enabled = !model.busy) { Text("Reload settings") }
         }
@@ -258,10 +258,9 @@ private fun TvSettings(model: TvModel, first: FocusRequester, back: () -> Unit) 
             val selected = choice.getInt("selected")
             repeat(choices.length()) { index ->
                 Button(onClick = { model.selectSetting(choice.getString("key"), index); choosing = null },
-                    enabled = !model.busy && !(choice.getString("key") == "transport" && index == 1),
+                    enabled = !model.busy,
                     modifier = if (index == selected) Modifier.focusRequester(optionFocus) else Modifier) {
-                    Text((if (index == selected) "✓  " else "") + choices.getString(index) +
-                        (if (choice.getString("key") == "transport" && index == 1) " · not available yet" else ""))
+                    Text((if (index == selected) "✓  " else "") + choices.getString(index))
                 }
             }
         }

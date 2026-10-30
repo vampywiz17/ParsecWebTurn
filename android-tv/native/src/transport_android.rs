@@ -21,7 +21,7 @@ use std::{
 };
 
 pub enum Transport {
-    WebRtc(Attempt),
+    WebRtc(Box<Attempt>),
     Bud(Box<Bud>),
 }
 pub struct Bud {
@@ -63,7 +63,7 @@ impl Transport {
                 None,
             )?;
             attempt.start_android_media(video);
-            return Ok(Self::WebRtc(attempt));
+            return Ok(Self::WebRtc(Box::new(attempt)));
         }
         let mut session = Session::external_video_depth(config.allow_hevc, config.ten_bit)?;
         session.wake_consumer(std::thread::current());
@@ -227,7 +227,7 @@ impl Transport {
             Self::Bud(b) => b.controls.pop_front().map(|b| (0, false, b)),
         }
     }
-    pub fn send_binary(&self, channel: u16, bytes: Bytes) -> Result<()> {
+    pub fn send_binary(&mut self, channel: u16, bytes: Bytes) -> Result<()> {
         match self {
             Self::WebRtc(a) => a.send_binary(channel, bytes),
             Self::Bud(b) => {
