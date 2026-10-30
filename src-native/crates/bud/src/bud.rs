@@ -206,7 +206,8 @@ impl Session {
     pub fn send_frame(&mut self, bytes: &[u8]) -> Result<()> {
         use lowlat_core::control::{self, op};
         if bytes.get(12) == Some(&op::USER_DATA) {
-            let message = control::parse(bytes).map_err(|_| anyhow!("Invalid BUD control frame"))?;
+            let message =
+                control::parse(bytes).map_err(|_| anyhow!("Invalid BUD control frame"))?;
             ensure!(
                 message.body.len() <= control::USER_DATA_MAX,
                 "BUD user data exceeds limit"
