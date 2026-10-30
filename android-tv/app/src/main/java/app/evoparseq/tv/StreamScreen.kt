@@ -82,8 +82,6 @@ internal fun StreamScreen(model: TvModel, host: Host, close: () -> Unit) {
                 if (error.isNotEmpty()) Text("Stage ${network.optString("failure_stage")} · channel ${network.optString("failure_channel")} · ${network.optString("read_error")}\n" +
                     "Control queue ${network.optInt("queued_control_messages")} · max message C/V/A ${network.optJSONArray("max_message_bytes")}", color = Color(0xFFFFB4AB))
                 Text("Empty messages C/V/A ${network.optJSONArray("empty_messages")}", color = Color(0xFFA8BED7))
-                Text("Received messages C/V/A ${network.optJSONArray("received_messages")}\n" +
-                    "Received bytes C/V/A ${network.optJSONArray("received_bytes")}", color = Color(0xFFA8BED7))
             }
             if (video != null && (!video.isNull("error") || video.optLong("submitted") == 0L)) {
                 Text("${video.optString("stage")} · ${video.optString("decoder")}\n" +
@@ -102,8 +100,7 @@ internal fun StreamScreen(model: TvModel, host: Host, close: () -> Unit) {
                 Text("Audio ${audioOutput.optString("state")} · decoded ${audioStatus.optLong("packets_decoded")} · errors ${audioStatus.optLong("decode_errors")}\n" +
                     "Frames written ${audioOutput.optLong("frames_written")} · read ${audioOutput.optLong("frames_read")} · underruns ${audioOutput.optInt("xruns")}\n" +
                     "Callbacks ${audioOutput.optLong("callbacks")} · PCM frames ${audioOutput.optLong("pcm_frames")} · peak ${audioOutput.optInt("peak")}/32768\n" +
-                    "Queued ${audioStatus.optInt("queued_frames")} · dropped ${audioStatus.optLong("packets_dropped")} · decoder ${if (audioStatus.optBoolean("worker_finished")) "stopped" else "running"}\n" +
-                    "Silence frames ${audioOutput.optLong("silent_frames")} · buffer ${audioOutput.optInt("buffer_frames")} frames",
+                    "Queued ${audioStatus.optInt("queued_frames")} · silence frames ${audioOutput.optLong("silent_frames")} · buffer ${audioOutput.optInt("buffer_frames")} frames",
                     color = Color(0xFFA8BED7))
             }
             Text("View and audio preview · controller input follows next", color = Color(0xFFA8BED7))

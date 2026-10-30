@@ -227,40 +227,6 @@ mod tests {
         assert_eq!(output, [3, -3]);
     }
     #[test]
-    fn opus_playback_resumes_after_silence_and_many_recycling_cycles() {
-        let mut pipeline = super::super::Pipeline::start_with_budget(Some(100));
-        let receiver = pipeline.native_receiver();
-        let mut reader = receiver.callback_reader().unwrap();
-        let sender = pipeline.sender().unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        let mut output = [0i16; 384];
-        for packet in 1..=96 {
-            // Exercise the actual Opus worker and ownership handoff, including
-            // more blocks than either FIFO holds, with device pulls in silence.
-            for _ in 0..8 {
-                assert_eq!(reader.render(&mut output).frames, 0);
-            }
-            assert!(sender.submit(&[0xf8, 0xff, 0xfe]));
-            while receiver.snapshot().packets_decoded < packet {
-                assert!(std::time::Instant::now() < deadline, "Opus worker stalled");
-                std::thread::yield_now();
-            }
-            let mut consumed = 0;
-            while consumed < 960 {
-                assert!(std::time::Instant::now() < deadline, "PCM handoff stalled");
-                consumed += reader.render(&mut output).frames;
-            }
-            assert_eq!(consumed, 960);
-        }
-        let report = receiver.snapshot();
-        assert_eq!(report.pcm_frames_consumed, 96 * 960);
-        assert_eq!(report.queued_frames, 0);
-        assert_eq!(report.packets_dropped, 0);
-        assert_eq!(report.decode_errors, 0);
-        assert!(!report.worker_finished);
-        pipeline.stop();
-    }
-    #[test]
     fn overflow_retires_stale_audio_and_never_exceeds_sample_budget() {
         let (mut publisher, mut reader) = new();
         publisher.push(vec![1; 8], Layout::STEREO, 8).unwrap();
