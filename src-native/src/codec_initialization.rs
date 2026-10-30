@@ -12,6 +12,7 @@ pub struct Geometry {
     pub depth: u32,
 }
 
+#[derive(PartialEq, Eq)]
 pub struct Initialization {
     pub geometry: Geometry,
     pub csd0: Vec<u8>,
@@ -145,23 +146,40 @@ pub fn initialize(units: &[Vec<u8>], codec: Codec) -> Option<Initialization> {
     let geometry = match codec {
         Codec::H264 => {
             let (_, geometry) = units.iter().rev().find_map(|u| avc_sps(u))?;
+            // A parameter-set ID is replaced, not accumulated. Canonical ID
+            // order also keeps identical header repeats from reopening a codec.
+            let mut sequences = [None::<&[u8]>; 32];
             let mut ids = 0u32;
-            for unit in units {
+            for unit in units.iter().rev() {
                 if let Some((id, shape)) = avc_sps(unit) {
-                    if shape == geometry {
+                    if shape == geometry && sequences[id as usize].is_none() {
                         ids |= 1 << id;
-                        append(&mut csd0, unit);
+                        sequences[id as usize] = Some(unit);
                     }
                 }
             }
-            for unit in units {
+            for unit in sequences.into_iter().flatten() {
+                append(&mut csd0, unit);
+            }
+            let mut pictures = [None::<&[u8]>; 256];
+            for unit in units.iter().rev() {
                 if unit[0] & 31 == 8 {
                     let mut bits = ParameterBits::new(&unit[1..]);
-                    bits.ue()?;
-                    let id = bits.ue()?;
-                    if id < 32 && ids & (1 << id) != 0 {
-                        append(&mut csd1, unit);
+                    let id = usize::try_from(bits.ue()?).ok()?;
+                    if id >= pictures.len() {
+                        return None;
                     }
+                    if pictures[id].is_none() {
+                        pictures[id] = Some(unit);
+                    }
+                }
+            }
+            for unit in pictures.into_iter().flatten() {
+                let mut bits = ParameterBits::new(&unit[1..]);
+                bits.ue()?;
+                let id = bits.ue()?;
+                if id < 32 && ids & (1 << id) != 0 {
+                    append(&mut csd1, unit);
                 }
             }
             if csd1.is_empty() {
@@ -263,6 +281,21 @@ mod tests {
         assert_eq!(config.csd0, [vec![0, 0, 0, 1], unit].concat());
         assert_eq!(config.csd1, vec![0, 0, 0, 1, 0x68, 0xc0]);
     }
+    #[test]
+    fn latest_parameter_id_replaces_old_bytes_and_repeats_have_stable_configuration() {
+        let old = sps(120, 68, 4);
+        let mut new = old.clone();
+        new[3] = 41;
+        let old_pps = vec![0x68, 0xc0];
+        let new_pps = vec![0x68, 0xc8];
+        let config =
+            initialize(&[old, old_pps, new.clone(), new_pps.clone()], Codec::H264).unwrap();
+        assert_eq!(config.csd0, [vec![0, 0, 0, 1], new.clone()].concat());
+        assert_eq!(config.csd1, [vec![0, 0, 0, 1], new_pps.clone()].concat());
+        let repeat = initialize(&[new_pps, new], Codec::H264).unwrap();
+        assert!(config == repeat);
+    }
+
     #[test]
     fn reject_truncated_oversized_and_unrelated_parameters_without_panicking() {
         let unit = sps(120, 68, 4);
