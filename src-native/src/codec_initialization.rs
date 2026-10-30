@@ -25,6 +25,12 @@ pub fn avc_sps(nal: &[u8]) -> Option<(u32, Geometry)> {
     }
     let mut bits = ParameterBits::new(nal.get(1..)?);
     let profile = bits.read(8)?;
+    if !matches!(
+        profile,
+        66 | 77 | 88 | 100 | 110 | 122 | 244 | 44 | 83 | 86 | 118 | 128 | 138 | 139 | 134 | 135
+    ) {
+        return None;
+    }
     bits.skip(16)?;
     let id = bits.ue()?;
     if id > 31 {
@@ -118,6 +124,77 @@ pub fn avc_sps(nal: &[u8]) -> Option<(u32, Geometry)> {
             depth: 8,
         },
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // Build standard baseline SPS syntax through frame cropping. No driver,
+    // network, account or decoded image is involved in metadata validation.
+    fn sps(width_mbs: u32, height_mbs: u32, bottom_crop: u32) -> Vec<u8> {
+        let mut bits = Vec::new();
+        fn word(bits: &mut Vec<bool>, n: u32, len: u32) {
+            for shift in (0..len).rev() {
+                bits.push(n & (1 << shift) != 0);
+            }
+        }
+        fn ue(bits: &mut Vec<bool>, n: u32) {
+            let n = n + 1;
+            let len = 32 - n.leading_zeros();
+            bits.extend(std::iter::repeat_n(false, (len - 1) as usize));
+            word(bits, n, len);
+        }
+        word(&mut bits, 66, 8);
+        word(&mut bits, 0, 8);
+        word(&mut bits, 40, 8);
+        for n in [0, 0, 0, 0, 1] {
+            ue(&mut bits, n);
+        }
+        bits.push(false);
+        ue(&mut bits, width_mbs - 1);
+        ue(&mut bits, height_mbs - 1);
+        bits.extend([true, true, true]);
+        for n in [0, 0, 0, bottom_crop] {
+            ue(&mut bits, n);
+        }
+        bits.push(true);
+        while bits.len() % 8 != 0 {
+            bits.push(false);
+        }
+        let mut nal = vec![0x67];
+        for chunk in bits.chunks(8) {
+            nal.push(
+                chunk
+                    .iter()
+                    .fold(0, |value, bit| (value << 1) | u8::from(*bit)),
+            );
+        }
+        nal
+    }
+    #[test]
+    fn cropped_avc_keeps_coded_and_visible_dimensions_and_requires_pps() {
+        let unit = sps(120, 68, 4);
+        let (_, geometry) = avc_sps(&unit).unwrap();
+        assert_eq!((geometry.width, geometry.height), (1920, 1088));
+        assert_eq!(
+            (geometry.visible_width, geometry.visible_height),
+            (1920, 1080)
+        );
+        assert!(initialize(std::slice::from_ref(&unit), Codec::H264).is_none());
+        let config = initialize(&[unit.clone(), vec![0x68, 0xc0]], Codec::H264).unwrap();
+        assert_eq!(config.csd0, [vec![0, 0, 0, 1], unit].concat());
+        assert_eq!(config.csd1, vec![0, 0, 0, 1, 0x68, 0xc0]);
+    }
+    #[test]
+    fn reject_truncated_oversized_and_unrelated_parameters_without_panicking() {
+        let unit = sps(120, 68, 4);
+        for end in 0..unit.len() - 1 {
+            assert!(avc_sps(&unit[..end]).is_none());
+        }
+        assert!(avc_sps(&sps(1024, 68, 0)).is_none());
+        assert!(initialize(&[vec![]], Codec::H264).is_none());
+        assert!(initialize(&[unit, vec![0x68, 0xa0]], Codec::H264).is_none()); // PPS references SPS 1.
+    }
 }
 
 fn signed(code: u32) -> Option<i32> {

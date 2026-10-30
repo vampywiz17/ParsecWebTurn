@@ -24,6 +24,14 @@ struct Running {
     status: Arc<Mutex<Value>>,
 }
 static RUNNING: Mutex<Option<Running>> = Mutex::new(None);
+struct Request {
+    session: Arc<Session>,
+    peer: String,
+    prefs: Preferences,
+    window: NativeWindow,
+    choices: Choices,
+    size: (u32, u32),
+}
 
 pub fn start(
     session: Arc<Session>,
@@ -67,12 +75,14 @@ pub fn start(
         .name("android-session".into())
         .spawn(move || {
             let result = run(
-                session,
-                &peer,
-                prefs,
-                window,
-                choices,
-                size,
+                Request {
+                    session,
+                    peer,
+                    prefs,
+                    window,
+                    choices,
+                    size,
+                },
                 &worker_stop,
                 &worker_status,
             );
@@ -125,16 +135,15 @@ impl Drop for Connection {
         self.video.stop();
     }
 }
-fn run(
-    session: Arc<Session>,
-    peer: &str,
-    prefs: Preferences,
-    window: NativeWindow,
-    choices: Choices,
-    size: (u32, u32),
-    stop: &AtomicBool,
-    status: &Mutex<Value>,
-) -> Result<()> {
+fn run(request: Request, stop: &AtomicBool, status: &Mutex<Value>) -> Result<()> {
+    let Request {
+        session,
+        peer,
+        prefs,
+        window,
+        choices,
+        size,
+    } = request;
     if stop.load(Ordering::Acquire) {
         return Ok(());
     }
@@ -177,7 +186,7 @@ fn run(
     let connection = Connection {
         attempt,
         socket,
-        peer: peer.into(),
+        peer,
         id,
         video,
     };
@@ -188,6 +197,7 @@ fn run(
     receiver.set_native_consumer(thread::current());
     let audio = audio_android::Output::open()?;
     let mut pending = None;
+    let mut pending_since = Instant::now();
     let mut offset = 0;
     let mut configured = false;
     let mut signaling_closed = false;
@@ -253,12 +263,16 @@ fn run(
         }
         if pending.is_none() {
             pending = receiver.take_native_pcm();
+            pending_since = Instant::now();
             offset = 0;
         }
         if let Some(block) = pending.as_ref() {
             offset += audio.write(&block.pcm[offset..])?;
             if offset == block.pcm.len() {
                 receiver.recycle_handoff(pending.take().unwrap());
+            } else if pending_since.elapsed() >= Duration::from_millis(100) {
+                receiver.recycle_handoff(pending.take().unwrap());
+                receiver.discard_pending();
             }
         }
         if update.elapsed() >= Duration::from_millis(500) {
@@ -273,7 +287,11 @@ fn run(
             *status.lock().unwrap_or_else(|e| e.into_inner()) = json!({"state":if snapshot.submitted>0 {"Streaming"} else {"Connecting…"},"ended":false,"video":snapshot});
             update = Instant::now();
         }
-        thread::park_timeout(Duration::from_millis(4));
+        thread::park_timeout(Duration::from_millis(if pending.is_some() {
+            4
+        } else {
+            25
+        }));
     }
     Ok(())
 }
