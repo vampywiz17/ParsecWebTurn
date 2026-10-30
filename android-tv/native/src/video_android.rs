@@ -38,6 +38,15 @@ impl Drop for NativeWindow {
     }
 }
 
+struct MediaFormat(*mut ndk::AMediaFormat);
+impl Drop for MediaFormat {
+    fn drop(&mut self) {
+        unsafe {
+            ndk::AMediaFormat_delete(self.0);
+        }
+    }
+}
+
 #[derive(Clone, Deserialize)]
 pub struct Choice {
     pub name: String,
@@ -243,8 +252,14 @@ unsafe extern "C" fn format(
     data: *mut c_void,
     f: *mut ndk::AMediaFormat,
 ) {
+    if f.is_null() {
+        return;
+    }
+    // The NDK gives the callback a new format copy. Release it even when
+    // stopping; it is metadata only, never a decoded output buffer.
+    let _owned = MediaFormat(f);
     let c = unsafe { &*data.cast::<Callbacks>() };
-    if c.stopping.load(Ordering::Acquire) || f.is_null() {
+    if c.stopping.load(Ordering::Acquire) {
         return;
     }
     let get = |key: &std::ffi::CStr| -> Option<i32> {
@@ -335,6 +350,7 @@ impl Decoder {
         );
         let f = unsafe { ndk::AMediaFormat_new() };
         ensure!(!f.is_null(), "MediaCodec format allocation failed");
+        let owned = MediaFormat(f);
         unsafe {
             ndk::AMediaFormat_setString(
                 f,
@@ -373,9 +389,7 @@ impl Decoder {
         }
         let result =
             unsafe { ndk::AMediaCodec_configure(native, f, window.0, std::ptr::null_mut(), 0).0 };
-        unsafe {
-            ndk::AMediaFormat_delete(f);
-        }
+        drop(owned);
         ensure!(
             result == 0,
             "MediaCodec Surface configuration failed ({result})"
