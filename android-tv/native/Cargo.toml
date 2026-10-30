@@ -26,6 +26,7 @@ futures-util = { version = "0.3", features = ["sink"] }
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "handshake", "rustls-tls-webpki-roots"] }
 webrtc = "=0.14.0"
 libopus_sys = { version = "=0.3.3", features = ["bundled", "static"] }
+rtrb = "=0.4.1"
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni = { version = "0.21.1", default-features = false }

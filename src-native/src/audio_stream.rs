@@ -1,7 +1,12 @@
 //! RFC 6716 reference decoder. The pinned Parsec channel carries raw Opus,
 //! 48 kHz stereo; containers/RTP headers must not be invented around it.
 use crate::audio_layout::Layout;
+#[cfg(not(windows))]
+#[path = "audio_callback.rs"]
+mod callback;
 use anyhow::{bail, Result};
+#[cfg(not(windows))]
+pub use callback::CallbackReader;
 use serde::Serialize;
 use std::{
     collections::VecDeque,
@@ -25,6 +30,8 @@ pub struct Snapshot {
 }
 #[derive(Default)]
 struct State {
+    #[cfg(not(windows))]
+    callback: Option<callback::Publisher>,
     report: Snapshot,
     pcm: VecDeque<Vec<i16>>,
     free_pcm: Vec<Vec<i16>>,
@@ -36,6 +43,10 @@ struct State {
 }
 impl State {
     fn discard_pending(&mut self) {
+        #[cfg(not(windows))]
+        if let Some(callback) = &self.callback {
+            callback.discard();
+        }
         self.generation = self.generation.wrapping_add(1);
         while let Some(pcm) = self.pcm.pop_front() {
             self.report.packets_dropped += 1;
@@ -52,6 +63,17 @@ pub struct Handoff {
     pub pcm: Vec<i16>,
 }
 fn stage_pcm(state: &mut State, mut pcm: Vec<i16>, max_samples: usize) {
+    #[cfg(not(windows))]
+    if let Some(callback) = state.callback.as_mut() {
+        let layout = state.report.layout.unwrap_or(Layout::STEREO);
+        if let Err(pcm) = callback.push(pcm, layout, max_samples) {
+            state.report.packets_dropped += 1;
+            if state.free_pcm.len() < RECYCLED_BUFFERS {
+                state.free_pcm.push(pcm);
+            }
+        }
+        return;
+    }
     if pcm.len() > max_samples {
         pcm.drain(..pcm.len() - max_samples);
         state.report.packets_dropped += 1;
@@ -156,18 +178,34 @@ struct Packet {
 pub struct NativeReceiver {
     state: Arc<Mutex<State>>,
 }
+
 fn snapshot(shared: &Mutex<State>) -> Snapshot {
-    let mut report = shared
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .report
-        .clone();
+    let state = shared.lock().unwrap_or_else(|e| e.into_inner());
+    let mut report = state.report.clone();
+    #[cfg(not(windows))]
+    if let Some(callback) = &state.callback {
+        callback.snapshot(&mut report);
+    }
     report.queued_frames =
         report.queued_samples / usize::from(report.layout.unwrap_or(Layout::STEREO).channels);
     report
 }
 
 impl NativeReceiver {
+    #[cfg(not(windows))]
+    pub fn callback_reader(&self) -> Result<CallbackReader> {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.callback.is_some() {
+            bail!("An audio callback consumer already exists");
+        }
+        let (publisher, reader) = callback::new();
+        state.callback = Some(publisher);
+        state.report.queued_samples = 0;
+        while let Some(pcm) = state.pcm.pop_front() {
+            stage_pcm(&mut state, pcm, MAX_SAMPLES);
+        }
+        Ok(reader)
+    }
     #[cfg(not(windows))]
     pub fn snapshot(&self) -> Snapshot {
         snapshot(&self.state)
@@ -340,11 +378,16 @@ impl Pipeline {
                         Err(mpsc::RecvTimeoutError::Timeout) => continue,
                         Err(mpsc::RecvTimeoutError::Disconnected) => break,
                     };
-                    let recycled = shared
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .free_pcm
-                        .pop();
+                    let recycled = {
+                        let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
+                        #[cfg(not(windows))]
+                        while let Some(pcm) = state.callback.as_mut().and_then(|c| c.recycled()) {
+                            if state.free_pcm.len() < RECYCLED_BUFFERS {
+                                state.free_pcm.push(pcm);
+                            }
+                        }
+                        state.free_pcm.pop()
+                    };
                     let mut pcm = recycled.unwrap_or_else(|| Vec::with_capacity(PCM_SAMPLES));
                     let decoded = if packet.raw {
                         pcm.clear();

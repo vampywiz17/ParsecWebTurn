@@ -3,9 +3,7 @@ use crate::{
     account::Session,
     account_signaling::Socket,
     attempt::{Attempt, Output, StunProvider},
-    audio_android,
-    audio_playback::Playback,
-    native_wire,
+    audio_android, native_wire,
     preferences::Preferences,
     video_android::{Choices, NativeWindow, Pipeline},
 };
@@ -199,9 +197,7 @@ fn run(request: Request, stop: &AtomicBool, status: &Mutex<Value>) -> Result<()>
         .attempt
         .audio_receiver()
         .context("Audio pipeline unavailable")?;
-    receiver.set_native_consumer(thread::current());
-    let mut audio = audio_android::Output::open()?;
-    let mut playback = Playback::new(receiver);
+    let audio = audio_android::Output::open(receiver.clone())?;
     let mut configured = false;
     let mut queried = false;
     let mut host_config = crate::host_video::Config::default();
@@ -307,11 +303,11 @@ fn run(request: Request, stop: &AtomicBool, status: &Mutex<Value>) -> Result<()>
                 .attempt
                 .send_binary(0, config.keyframe_request())?;
         }
-        let retry_audio = playback.pump(|pcm| audio.write(pcm))?;
+        audio.check()?;
         if update.elapsed() >= Duration::from_millis(500) {
             let snapshot = connection.video.snapshot();
             *status.lock().unwrap_or_else(|e| e.into_inner()) = json!({"state":if snapshot.submitted>0 {"Streaming"} else {"Connecting…"},"ended":false,"video":snapshot,"settings_confirmed":settings_confirmed,
-                "audio":playback.snapshot(),"audio_output":audio.snapshot(),"audio_stale_frames":playback.stale_frames});
+                "audio":receiver.snapshot(),"audio_output":audio.snapshot()});
             if let Some(error) = snapshot.error.as_ref() {
                 anyhow::bail!("{error}");
             }
@@ -321,7 +317,7 @@ fn run(request: Request, stop: &AtomicBool, status: &Mutex<Value>) -> Result<()>
             );
             update = Instant::now();
         }
-        thread::park_timeout(Duration::from_millis(if retry_audio { 4 } else { 25 }));
+        thread::park_timeout(Duration::from_millis(25));
     }
     Ok(())
 }

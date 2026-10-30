@@ -6,19 +6,31 @@ use std::{collections::VecDeque, sync::Mutex};
 pub struct OutputIndex {
     pub index: usize,
     pub render: bool,
+    pub skipped: bool,
 }
-pub struct OutputIndices(VecDeque<OutputIndex>);
+pub struct OutputIndices {
+    indices: VecDeque<OutputIndex>,
+    pictures: usize,
+}
 impl Default for OutputIndices {
     fn default() -> Self {
-        Self(VecDeque::with_capacity(128))
+        Self {
+            indices: VecDeque::with_capacity(128),
+            pictures: 0,
+        }
     }
 }
 impl OutputIndices {
     pub fn push(&mut self, index: usize, render: bool) -> bool {
-        if self.0.len() == 128 {
+        if self.indices.len() == 128 {
             return false;
         }
-        self.0.push_back(OutputIndex { index, render });
+        self.pictures += usize::from(render);
+        self.indices.push_back(OutputIndex {
+            index,
+            render,
+            skipped: false,
+        });
         true
     }
 }
@@ -33,7 +45,16 @@ pub fn drain_outputs(
     loop {
         let next = {
             let mut indices = queue.lock().unwrap_or_else(|e| e.into_inner());
-            indices.0.pop_front()
+            indices.indices.pop_front().map(|mut output| {
+                if output.render {
+                    indices.pictures -= 1;
+                    // Only an already decoded, newer picture can supersede
+                    // this one. Always retain the final picture in a burst.
+                    output.skipped = indices.pictures > 0;
+                    output.render = !output.skipped;
+                }
+                output
+            })
         };
         let Some(next) = next else {
             return Ok(());
@@ -112,9 +133,32 @@ mod tests {
         .unwrap();
         assert_eq!(
             released,
-            (0..128).map(|i| (i, i % 2 == 0)).collect::<Vec<_>>()
+            (0..128).map(|i| (i, i == 126)).collect::<Vec<_>>()
         );
         drain_outputs(&queue, |_| panic!("Already released an output index")).unwrap();
+    }
+
+    #[test]
+    fn output_catch_up_keeps_the_last_picture_even_with_trailing_codec_metadata() {
+        let mut indices = OutputIndices::default();
+        for (index, picture) in [(0, false), (1, true), (2, true), (3, false)] {
+            assert!(indices.push(index, picture));
+        }
+        let mut released = Vec::new();
+        drain_outputs(&Mutex::new(indices), |o| {
+            released.push((o.index, o.render, o.skipped));
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(
+            released,
+            [
+                (0, false, false),
+                (1, false, true),
+                (2, true, false),
+                (3, false, false)
+            ]
+        );
     }
 
     #[test]

@@ -83,13 +83,16 @@ internal fun StreamScreen(model: TvModel, host: Host, close: () -> Unit) {
                     color = Color(0xFFA8BED7))
             }
             if (width > 0 && height > 0) Text("${video?.optString("codec")} · $width × $height · ${video?.optInt("depth")}-bit", color = Color(0xFFA8BED7))
+            if (video != null && video.optLong("submitted") > 0L) Text("Video queue ${video.optInt("queued")} · wait ${video.optDouble("queue_wait_ms").toInt()} ms · catch-up skipped ${video.optLong("skipped")}\n" +
+                "Compressed drops ${video.optLong("dropped")} · Surface frames ${video.optLong("submitted")}", color = Color(0xFFA8BED7))
             val audioStatus = status?.optJSONObject("audio")
             if (focusGranted == false) Text("Android did not grant audio focus", color = Color(0xFFFFB4AB))
             val audioOutput = status?.optJSONObject("audio_output")
             if (audioStatus != null && audioOutput != null) {
                 Text("Audio ${audioOutput.optString("state")} · decoded ${audioStatus.optLong("packets_decoded")} · errors ${audioStatus.optLong("decode_errors")}\n" +
                     "Frames written ${audioOutput.optLong("frames_written")} · read ${audioOutput.optLong("frames_read")} · underruns ${audioOutput.optInt("xruns")}\n" +
-                    "Queued ${audioStatus.optInt("queued_frames")} · dropped ${audioStatus.optLong("packets_dropped")} · stale frames ${status?.optLong("audio_stale_frames") ?: 0}",
+                    "Callbacks ${audioOutput.optLong("callbacks")} · PCM frames ${audioOutput.optLong("pcm_frames")} · peak ${audioOutput.optInt("peak")}/32768\n" +
+                    "Queued ${audioStatus.optInt("queued_frames")} · silence frames ${audioOutput.optLong("silent_frames")} · buffer ${audioOutput.optInt("buffer_frames")} frames",
                     color = Color(0xFFA8BED7))
             }
             Text("View and audio preview · controller input follows next", color = Color(0xFFA8BED7))

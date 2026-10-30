@@ -1,11 +1,77 @@
-//! AAudio owns device buffering; the existing Rust Opus pipeline owns the only
-//! application PCM queue. Writes are nonblocking and never delay video delivery.
+//! AAudio pulls the common PCM queue on its own real-time callback.
+use crate::audio_stream::{CallbackReader, NativeReceiver};
 use anyhow::{ensure, Result};
 use ndk_sys as ndk;
+use std::{
+    cell::UnsafeCell,
+    ffi::c_void,
+    sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, Ordering},
+};
 
+struct Callback {
+    reader: UnsafeCell<CallbackReader>,
+    stopping: AtomicBool,
+    error: AtomicI32,
+    callbacks: AtomicU64,
+    pcm_frames: AtomicU64,
+    silent_frames: AtomicU64,
+    peak: AtomicU32,
+}
+impl Callback {
+    fn fail(&self, code: i32) {
+        let _ = self
+            .error
+            .compare_exchange(0, code, Ordering::Relaxed, Ordering::Relaxed);
+    }
+}
+unsafe extern "C" fn data(
+    _stream: *mut ndk::AAudioStream,
+    user: *mut c_void,
+    output: *mut c_void,
+    frames: i32,
+) -> i32 {
+    // NDK owns this writable stereo i16 buffer for this callback only.
+    // Boxed userData stays alive until close has stopped native callbacks.
+    if user.is_null() || output.is_null() || frames <= 0 {
+        return ndk::AAUDIO_CALLBACK_RESULT_STOP as i32;
+    }
+    let state = &*user.cast::<Callback>();
+    let Some(samples) = (frames as usize).checked_mul(2) else {
+        return ndk::AAUDIO_CALLBACK_RESULT_STOP as i32;
+    };
+    let output = std::slice::from_raw_parts_mut(output.cast::<i16>(), samples);
+    if state.stopping.load(Ordering::Relaxed) {
+        output.fill(0);
+        return ndk::AAUDIO_CALLBACK_RESULT_STOP as i32;
+    }
+    state.callbacks.fetch_add(1, Ordering::Relaxed);
+    // AAudio documents serialized callbacks. Only this callback accesses the
+    // reader; other threads use atomic counters. No locks, allocation, stream
+    // commands, network or decoder work run on this real-time thread.
+    let result = (&mut *state.reader.get()).render(output);
+    state
+        .pcm_frames
+        .fetch_add(result.frames as u64, Ordering::Relaxed);
+    state
+        .silent_frames
+        .fetch_add((frames as usize - result.frames) as u64, Ordering::Relaxed);
+    state
+        .peak
+        .fetch_max(u32::from(result.peak), Ordering::Relaxed);
+    if result.invalid_layout {
+        state.fail(ndk::AAUDIO_ERROR_INVALID_FORMAT);
+        return ndk::AAUDIO_CALLBACK_RESULT_STOP as i32;
+    }
+    ndk::AAUDIO_CALLBACK_RESULT_CONTINUE as i32
+}
+unsafe extern "C" fn error(_stream: *mut ndk::AAudioStream, user: *mut c_void, code: i32) {
+    if let Some(state) = user.cast::<Callback>().as_ref() {
+        state.fail(code);
+    }
+}
 pub struct Output {
     stream: *mut ndk::AAudioStream,
-    started: bool,
+    callback: Option<Box<Callback>>,
 }
 #[derive(serde::Serialize)]
 pub struct Snapshot {
@@ -15,9 +81,23 @@ pub struct Snapshot {
     xruns: i32,
     buffer_frames: i32,
     capacity_frames: i32,
+    callbacks: u64,
+    pcm_frames: u64,
+    silent_frames: u64,
+    peak: u32,
+    device_id: i32,
 }
 impl Output {
-    pub fn open() -> Result<Self> {
+    pub fn open(receiver: NativeReceiver) -> Result<Self> {
+        let mut callback = Box::new(Callback {
+            reader: UnsafeCell::new(receiver.callback_reader()?),
+            stopping: AtomicBool::new(false),
+            error: AtomicI32::new(0),
+            callbacks: AtomicU64::new(0),
+            pcm_frames: AtomicU64::new(0),
+            silent_frames: AtomicU64::new(0),
+            peak: AtomicU32::new(0),
+        });
         unsafe {
             let mut builder = std::ptr::null_mut();
             ensure!(
@@ -34,13 +114,13 @@ impl Output {
                 ndk::AAUDIO_PERFORMANCE_MODE_LOW_LATENCY as i32,
             );
             ndk::AAudioStreamBuilder_setUsage(builder, ndk::AAUDIO_USAGE_GAME as i32);
+            ndk::AAudioStreamBuilder_setContentType(builder, ndk::AAUDIO_CONTENT_TYPE_MOVIE as i32);
             ndk::AAudioStreamBuilder_setFormat(builder, ndk::AAUDIO_FORMAT_PCM_I16);
             ndk::AAudioStreamBuilder_setChannelCount(builder, 2);
             ndk::AAudioStreamBuilder_setSampleRate(builder, 48000);
-            // This backend is a bounded, nonblocking writer, not an AAudio
-            // real-time data callback. Give one 20-ms Opus block room to play
-            // between worker wakeups; two tiny bursts can underrun repeatedly.
-            ndk::AAudioStreamBuilder_setBufferCapacityInFrames(builder, 1920);
+            let user = (&mut *callback as *mut Callback).cast();
+            ndk::AAudioStreamBuilder_setDataCallback(builder, Some(data), user);
+            ndk::AAudioStreamBuilder_setErrorCallback(builder, Some(error), user);
             let mut stream = std::ptr::null_mut();
             let result = ndk::AAudioStreamBuilder_openStream(builder, &mut stream);
             ndk::AAudioStreamBuilder_delete(builder);
@@ -50,7 +130,7 @@ impl Output {
             );
             let output = Self {
                 stream,
-                started: false,
+                callback: Some(callback),
             };
             ensure!(
                 ndk::AAudioStream_getSampleRate(stream) == 48000
@@ -61,32 +141,35 @@ impl Output {
             let burst = ndk::AAudioStream_getFramesPerBurst(stream);
             if burst > 0 {
                 let capacity = ndk::AAudioStream_getBufferCapacityInFrames(stream);
-                ndk::AAudioStream_setBufferSizeInFrames(
+                let result = ndk::AAudioStream_setBufferSizeInFrames(
                     stream,
-                    burst.saturating_mul(2).max(960).min(capacity),
+                    burst.saturating_mul(2).min(capacity),
+                );
+                ensure!(
+                    result > 0,
+                    "Audio device buffer configuration failed ({result})"
                 );
             }
+            let result = ndk::AAudioStream_requestStart(stream);
+            ensure!(result == 0, "Audio output could not start ({result})");
             Ok(output)
         }
     }
-    pub fn write(&mut self, samples: &[i16]) -> Result<usize> {
-        let frames = i32::try_from(samples.len() / 2)?;
-        let written =
-            unsafe { ndk::AAudioStream_write(self.stream, samples.as_ptr().cast(), frames, 0) };
+    pub fn check(&self) -> Result<()> {
+        let code = self
+            .callback
+            .as_ref()
+            .unwrap()
+            .error
+            .load(Ordering::Relaxed);
         ensure!(
-            written >= 0,
-            "Audio output stopped ({written}); reconnect after checking the output device"
+            code == 0,
+            "Android audio output failed ({code}); check the output device and reconnect"
         );
-        // Prime with actual PCM before starting; opening during signaling used
-        // to start an empty output seconds before the first audio could arrive.
-        if written > 0 && !self.started {
-            let result = unsafe { ndk::AAudioStream_requestStart(self.stream) };
-            ensure!(result == 0, "Audio output could not start ({result})");
-            self.started = true;
-        }
-        Ok(written as usize * 2)
+        Ok(())
     }
     pub fn snapshot(&self) -> Snapshot {
+        let c = self.callback.as_ref().unwrap();
         unsafe {
             Snapshot {
                 state: std::ffi::CStr::from_ptr(ndk::AAudio_convertStreamStateToText(
@@ -99,14 +182,36 @@ impl Output {
                 xruns: ndk::AAudioStream_getXRunCount(self.stream),
                 buffer_frames: ndk::AAudioStream_getBufferSizeInFrames(self.stream),
                 capacity_frames: ndk::AAudioStream_getBufferCapacityInFrames(self.stream),
+                callbacks: c.callbacks.load(Ordering::Relaxed),
+                pcm_frames: c.pcm_frames.load(Ordering::Relaxed),
+                silent_frames: c.silent_frames.load(Ordering::Relaxed),
+                peak: c.peak.swap(0, Ordering::Relaxed),
+                device_id: ndk::AAudioStream_getDeviceId(self.stream),
             }
         }
     }
 }
 impl Drop for Output {
     fn drop(&mut self) {
+        self.callback
+            .as_ref()
+            .unwrap()
+            .stopping
+            .store(true, Ordering::Relaxed);
         unsafe {
-            ndk::AAudioStream_close(self.stream);
+            // Close from the control thread, never from the native callbacks.
+            ndk::AAudioStream_requestStop(self.stream);
+            let result = ndk::AAudioStream_close(self.stream);
+            if result < 0 {
+                crate::event_log::record(
+                    "ERROR",
+                    "android_audio_close_failed",
+                    serde_json::json!({"code":result}),
+                );
+                // A failed close does not prove callbacks have stopped. Retain
+                // userData rather than free memory a callback may still use.
+                Box::leak(self.callback.take().unwrap());
+            }
         }
     }
 }

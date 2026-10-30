@@ -65,6 +65,7 @@ struct Counters {
     output_callbacks: AtomicU64,
     inputs: AtomicU64,
     outputs: AtomicU64,
+    skipped: AtomicU64,
     stage: AtomicU32,
     decoder: Mutex<Option<String>>,
     width: AtomicU32,
@@ -99,6 +100,8 @@ pub struct Snapshot {
     pub decoder: Option<String>,
     pub queued: usize,
     pub dropped: u64,
+    pub skipped: u64,
+    pub queue_wait_ms: f64,
     pub recovery_reason: Option<&'static str>,
     pub width: u32,
     pub height: u32,
@@ -210,6 +213,8 @@ impl Pipeline {
             decoder: c.decoder.lock().unwrap_or_else(|e| e.into_inner()).clone(),
             queued: queue.report.queue_depth,
             dropped: queue.report.frames_dropped,
+            skipped: c.skipped.load(Ordering::Relaxed),
+            queue_wait_ms: queue.report.local_timing.compressed_wait.latest_ms,
             recovery_reason: queue.report.recovery_reason,
             width: c.width.load(Ordering::Relaxed),
             height: c.height.load(Ordering::Relaxed),
@@ -454,6 +459,12 @@ impl Decoder {
                 self.callbacks
                     .counters
                     .outputs
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            if output.skipped {
+                self.callbacks
+                    .counters
+                    .skipped
                     .fetch_add(1, Ordering::Relaxed);
             }
             self.callbacks.counters.stage.store(4, Ordering::Relaxed);

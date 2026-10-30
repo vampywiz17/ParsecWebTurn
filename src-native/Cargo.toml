@@ -46,6 +46,9 @@ lto = "thin"
 codegen-units = 1
 opt-level = "s"
 
+[target.'cfg(not(windows))'.dependencies]
+rtrb = "=0.4.1"
+
 [target.'cfg(windows)'.dependencies]
 windows-core = "=0.62.2"
 evoparseq-bud = { path = "crates/bud", optional = true }
