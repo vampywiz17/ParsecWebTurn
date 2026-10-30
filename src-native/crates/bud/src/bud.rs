@@ -205,8 +205,8 @@ impl Session {
     /// preserving the short input/control queue and its existing size limit.
     pub fn send_frame(&mut self, bytes: &[u8]) -> Result<()> {
         use lowlat_core::control::{self, op};
-        let message = control::parse(bytes).map_err(|_| anyhow!("Invalid BUD control frame"))?;
-        if message.opcode == op::USER_DATA {
+        if bytes.get(12) == Some(&op::USER_DATA) {
+            let message = control::parse(bytes).map_err(|_| anyhow!("Invalid BUD control frame"))?;
             ensure!(
                 message.body.len() <= control::USER_DATA_MAX,
                 "BUD user data exceeds limit"
