@@ -232,7 +232,7 @@ impl Transport {
             Self::WebRtc(a) => a.send_binary(channel, bytes),
             Self::Bud(b) => {
                 ensure!(channel == 0, "Invalid BUD control channel");
-                b.session.send_control(&bytes)
+                b.session.send_frame(&bytes)
             }
         }
     }

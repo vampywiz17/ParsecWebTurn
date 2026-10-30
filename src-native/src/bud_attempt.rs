@@ -237,17 +237,7 @@ impl Attempt {
     pub fn send(&self, frame: &[u8]) -> Result<()> {
         let mut session = self.session.lock().unwrap_or_else(|e| e.into_inner());
         let session = session.as_mut().context("BUD session unavailable")?;
-        if frame.len() >= 14 && frame[12] == 17 {
-            let id = u32::from_be_bytes(frame[4..8].try_into()?);
-            let body = &frame[13..];
-            ensure!(body.last() == Some(&0), "BUD user data lacks terminator");
-            ensure!(
-                session.send_user_data(id, &body[..body.len() - 1]),
-                "BUD user data refused"
-            );
-            return Ok(());
-        }
-        session.send_control(frame)
+        session.send_frame(frame)
     }
 
     pub fn native_input(
