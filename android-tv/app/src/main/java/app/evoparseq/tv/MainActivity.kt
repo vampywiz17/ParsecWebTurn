@@ -177,7 +177,7 @@ private fun SignIn(model: TvModel, first: FocusRequester, inspect: () -> Unit, s
 
 @Composable
 private fun AccountField(label: String, value: String, change: (String) -> Unit,
-    type: KeyboardType, secret: Boolean = false, done: Boolean = false, modifier: Modifier = Modifier) {
+    type: KeyboardType, modifier: Modifier = Modifier, secret: Boolean = false, done: Boolean = false) {
     var focused by remember { mutableStateOf(false) }
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current

@@ -20,7 +20,9 @@ internal object DecoderInventory {
                 appendLine(codec.name)
                 runCatching {
                     val caps = codec.getCapabilitiesForType(mime)
-                    val lowLatency = caps.isFeatureSupported(MediaCodecInfo.CodecCapabilities.FEATURE_LowLatency)
+                    val lowLatency = if (android.os.Build.VERSION.SDK_INT >= 30) {
+                        caps.isFeatureSupported(MediaCodecInfo.CodecCapabilities.FEATURE_LowLatency).toString()
+                    } else "not queryable on this Android version"
                     val supports1080 = caps.videoCapabilities.areSizeAndRateSupported(1920, 1080, 60.0)
                     appendLine("1080p60: $supports1080 · low-latency feature: $lowLatency")
                     if (mime == "video/hevc") {
