@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.KeyboardActions
@@ -26,6 +27,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -46,11 +48,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme(
-                primary = Color(0xFF71BCFF), onPrimary = Color(0xFF08203A),
-                background = Color(0xFF10141C), surface = Color(0xFF202936),
-                onBackground = Color(0xFFEAF1FA), onSurface = Color(0xFFEAF1FA),
-            )) { TvApp(viewModel()) }
+            TvTheme { TvApp(viewModel()) }
         }
     }
 }
@@ -70,7 +68,8 @@ private fun TvApp(model: TvModel) {
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).imePadding()
         .padding(horizontal = 48.dp, vertical = 28.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Image(painterResource(R.drawable.evoparseq_icon), null, Modifier.size(48.dp))
+            Image(painterResource(R.drawable.evoparseq_symbol), null, Modifier.size(48.dp)
+                .background(colorResource(R.color.icon_background), CircleShape))
             Column {
                 Text("EVO PARSEQ", style = MaterialTheme.typography.headlineMedium)
                 Text("Your computers. On your TV.", color = Color(0xFFA8BED7))
@@ -125,7 +124,7 @@ private fun TvApp(model: TvModel) {
                                 Card(onClick = { selected = host }, modifier = Modifier.fillMaxWidth()) {
                                     Column(Modifier.padding(20.dp)) {
                                         Text(host.name, style = MaterialTheme.typography.titleLarge)
-                                        Text("Inspect computer", color = Color(0xFFA8BED7))
+                                        Text("Inspect computer", color = LocalContentColor.current.copy(alpha = 0.8f))
                                     }
                                 }
                             }

@@ -29,6 +29,12 @@ This is a TV/account foundation, **not a working streaming client yet**:
   bitness. Android 10 / API 29 is the initial API floor; Android 14 is the first
   intended live target. Older supported API levels are not yet live-validated.
 
+The first on-device inventory (Xiaomi MiTV-AFMU0, Android 14 / API 34) reports
+**armeabi-v7a/armeabi userspace**, `c2.amlogic.avc.decoder` and
+`c2.amlogic.hevc.decoder`. Both declare 1080p60 and low-latency support; HEVC
+also declares Main10. App launch/inventory rendering has been observed on this
+device. Hardware playback, Surface behavior and latency remain unverified.
+
 Select a computer to inspect it. Streaming controls are **not offered as working**
 until the Android media/session backend exists. No synthetic/fake hosts or
 hard-coded successful connection status are used.

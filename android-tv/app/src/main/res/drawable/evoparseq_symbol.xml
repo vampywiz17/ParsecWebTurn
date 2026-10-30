@@ -1,0 +1,11 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="128" android:viewportHeight="128">
+    <!-- Keep the symbol within the adaptive icon's central safe zone. The same
+         foreground is reused by the in-app circle and the launcher mask. -->
+    <group android:pivotX="64" android:pivotY="64" android:scaleX="0.85" android:scaleY="0.85">
+        <path android:fillColor="#3B82F6" android:pathData="M57,25L26,43v42l31,18V84l-15,-9V53l15,-9Z" />
+        <path android:fillColor="#63D8FF" android:pathData="M71,25l31,18v42l-31,18V84l15,-9V53l-15,-9Z" />
+        <path android:fillColor="#E6F7FF" android:pathData="M64,54l10,10l-10,10l-10,-10Z" />
+    </group>
+</vector>
