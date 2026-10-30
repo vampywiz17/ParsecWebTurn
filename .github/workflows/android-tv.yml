@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [codex/android-tv]
-    paths: ['android-tv/**', '.github/workflows/android-tv.yml', 'src-native/src/**', 'src-native/vendor/**']
+    paths: ['android-tv/**', '.github/workflows/android-tv.yml', 'src-native/src/**', 'src-native/vendor/**', 'src-native/crates/bud/**']
 
 permissions:
   contents: read
