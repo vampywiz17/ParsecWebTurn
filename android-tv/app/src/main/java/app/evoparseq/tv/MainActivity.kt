@@ -137,15 +137,22 @@ private fun TvApp(model: TvModel) {
                 }
             }
         }
-        // Reserve two text lines even while idle. A message/progress change must
-        // not resize the page and trigger a focused field's bring-into-view scroll.
-        Text(if (model.busy) "Working…" else model.message,
+        // One footer, always two lines high. Progress and feedback replace the
+        // preview caption instead of adding rows and shrinking the form/IME area.
+        val feedback = when {
+            model.busy -> "Working…"
+            model.message.isNotEmpty() -> model.message
+            else -> "Android TV preview · streaming not yet available"
+        }
+        Text(feedback,
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             minLines = 2, maxLines = 2, overflow = TextOverflow.Ellipsis,
-            color = if (model.busy) Color(0xFFA8BED7) else Color(0xFFFFC6A0))
-        Spacer(Modifier.height(12.dp))
-        Text("Android TV preview · streaming not yet available", fontSize = 12.sp,
-            color = Color(0xFF9CACC0))
+            fontSize = 16.sp, lineHeight = 20.sp,
+            color = when {
+                model.busy -> Color(0xFFA8BED7)
+                model.message.isNotEmpty() -> Color(0xFFFFC6A0)
+                else -> Color(0xFF9CACC0)
+            })
     }
 }
 
