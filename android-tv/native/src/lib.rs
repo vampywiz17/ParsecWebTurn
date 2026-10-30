@@ -13,6 +13,8 @@ pub mod audio_stream;
 pub mod codec_initialization;
 #[path = "../../../src-native/src/control.rs"]
 pub mod control;
+#[cfg(any(target_os = "android", test))]
+mod decode_state;
 #[path = "../../../src-native/src/event_log.rs"]
 mod event_log;
 #[path = "../../../src-native/src/frame_timing.rs"]

@@ -30,13 +30,9 @@ internal fun StreamScreen(model: TvModel, host: Host, close: () -> Unit) {
     val video = status?.optJSONObject("video")
     val width = video?.optInt("width") ?: 0
     val height = video?.optInt("height") ?: 0
-    var view by remember { mutableStateOf<SurfaceView?>(null) }
     val exit = { model.stopStream(); close() }
     BackHandler { exit() }
     LaunchedEffect(Unit) { first.requestFocus() }
-    LaunchedEffect(width, height) {
-        if (width > 0 && height > 0) view?.holder?.setFixedSize(width, height)
-    }
     DisposableEffect(Unit) {
         val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
@@ -55,7 +51,9 @@ internal fun StreamScreen(model: TvModel, host: Host, close: () -> Unit) {
         else Modifier.width(maxWidth).height(maxWidth / ratio)
         AndroidView(modifier = videoSize.align(Alignment.Center), factory = { ctx ->
             SurfaceView(ctx).also { surface ->
-                view = surface
+                // MediaCodec owns buffer geometry. Only the View's layout
+                // follows the visible aspect ratio; do not resize its producer
+                // buffers in response to codec-format callbacks.
                 surface.keepScreenOn = true
                 var started = false
                 surface.holder.addCallback(object : SurfaceHolder.Callback {
@@ -75,6 +73,12 @@ internal fun StreamScreen(model: TvModel, host: Host, close: () -> Unit) {
             Button(onClick = { exit() }, modifier = Modifier.focusRequester(first)) { Text("Disconnect") }
             val error = status?.optString("error").orEmpty()
             Text(if (error.isNotEmpty()) error else "${host.name} · ${status?.optString("state") ?: "Connecting…"}", color = Color.White)
+            if (video != null && (error.isNotEmpty() || video.optLong("submitted") == 0L)) {
+                Text("${video.optString("stage")} · ${video.optString("decoder")}\n" +
+                    "Input callbacks ${video.optLong("input_callbacks")} · queued to codec ${video.optLong("inputs")} · output ${video.optLong("submitted")}\n" +
+                    "Queue ${video.optInt("queued")} · dropped ${video.optLong("dropped")} · ${video.optString("recovery_reason")}",
+                    color = Color(0xFFA8BED7))
+            }
             if (width > 0 && height > 0) Text("${video?.optString("codec")} · $width × $height · ${video?.optInt("depth")}-bit", color = Color(0xFFA8BED7))
             Text("View and audio preview · controller input follows next", color = Color(0xFFA8BED7))
         }

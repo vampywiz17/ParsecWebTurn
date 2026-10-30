@@ -586,6 +586,12 @@ impl Queue {
         true
     }
 
+    /// Setup must not gate away deltas following an already queued IDR.
+    #[cfg(any(target_os = "android", test))]
+    pub fn has_queued_idr(&self) -> bool {
+        self.frames.iter().any(|frame| frame.idr)
+    }
+
     /// A valid stream format change is not a decoder failure. Preserve queued
     /// compressed frames, especially an already received random-access picture,
     /// and keep the existing keyframe deadline/rate limit if one is needed.
@@ -677,6 +683,19 @@ impl Queue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn opening_on_headers_does_not_rearm_ingress_after_a_queued_idr() {
+        let mut queue = Queue::default();
+        assert!(queue.submit(&[7, 8], false, true, 0));
+        assert!(queue.submit(&[5], true, false, 1));
+        let header = queue.pop().unwrap();
+        let needs_keyframe = !header.idr && !queue.has_queued_idr();
+        queue.begin_format_change(Instant::now(), needs_keyframe);
+        assert!(queue.submit(&[1], false, false, 2));
+        assert_eq!(queue.pop().unwrap().bytes, vec![5]);
+        assert_eq!(queue.pop().unwrap().bytes, vec![1]);
+        assert!(!queue.has_queued_idr());
+    }
     #[test]
     fn chroma_fallback_is_sticky_bounded_and_requires_fresh_random_access() {
         let now = Instant::now();

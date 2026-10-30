@@ -87,12 +87,15 @@ pub fn start(
                 &worker_status,
             );
             worker_stop.store(true, Ordering::Release);
-            *worker_status.lock().unwrap_or_else(|e| e.into_inner()) = match result {
-                Ok(()) => json!({"state":"Disconnected","ended":true}),
+            let mut report = worker_status.lock().unwrap_or_else(|e| e.into_inner());
+            report["ended"] = true.into();
+            match result {
+                Ok(()) => report["state"] = "Disconnected".into(),
                 Err(error) => {
-                    json!({"state":"Stream stopped","error":error.to_string(),"ended":true})
+                    report["state"] = "Stream stopped".into();
+                    report["error"] = error.to_string().into();
                 }
-            };
+            }
         })?;
     *slot = Some(Running {
         stop,
@@ -320,6 +323,7 @@ fn run(request: Request, stop: &AtomicBool, status: &Mutex<Value>) -> Result<()>
         }
         if update.elapsed() >= Duration::from_millis(500) {
             let snapshot = connection.video.snapshot();
+            *status.lock().unwrap_or_else(|e| e.into_inner()) = json!({"state":if snapshot.submitted>0 {"Streaming"} else {"Connecting…"},"ended":false,"video":snapshot,"settings_confirmed":settings_confirmed});
             if let Some(error) = snapshot.error.as_ref() {
                 anyhow::bail!("{error}");
             }
@@ -327,7 +331,6 @@ fn run(request: Request, stop: &AtomicBool, status: &Mutex<Value>) -> Result<()>
                 snapshot.submitted > 0 || started.elapsed() < Duration::from_secs(30),
                 "No video output received within 30 seconds"
             );
-            *status.lock().unwrap_or_else(|e| e.into_inner()) = json!({"state":if snapshot.submitted>0 {"Streaming"} else {"Connecting…"},"ended":false,"video":snapshot,"settings_confirmed":settings_confirmed});
             update = Instant::now();
         }
         thread::park_timeout(Duration::from_millis(if pending.is_some() {

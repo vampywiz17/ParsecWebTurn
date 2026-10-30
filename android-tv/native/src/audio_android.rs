@@ -25,6 +25,10 @@ impl Output {
             ndk::AAudioStreamBuilder_setFormat(builder, ndk::AAUDIO_FORMAT_PCM_I16);
             ndk::AAudioStreamBuilder_setChannelCount(builder, 2);
             ndk::AAudioStreamBuilder_setSampleRate(builder, 48000);
+            // This backend is a bounded, nonblocking writer, not an AAudio
+            // real-time data callback. Give one 20-ms Opus block room to play
+            // between worker wakeups; two tiny bursts can underrun repeatedly.
+            ndk::AAudioStreamBuilder_setBufferCapacityInFrames(builder, 1920);
             let mut stream = std::ptr::null_mut();
             let result = ndk::AAudioStreamBuilder_openStream(builder, &mut stream);
             ndk::AAudioStreamBuilder_delete(builder);
@@ -41,7 +45,11 @@ impl Output {
             );
             let burst = ndk::AAudioStream_getFramesPerBurst(stream);
             if burst > 0 {
-                ndk::AAudioStream_setBufferSizeInFrames(stream, burst.saturating_mul(2));
+                let capacity = ndk::AAudioStream_getBufferCapacityInFrames(stream);
+                ndk::AAudioStream_setBufferSizeInFrames(
+                    stream,
+                    burst.saturating_mul(2).max(960).min(capacity),
+                );
             }
             let result = ndk::AAudioStream_requestStart(stream);
             ensure!(result == 0, "Audio output could not start ({result})");

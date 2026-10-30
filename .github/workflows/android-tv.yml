@@ -45,6 +45,7 @@ jobs:
         run: |
           sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;28.2.13676358'
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
           cargo install cargo-ndk --version 4.1.2 --locked
       - name: Build ARM64 and ARMv7 Rust adapters
         working-directory: android-tv/native

@@ -2,7 +2,7 @@
 //! buffer is mapped, copied to the CPU, uploaded, or passed across JNI.
 use crate::{
     codec_initialization::{Geometry, Initialization},
-    video_output::Queue,
+    video_output::{NativeOperation, Queue},
     video_stream::{Codec, PacketInfo, ParameterCache},
 };
 use anyhow::{ensure, Context, Result};
@@ -61,7 +61,11 @@ pub struct Choices {
 
 #[derive(Default)]
 struct Counters {
+    input_callbacks: AtomicU64,
+    inputs: AtomicU64,
     outputs: AtomicU64,
+    stage: AtomicU32,
+    decoder: Mutex<Option<String>>,
     width: AtomicU32,
     height: AtomicU32,
     depth: AtomicU32,
@@ -78,7 +82,14 @@ impl Counters {
 }
 #[derive(Serialize)]
 pub struct Snapshot {
+    pub input_callbacks: u64,
+    pub inputs: u64,
     pub submitted: u64,
+    pub stage: &'static str,
+    pub decoder: Option<String>,
+    pub queued: usize,
+    pub dropped: u64,
+    pub recovery_reason: Option<&'static str>,
     pub width: u32,
     pub height: u32,
     pub depth: u32,
@@ -162,31 +173,32 @@ impl Pipeline {
         }
     }
     pub fn take_keyframe_request(&self) -> bool {
-        self.state
-            .queue
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take_keyframe_request(Instant::now())
-            .is_some()
+        let mut queue = self.state.queue.lock().unwrap_or_else(|e| e.into_inner());
+        queue.check_native_call(Instant::now());
+        queue.take_keyframe_request(Instant::now()).is_some()
     }
     pub fn snapshot(&self) -> Snapshot {
         let c = &self.state.counters;
-        let error = c
-            .error
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
-            .or_else(|| {
-                self.state
-                    .queue
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .report
-                    .failure_stage
-                    .map(str::to_owned)
-            });
+        let native_error = c.error.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let mut queue = self.state.queue.lock().unwrap_or_else(|e| e.into_inner());
+        queue.check_native_call(Instant::now());
+        let error = native_error.or_else(|| queue.report.failure_stage.map(str::to_owned));
         Snapshot {
+            input_callbacks: c.input_callbacks.load(Ordering::Relaxed),
+            inputs: c.inputs.load(Ordering::Relaxed),
             submitted: c.outputs.load(Ordering::Relaxed),
+            stage: match c.stage.load(Ordering::Relaxed) {
+                1 => "creating codec",
+                2 => "configuring Surface",
+                3 => "starting codec",
+                4 => "waiting for input buffer",
+                5 => "submitting compressed input",
+                _ => "waiting for stream parameters",
+            },
+            decoder: c.decoder.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+            queued: queue.report.queue_depth,
+            dropped: queue.report.frames_dropped,
+            recovery_reason: queue.report.recovery_reason,
             width: c.width.load(Ordering::Relaxed),
             height: c.height.load(Ordering::Relaxed),
             depth: c.depth.load(Ordering::Relaxed),
@@ -216,6 +228,7 @@ unsafe extern "C" fn input(_codec: *mut ndk::AMediaCodec, data: *mut c_void, ind
     if c.stopping.load(Ordering::Acquire) {
         return;
     }
+    c.counters.input_callbacks.fetch_add(1, Ordering::Relaxed);
     let mut slots = c.slots.lock().unwrap_or_else(|e| e.into_inner());
     if index < 0 || slots.len() >= 128 {
         c.counters.fail("video-input-slots", index);
@@ -314,6 +327,8 @@ impl Decoder {
             "Invalid hardware decoder name"
         );
         let name = CString::new(choice.name.as_str())?;
+        *counters.decoder.lock().unwrap_or_else(|e| e.into_inner()) = Some(choice.name.clone());
+        counters.stage.store(1, Ordering::Relaxed);
         let native = unsafe { ndk::AMediaCodec_createCodecByName(name.as_ptr()) };
         ensure!(
             !native.is_null(),
@@ -387,6 +402,7 @@ impl Decoder {
                 );
             }
         }
+        counters.stage.store(2, Ordering::Relaxed);
         let result =
             unsafe { ndk::AMediaCodec_configure(native, f, window.0, std::ptr::null_mut(), 0).0 };
         drop(owned);
@@ -404,8 +420,10 @@ impl Decoder {
             .depth
             .store(config.geometry.depth, Ordering::Relaxed);
         counters.hevc.store(codec == Codec::Hevc, Ordering::Relaxed);
+        counters.stage.store(3, Ordering::Relaxed);
         let result = unsafe { ndk::AMediaCodec_start(native).0 };
         ensure!(result == 0, "MediaCodec start failed ({result})");
+        counters.stage.store(4, Ordering::Relaxed);
         Ok(decoder)
     }
     fn feed(&mut self, frame: &crate::video_output::Frame) -> Result<bool> {
@@ -418,6 +436,7 @@ impl Decoder {
         else {
             return Ok(false);
         };
+        self.callbacks.counters.stage.store(5, Ordering::Relaxed);
         let mut capacity = 0;
         let buffer = unsafe { ndk::AMediaCodec_getInputBuffer(self.codec, index, &mut capacity) };
         ensure!(
@@ -429,6 +448,8 @@ impl Decoder {
         }
         let flags = if frame.parameters && !frame.picture {
             ndk::AMEDIACODEC_BUFFER_FLAG_CODEC_CONFIG
+        } else if frame.idr {
+            ndk::AMEDIACODEC_BUFFER_FLAG_KEY_FRAME
         } else {
             0
         };
@@ -444,6 +465,11 @@ impl Decoder {
             .0
         };
         ensure!(result == 0, "MediaCodec compressed input failed ({result})");
+        self.callbacks
+            .counters
+            .inputs
+            .fetch_add(1, Ordering::Relaxed);
+        self.callbacks.counters.stage.store(4, Ordering::Relaxed);
         Ok(true)
     }
 }
@@ -458,6 +484,26 @@ impl Drop for Decoder {
     }
 }
 
+// Setup is an explicitly bounded native operation, not three failed decodes.
+// The queue stays bounded and requests a fresh IDR if setup falls behind.
+// A stalled driver keeps owning its resources; no forced free/cancellation.
+struct Setup<'a>(&'a State);
+impl<'a> Setup<'a> {
+    fn begin(state: &'a State) -> Self {
+        let mut queue = state.queue.lock().unwrap_or_else(|e| e.into_inner());
+        queue.optional_setup(true);
+        queue.begin_native_call(NativeOperation::Setup, Instant::now());
+        Self(state)
+    }
+}
+impl Drop for Setup<'_> {
+    fn drop(&mut self) {
+        let mut queue = self.0.queue.lock().unwrap_or_else(|e| e.into_inner());
+        queue.finish_native_call(Instant::now());
+        queue.optional_setup(false);
+    }
+}
+
 fn run(state: &State, window: &NativeWindow, choices: Choices) -> Result<()> {
     let mut cache = ParameterCache::default();
     let mut decoder: Option<Decoder> = None;
@@ -465,14 +511,21 @@ fn run(state: &State, window: &NativeWindow, choices: Choices) -> Result<()> {
     let mut prepared = false;
     let mut waiting_idr = true;
     let mut previous_codec = None;
+    let mut generation = 0;
     loop {
-        if state
-            .queue
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .stopped
         {
-            return Ok(());
+            let mut queue = state.queue.lock().unwrap_or_else(|e| e.into_inner());
+            if queue.stopped || queue.report.failure_stage.is_some() {
+                return Ok(());
+            }
+            if crate::decode_state::retire_pending(&mut queue, &mut generation, &mut pending) {
+                prepared = false;
+                waiting_idr = true;
+            }
+            if pending.is_none() {
+                pending = queue.pop();
+                prepared = false;
+            }
         }
         if state
             .counters
@@ -482,10 +535,6 @@ fn run(state: &State, window: &NativeWindow, choices: Choices) -> Result<()> {
             .is_some()
         {
             return Ok(());
-        }
-        if pending.is_none() {
-            pending = state.queue.lock().unwrap_or_else(|e| e.into_inner()).pop();
-            prepared = false;
         }
         let Some(frame) = &pending else {
             thread::park();
@@ -502,6 +551,7 @@ fn run(state: &State, window: &NativeWindow, choices: Choices) -> Result<()> {
                     .as_ref()
                     .is_none_or(|d| d.geometry != config.geometry || d.kind != frame.codec)
                 {
+                    let setup = Setup::begin(state);
                     drop(decoder.take());
                     let choice = match frame.codec {
                         Codec::H264 => &choices.avc,
@@ -517,12 +567,16 @@ fn run(state: &State, window: &NativeWindow, choices: Choices) -> Result<()> {
                         frame.codec,
                         state.counters.clone(),
                     )?);
+                    drop(setup);
                     waiting_idr = true;
-                    state
-                        .queue
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .begin_format_change(Instant::now(), !frame.idr);
+                    {
+                        let mut queue = state.queue.lock().unwrap_or_else(|e| e.into_inner());
+                        // A queued IDR already terminates the reference gap.
+                        // Re-arming ingress gating here would drop its following
+                        // deltas while the worker is still opening the codec.
+                        let needs_keyframe = !frame.idr && !queue.has_queued_idr();
+                        queue.begin_format_change(Instant::now(), needs_keyframe);
+                    }
                     // CSD in MediaFormat is submitted automatically by start().
                     if !frame.picture {
                         let frame = pending.take().unwrap();
@@ -533,6 +587,10 @@ fn run(state: &State, window: &NativeWindow, choices: Choices) -> Result<()> {
                             .recycle(frame.bytes);
                         continue;
                     }
+                    // Recheck the queue generation after a slow native setup
+                    // before submitting the access unit retained across it.
+                    prepared = true;
+                    continue;
                 }
             }
         }
