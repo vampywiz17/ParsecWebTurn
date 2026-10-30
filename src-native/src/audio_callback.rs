@@ -186,7 +186,8 @@ mod tests {
         assert_eq!(output, [2, -2, i16::MIN, i16::MAX, 0, 0]);
         assert_eq!(report.frames, 2);
         assert_eq!(report.peak, 32768);
-        assert_eq!(publisher.recycled().unwrap().as_ptr(), pointer);
+        let recycled = publisher.recycled().unwrap();
+        assert_eq!(recycled.as_ptr(), pointer);
         let mut snapshot = Snapshot::default();
         publisher.snapshot(&mut snapshot);
         assert_eq!(snapshot.queued_samples, 0);
