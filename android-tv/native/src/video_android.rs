@@ -79,6 +79,14 @@ impl Counters {
             *error = Some(format!("{stage} ({code})"));
         }
     }
+    fn check(&self, stage: &str, code: i32) -> Result<()> {
+        if code == 0 {
+            return Ok(());
+        }
+        // Publish before stop/delete, which may itself block inside a driver.
+        self.fail(stage, code);
+        anyhow::bail!("{stage} ({code})")
+    }
 }
 #[derive(Serialize)]
 pub struct Snapshot {
@@ -359,10 +367,7 @@ impl Decoder {
             )
             .0
         };
-        ensure!(
-            result == 0,
-            "MediaCodec asynchronous setup failed ({result})"
-        );
+        counters.check("video-async-setup", result)?;
         let f = unsafe { ndk::AMediaFormat_new() };
         ensure!(!f.is_null(), "MediaCodec format allocation failed");
         let owned = MediaFormat(f);
@@ -406,10 +411,7 @@ impl Decoder {
         let result =
             unsafe { ndk::AMediaCodec_configure(native, f, window.0, std::ptr::null_mut(), 0).0 };
         drop(owned);
-        ensure!(
-            result == 0,
-            "MediaCodec Surface configuration failed ({result})"
-        );
+        counters.check("video-surface-configuration", result)?;
         counters
             .width
             .store(config.geometry.visible_width, Ordering::Relaxed);
@@ -422,7 +424,7 @@ impl Decoder {
         counters.hevc.store(codec == Codec::Hevc, Ordering::Relaxed);
         counters.stage.store(3, Ordering::Relaxed);
         let result = unsafe { ndk::AMediaCodec_start(native).0 };
-        ensure!(result == 0, "MediaCodec start failed ({result})");
+        counters.check("video-codec-start", result)?;
         counters.stage.store(4, Ordering::Relaxed);
         Ok(decoder)
     }
@@ -439,10 +441,22 @@ impl Decoder {
         self.callbacks.counters.stage.store(5, Ordering::Relaxed);
         let mut capacity = 0;
         let buffer = unsafe { ndk::AMediaCodec_getInputBuffer(self.codec, index, &mut capacity) };
-        ensure!(
-            !buffer.is_null() && capacity >= frame.bytes.len(),
-            "MediaCodec compressed input exceeds buffer capacity"
-        );
+        if buffer.is_null() || capacity < frame.bytes.len() {
+            let message = format!(
+                "video-input-capacity: {} compressed bytes, buffer {capacity}",
+                frame.bytes.len()
+            );
+            let mut error = self
+                .callbacks
+                .counters
+                .error
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            if error.is_none() {
+                *error = Some(message.clone());
+            }
+            anyhow::bail!("{message}");
+        }
         unsafe {
             std::ptr::copy_nonoverlapping(frame.bytes.as_ptr(), buffer, frame.bytes.len());
         }
@@ -464,7 +478,9 @@ impl Decoder {
             )
             .0
         };
-        ensure!(result == 0, "MediaCodec compressed input failed ({result})");
+        self.callbacks
+            .counters
+            .check("video-compressed-input", result)?;
         self.callbacks
             .counters
             .inputs
