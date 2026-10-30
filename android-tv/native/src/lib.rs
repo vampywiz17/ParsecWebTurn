@@ -41,6 +41,8 @@ pub mod video_stream;
 
 #[cfg(target_os = "android")]
 mod audio_android;
+#[cfg(any(target_os = "android", test))]
+mod audio_playback;
 #[cfg(target_os = "android")]
 mod stream;
 #[cfg(target_os = "android")]

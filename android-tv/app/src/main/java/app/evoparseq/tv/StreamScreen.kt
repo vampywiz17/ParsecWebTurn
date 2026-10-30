@@ -26,6 +26,7 @@ import androidx.tv.material3.Text
 internal fun StreamScreen(model: TvModel, host: Host, close: () -> Unit) {
     val context = LocalContext.current
     val first = remember { FocusRequester() }
+    var focusGranted by remember { mutableStateOf<Boolean?>(null) }
     val status = model.streamStatus
     val video = status?.optJSONObject("video")
     val width = video?.optInt("width") ?: 0
@@ -42,6 +43,7 @@ internal fun StreamScreen(model: TvModel, host: Host, close: () -> Unit) {
                 if (change == AudioManager.AUDIOFOCUS_LOSS || change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) model.stopStream()
             }.build()
         val granted = audio.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        focusGranted = granted
         onDispose { model.stopStream(); if (granted) audio.abandonAudioFocusRequest(request) }
     }
     BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
@@ -81,6 +83,15 @@ internal fun StreamScreen(model: TvModel, host: Host, close: () -> Unit) {
                     color = Color(0xFFA8BED7))
             }
             if (width > 0 && height > 0) Text("${video?.optString("codec")} · $width × $height · ${video?.optInt("depth")}-bit", color = Color(0xFFA8BED7))
+            val audioStatus = status?.optJSONObject("audio")
+            if (focusGranted == false) Text("Android did not grant audio focus", color = Color(0xFFFFB4AB))
+            val audioOutput = status?.optJSONObject("audio_output")
+            if (audioStatus != null && audioOutput != null) {
+                Text("Audio ${audioOutput.optString("state")} · decoded ${audioStatus.optLong("packets_decoded")} · errors ${audioStatus.optLong("decode_errors")}\n" +
+                    "Frames written ${audioOutput.optLong("frames_written")} · read ${audioOutput.optLong("frames_read")} · underruns ${audioOutput.optInt("xruns")}\n" +
+                    "Queued ${audioStatus.optInt("queued_frames")} · dropped ${audioStatus.optLong("packets_dropped")} · stale frames ${status?.optLong("audio_stale_frames") ?: 0}",
+                    color = Color(0xFFA8BED7))
+            }
             Text("View and audio preview · controller input follows next", color = Color(0xFFA8BED7))
         }
     }

@@ -156,8 +156,21 @@ struct Packet {
 pub struct NativeReceiver {
     state: Arc<Mutex<State>>,
 }
+fn snapshot(shared: &Mutex<State>) -> Snapshot {
+    let mut report = shared
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .report
+        .clone();
+    report.queued_frames =
+        report.queued_samples / usize::from(report.layout.unwrap_or(Layout::STEREO).channels);
+    report
+}
 
 impl NativeReceiver {
+    pub fn snapshot(&self) -> Snapshot {
+        snapshot(&self.state)
+    }
     pub fn set_native_consumer(&self, thread: std::thread::Thread) {
         self.state
             .lock()
@@ -470,15 +483,7 @@ impl Pipeline {
         self.native_receiver().take_native_pcm()
     }
     pub fn snapshot(&self) -> Snapshot {
-        let mut report = self
-            .state
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .report
-            .clone();
-        report.queued_frames =
-            report.queued_samples / usize::from(report.layout.unwrap_or(Layout::STEREO).channels);
-        report
+        snapshot(&self.state)
     }
     pub fn stop(&mut self) {
         self.state.lock().unwrap_or_else(|e| e.into_inner()).stopped = true;

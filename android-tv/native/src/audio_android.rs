@@ -3,7 +3,19 @@
 use anyhow::{ensure, Result};
 use ndk_sys as ndk;
 
-pub struct Output(*mut ndk::AAudioStream);
+pub struct Output {
+    stream: *mut ndk::AAudioStream,
+    started: bool,
+}
+#[derive(serde::Serialize)]
+pub struct Snapshot {
+    state: String,
+    frames_written: i64,
+    frames_read: i64,
+    xruns: i32,
+    buffer_frames: i32,
+    capacity_frames: i32,
+}
 impl Output {
     pub fn open() -> Result<Self> {
         unsafe {
@@ -36,7 +48,10 @@ impl Output {
                 result == 0 && !stream.is_null(),
                 "Audio output could not open ({result})"
             );
-            let output = Self(stream);
+            let output = Self {
+                stream,
+                started: false,
+            };
             ensure!(
                 ndk::AAudioStream_getSampleRate(stream) == 48000
                     && ndk::AAudioStream_getChannelCount(stream) == 2
@@ -51,26 +66,47 @@ impl Output {
                     burst.saturating_mul(2).max(960).min(capacity),
                 );
             }
-            let result = ndk::AAudioStream_requestStart(stream);
-            ensure!(result == 0, "Audio output could not start ({result})");
             Ok(output)
         }
     }
-    pub fn write(&self, samples: &[i16]) -> Result<usize> {
+    pub fn write(&mut self, samples: &[i16]) -> Result<usize> {
         let frames = i32::try_from(samples.len() / 2)?;
         let written =
-            unsafe { ndk::AAudioStream_write(self.0, samples.as_ptr().cast(), frames, 0) };
+            unsafe { ndk::AAudioStream_write(self.stream, samples.as_ptr().cast(), frames, 0) };
         ensure!(
             written >= 0,
             "Audio output stopped ({written}); reconnect after checking the output device"
         );
+        // Prime with actual PCM before starting; opening during signaling used
+        // to start an empty output seconds before the first audio could arrive.
+        if written > 0 && !self.started {
+            let result = unsafe { ndk::AAudioStream_requestStart(self.stream) };
+            ensure!(result == 0, "Audio output could not start ({result})");
+            self.started = true;
+        }
         Ok(written as usize * 2)
+    }
+    pub fn snapshot(&self) -> Snapshot {
+        unsafe {
+            Snapshot {
+                state: std::ffi::CStr::from_ptr(ndk::AAudio_convertStreamStateToText(
+                    ndk::AAudioStream_getState(self.stream),
+                ))
+                .to_string_lossy()
+                .into_owned(),
+                frames_written: ndk::AAudioStream_getFramesWritten(self.stream),
+                frames_read: ndk::AAudioStream_getFramesRead(self.stream),
+                xruns: ndk::AAudioStream_getXRunCount(self.stream),
+                buffer_frames: ndk::AAudioStream_getBufferSizeInFrames(self.stream),
+                capacity_frames: ndk::AAudioStream_getBufferCapacityInFrames(self.stream),
+            }
+        }
     }
 }
 impl Drop for Output {
     fn drop(&mut self) {
         unsafe {
-            ndk::AAudioStream_close(self.0);
+            ndk::AAudioStream_close(self.stream);
         }
     }
 }

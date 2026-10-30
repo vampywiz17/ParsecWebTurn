@@ -3,7 +3,9 @@ use crate::{
     account::Session,
     account_signaling::Socket,
     attempt::{Attempt, Output, StunProvider},
-    audio_android, native_wire,
+    audio_android,
+    audio_playback::Playback,
+    native_wire,
     preferences::Preferences,
     video_android::{Choices, NativeWindow, Pipeline},
 };
@@ -198,10 +200,8 @@ fn run(request: Request, stop: &AtomicBool, status: &Mutex<Value>) -> Result<()>
         .audio_receiver()
         .context("Audio pipeline unavailable")?;
     receiver.set_native_consumer(thread::current());
-    let audio = audio_android::Output::open()?;
-    let mut pending = None;
-    let mut pending_since = Instant::now();
-    let mut offset = 0;
+    let mut audio = audio_android::Output::open()?;
+    let mut playback = Playback::new(receiver);
     let mut configured = false;
     let mut queried = false;
     let mut host_config = crate::host_video::Config::default();
@@ -307,23 +307,11 @@ fn run(request: Request, stop: &AtomicBool, status: &Mutex<Value>) -> Result<()>
                 .attempt
                 .send_binary(0, config.keyframe_request())?;
         }
-        if pending.is_none() {
-            pending = receiver.take_native_pcm();
-            pending_since = Instant::now();
-            offset = 0;
-        }
-        if let Some(block) = pending.as_ref() {
-            offset += audio.write(&block.pcm[offset..])?;
-            if offset == block.pcm.len() {
-                receiver.recycle_handoff(pending.take().unwrap());
-            } else if pending_since.elapsed() >= Duration::from_millis(100) {
-                receiver.recycle_handoff(pending.take().unwrap());
-                receiver.discard_pending();
-            }
-        }
+        let retry_audio = playback.pump(|pcm| audio.write(pcm))?;
         if update.elapsed() >= Duration::from_millis(500) {
             let snapshot = connection.video.snapshot();
-            *status.lock().unwrap_or_else(|e| e.into_inner()) = json!({"state":if snapshot.submitted>0 {"Streaming"} else {"Connecting…"},"ended":false,"video":snapshot,"settings_confirmed":settings_confirmed});
+            *status.lock().unwrap_or_else(|e| e.into_inner()) = json!({"state":if snapshot.submitted>0 {"Streaming"} else {"Connecting…"},"ended":false,"video":snapshot,"settings_confirmed":settings_confirmed,
+                "audio":playback.snapshot(),"audio_output":audio.snapshot(),"audio_stale_frames":playback.stale_frames});
             if let Some(error) = snapshot.error.as_ref() {
                 anyhow::bail!("{error}");
             }
@@ -333,11 +321,7 @@ fn run(request: Request, stop: &AtomicBool, status: &Mutex<Value>) -> Result<()>
             );
             update = Instant::now();
         }
-        thread::park_timeout(Duration::from_millis(if pending.is_some() {
-            4
-        } else {
-            25
-        }));
+        thread::park_timeout(Duration::from_millis(if retry_audio { 4 } else { 25 }));
     }
     Ok(())
 }
