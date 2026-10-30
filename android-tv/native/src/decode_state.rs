@@ -1,22 +1,6 @@
 //! Compressed-input ownership across the existing bounded queue's resets.
 use crate::video_output::{Frame, Queue};
 
-/// MediaCodec accepts complete access units, unlike a stream-oriented decoder.
-/// Retain only bounded non-VCL prefixes until the next picture, without adding
-/// a frame of lookahead or copying the compressed picture into another Vec.
-pub fn append_metadata(prefix: &mut Vec<u8>, bytes: &[u8]) -> anyhow::Result<()> {
-    anyhow::ensure!(
-        prefix.len().saturating_add(bytes.len()) <= 256 * 1024,
-        "Video access-unit metadata exceeds limit"
-    );
-    prefix.extend_from_slice(bytes);
-    Ok(())
-}
-
-pub fn presentation_time(previous: u64, timestamp_100ns: i64) -> u64 {
-    ((timestamp_100ns.max(0) / 10) as u64).max(previous.saturating_add(1))
-}
-
 pub fn retire_pending(
     queue: &mut Queue,
     generation: &mut u64,
@@ -37,29 +21,6 @@ mod tests {
     use super::*;
     use crate::video_stream::Codec;
     use std::time::Instant;
-
-    #[test]
-    fn metadata_prefix_is_ordered_bounded_and_reusable_without_picture_lookahead() {
-        let mut prefix = Vec::new();
-        append_metadata(&mut prefix, &[0, 0, 1, 9, 0xf0]).unwrap();
-        append_metadata(&mut prefix, &[0, 0, 1, 6, 0x80]).unwrap();
-        assert_eq!(prefix, [0, 0, 1, 9, 0xf0, 0, 0, 1, 6, 0x80]);
-        assert!(append_metadata(&mut prefix, &vec![0; 256 * 1024]).is_err());
-        assert_eq!(prefix.len(), 10);
-        let capacity = prefix.capacity();
-        prefix.clear();
-        append_metadata(&mut prefix, &[0, 0, 1, 9]).unwrap();
-        assert_eq!(prefix.capacity(), capacity);
-    }
-
-    #[test]
-    fn burst_delivery_never_reuses_a_picture_timestamp() {
-        assert_eq!(presentation_time(0, 0), 1);
-        assert_eq!(presentation_time(1, 0), 2);
-        assert_eq!(presentation_time(2, 1000), 100);
-        assert_eq!(presentation_time(100, 1000), 101);
-        assert_eq!(presentation_time(101, -1), 102);
-    }
 
     #[test]
     fn a_pending_input_slot_cannot_keep_a_retired_reference_picture() {

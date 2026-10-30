@@ -76,7 +76,6 @@ internal fun StreamScreen(model: TvModel, host: Host, close: () -> Unit) {
             if (video != null && (error.isNotEmpty() || video.optLong("submitted") == 0L)) {
                 Text("${video.optString("stage")} · ${video.optString("decoder")}\n" +
                     "Input callbacks ${video.optLong("input_callbacks")} · queued to codec ${video.optLong("inputs")} · output ${video.optLong("submitted")}\n" +
-                    "Config ${video.optLong("config_inputs")} · IDR ${video.optLong("idr_inputs")} · format changes ${video.optLong("format_callbacks")}\n" +
                     "Queue ${video.optInt("queued")} · dropped ${video.optLong("dropped")} · ${video.optString("recovery_reason")}",
                     color = Color(0xFFA8BED7))
             }

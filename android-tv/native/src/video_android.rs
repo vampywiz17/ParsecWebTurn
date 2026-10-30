@@ -1,7 +1,7 @@
 //! NDK asynchronous MediaCodec -> original Android Surface. No decoded output
 //! buffer is mapped, copied to the CPU, uploaded, or passed across JNI.
 use crate::{
-    codec_initialization::Initialization,
+    codec_initialization::{Geometry, Initialization},
     video_output::{NativeOperation, Queue},
     video_stream::{Codec, PacketInfo, ParameterCache},
 };
@@ -63,9 +63,6 @@ pub struct Choices {
 struct Counters {
     input_callbacks: AtomicU64,
     inputs: AtomicU64,
-    config_inputs: AtomicU64,
-    idr_inputs: AtomicU64,
-    format_callbacks: AtomicU64,
     outputs: AtomicU64,
     stage: AtomicU32,
     decoder: Mutex<Option<String>>,
@@ -95,9 +92,6 @@ impl Counters {
 pub struct Snapshot {
     pub input_callbacks: u64,
     pub inputs: u64,
-    pub config_inputs: u64,
-    pub idr_inputs: u64,
-    pub format_callbacks: u64,
     pub submitted: u64,
     pub stage: &'static str,
     pub decoder: Option<String>,
@@ -200,9 +194,6 @@ impl Pipeline {
         Snapshot {
             input_callbacks: c.input_callbacks.load(Ordering::Relaxed),
             inputs: c.inputs.load(Ordering::Relaxed),
-            config_inputs: c.config_inputs.load(Ordering::Relaxed),
-            idr_inputs: c.idr_inputs.load(Ordering::Relaxed),
-            format_callbacks: c.format_callbacks.load(Ordering::Relaxed),
             submitted: c.outputs.load(Ordering::Relaxed),
             stage: match c.stage.load(Ordering::Relaxed) {
                 1 => "creating codec",
@@ -289,7 +280,6 @@ unsafe extern "C" fn format(
     // stopping; it is metadata only, never a decoded output buffer.
     let _owned = MediaFormat(f);
     let c = unsafe { &*data.cast::<Callbacks>() };
-    c.counters.format_callbacks.fetch_add(1, Ordering::Relaxed);
     if c.stopping.load(Ordering::Acquire) {
         return;
     }
@@ -330,9 +320,7 @@ struct Decoder {
     codec: *mut ndk::AMediaCodec,
     kind: Codec,
     callbacks: Box<Callbacks>,
-    configuration: Initialization,
-    config_pending: bool,
-    last_timestamp: u64,
+    geometry: Geometry,
 }
 impl Decoder {
     fn open(
@@ -354,13 +342,10 @@ impl Decoder {
             !native.is_null(),
             "Could not open the declared Android hardware decoder"
         );
-        let geometry = config.geometry;
         let mut decoder = Self {
             codec: native,
             kind: codec,
-            configuration: config,
-            config_pending: true,
-            last_timestamp: 0,
+            geometry: config.geometry,
             callbacks: Box::new(Callbacks {
                 slots: Mutex::new(VecDeque::with_capacity(128)),
                 thread: thread::current(),
@@ -396,8 +381,8 @@ impl Decoder {
                 }
                 .as_ptr(),
             );
-            ndk::AMediaFormat_setInt32(f, c"width".as_ptr(), geometry.width as i32);
-            ndk::AMediaFormat_setInt32(f, c"height".as_ptr(), geometry.height as i32);
+            ndk::AMediaFormat_setInt32(f, c"width".as_ptr(), config.geometry.width as i32);
+            ndk::AMediaFormat_setInt32(f, c"height".as_ptr(), config.geometry.height as i32);
             ndk::AMediaFormat_setInt32(
                 f,
                 c"max-input-size".as_ptr(),
@@ -407,8 +392,20 @@ impl Decoder {
             if choice.low_latency {
                 ndk::AMediaFormat_setInt32(f, c"low-latency".as_ptr(), 1);
             }
-            // Use one documented explicit CODEC_CONFIG input after start.
-            // Do not also set csd-* keys: MediaCodec would submit those itself.
+            ndk::AMediaFormat_setBuffer(
+                f,
+                c"csd-0".as_ptr(),
+                config.csd0.as_ptr().cast(),
+                config.csd0.len(),
+            );
+            if !config.csd1.is_empty() {
+                ndk::AMediaFormat_setBuffer(
+                    f,
+                    c"csd-1".as_ptr(),
+                    config.csd1.as_ptr().cast(),
+                    config.csd1.len(),
+                );
+            }
         }
         counters.stage.store(2, Ordering::Relaxed);
         let result =
@@ -417,11 +414,13 @@ impl Decoder {
         counters.check("video-surface-configuration", result)?;
         counters
             .width
-            .store(geometry.visible_width, Ordering::Relaxed);
+            .store(config.geometry.visible_width, Ordering::Relaxed);
         counters
             .height
-            .store(geometry.visible_height, Ordering::Relaxed);
-        counters.depth.store(geometry.depth, Ordering::Relaxed);
+            .store(config.geometry.visible_height, Ordering::Relaxed);
+        counters
+            .depth
+            .store(config.geometry.depth, Ordering::Relaxed);
         counters.hevc.store(codec == Codec::Hevc, Ordering::Relaxed);
         counters.stage.store(3, Ordering::Relaxed);
         let result = unsafe { ndk::AMediaCodec_start(native).0 };
@@ -429,7 +428,7 @@ impl Decoder {
         counters.stage.store(4, Ordering::Relaxed);
         Ok(decoder)
     }
-    fn queue_input(&self, first: &[u8], second: &[u8], timestamp: u64, flags: u32) -> Result<bool> {
+    fn feed(&mut self, frame: &crate::video_output::Frame) -> Result<bool> {
         let Some(index) = self
             .callbacks
             .slots
@@ -442,14 +441,10 @@ impl Decoder {
         self.callbacks.counters.stage.store(5, Ordering::Relaxed);
         let mut capacity = 0;
         let buffer = unsafe { ndk::AMediaCodec_getInputBuffer(self.codec, index, &mut capacity) };
-        let length = first
-            .len()
-            .checked_add(second.len())
-            .context("Video input length overflow")?;
-        if buffer.is_null() || capacity < length {
+        if buffer.is_null() || capacity < frame.bytes.len() {
             let message = format!(
                 "video-input-capacity: {} compressed bytes, buffer {capacity}",
-                length
+                frame.bytes.len()
             );
             let mut error = self
                 .callbacks
@@ -463,11 +458,25 @@ impl Decoder {
             anyhow::bail!("{message}");
         }
         unsafe {
-            std::ptr::copy_nonoverlapping(first.as_ptr(), buffer, first.len());
-            std::ptr::copy_nonoverlapping(second.as_ptr(), buffer.add(first.len()), second.len());
+            std::ptr::copy_nonoverlapping(frame.bytes.as_ptr(), buffer, frame.bytes.len());
         }
+        let flags = if frame.parameters && !frame.picture {
+            ndk::AMEDIACODEC_BUFFER_FLAG_CODEC_CONFIG
+        } else if frame.idr {
+            ndk::AMEDIACODEC_BUFFER_FLAG_KEY_FRAME
+        } else {
+            0
+        };
         let result = unsafe {
-            ndk::AMediaCodec_queueInputBuffer(self.codec, index, 0, length, timestamp, flags).0
+            ndk::AMediaCodec_queueInputBuffer(
+                self.codec,
+                index,
+                0,
+                frame.bytes.len(),
+                (frame.timestamp_100ns.max(0) / 10) as u64,
+                flags,
+            )
+            .0
         };
         self.callbacks
             .counters
@@ -477,41 +486,6 @@ impl Decoder {
             .inputs
             .fetch_add(1, Ordering::Relaxed);
         self.callbacks.counters.stage.store(4, Ordering::Relaxed);
-        Ok(true)
-    }
-    fn feed(&mut self, prefix: &[u8], frame: &crate::video_output::Frame) -> Result<bool> {
-        if self.config_pending {
-            if !self.queue_input(
-                &self.configuration.csd0,
-                &self.configuration.csd1,
-                0,
-                ndk::AMEDIACODEC_BUFFER_FLAG_CODEC_CONFIG,
-            )? {
-                return Ok(false);
-            }
-            self.config_pending = false;
-            self.callbacks
-                .counters
-                .config_inputs
-                .fetch_add(1, Ordering::Relaxed);
-        }
-        let timestamp =
-            crate::decode_state::presentation_time(self.last_timestamp, frame.timestamp_100ns);
-        let flags = if frame.idr {
-            ndk::AMEDIACODEC_BUFFER_FLAG_KEY_FRAME
-        } else {
-            0
-        };
-        if !self.queue_input(prefix, &frame.bytes, timestamp, flags)? {
-            return Ok(false);
-        }
-        self.last_timestamp = timestamp;
-        if frame.idr {
-            self.callbacks
-                .counters
-                .idr_inputs
-                .fetch_add(1, Ordering::Relaxed);
-        }
         Ok(true)
     }
 }
@@ -554,8 +528,6 @@ fn run(state: &State, window: &NativeWindow, choices: Choices) -> Result<()> {
     let mut waiting_idr = true;
     let mut previous_codec = None;
     let mut generation = 0;
-    let mut prefix = Vec::new();
-    let mut format_dirty = true;
     loop {
         {
             let mut queue = state.queue.lock().unwrap_or_else(|e| e.into_inner());
@@ -565,7 +537,6 @@ fn run(state: &State, window: &NativeWindow, choices: Choices) -> Result<()> {
             if crate::decode_state::retire_pending(&mut queue, &mut generation, &mut pending) {
                 prepared = false;
                 waiting_idr = true;
-                prefix.clear();
             }
             if pending.is_none() {
                 pending = queue.pop();
@@ -591,72 +562,65 @@ fn run(state: &State, window: &NativeWindow, choices: Choices) -> Result<()> {
         }
         if !prepared && frame.parameters {
             cache.observe(&frame.bytes, frame.codec);
-            format_dirty = true;
-        }
-        if !frame.picture {
-            crate::decode_state::append_metadata(&mut prefix, &frame.bytes)?;
-            let frame = pending.take().unwrap();
-            state
-                .queue
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .recycle(frame.bytes);
-            continue;
-        }
-        if waiting_idr && !frame.idr {
-            prefix.clear();
-            let frame = pending.take().unwrap();
-            state
-                .queue
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .recycle(frame.bytes);
-            continue;
-        }
-        if !prepared && (format_dirty || decoder.is_none() || frame.idr) {
-            let config = cache
-                .decoder_initialization(frame.codec)
-                .context("Video parameters incomplete; reconnect to request a fresh keyframe")?;
-            if decoder
-                .as_ref()
-                .is_none_or(|d| d.configuration != config || d.kind != frame.codec)
-            {
-                if !frame.idr {
+            if let Some(config) = cache.decoder_initialization(frame.codec) {
+                if decoder
+                    .as_ref()
+                    .is_none_or(|d| d.geometry != config.geometry || d.kind != frame.codec)
+                {
+                    let setup = Setup::begin(state);
+                    drop(decoder.take());
+                    let choice = match frame.codec {
+                        Codec::H264 => &choices.avc,
+                        Codec::Hevc => choices
+                            .hevc
+                            .as_ref()
+                            .context("Host sent HEVC without a hardware decoder")?,
+                    };
+                    decoder = Some(Decoder::open(
+                        window,
+                        choice,
+                        config,
+                        frame.codec,
+                        state.counters.clone(),
+                    )?);
+                    drop(setup);
                     waiting_idr = true;
-                    let mut queue = state.queue.lock().unwrap_or_else(|e| e.into_inner());
-                    let needs_keyframe = !queue.has_queued_idr();
-                    queue.begin_format_change(Instant::now(), needs_keyframe);
+                    {
+                        let mut queue = state.queue.lock().unwrap_or_else(|e| e.into_inner());
+                        // A queued IDR already terminates the reference gap.
+                        // Re-arming ingress gating here would drop its following
+                        // deltas while the worker is still opening the codec.
+                        let needs_keyframe = !frame.idr && !queue.has_queued_idr();
+                        queue.begin_format_change(Instant::now(), needs_keyframe);
+                    }
+                    // CSD in MediaFormat is submitted automatically by start().
+                    if !frame.picture {
+                        let frame = pending.take().unwrap();
+                        state
+                            .queue
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .recycle(frame.bytes);
+                        continue;
+                    }
+                    // Recheck the queue generation after a slow native setup
+                    // before submitting the access unit retained across it.
+                    prepared = true;
                     continue;
                 }
-                // Open once the full parameter set and its random-access
-                // picture are known, rather than once for each SPS/PPS message.
-                let setup = Setup::begin(state);
-                drop(decoder.take());
-                let choice = match frame.codec {
-                    Codec::H264 => &choices.avc,
-                    Codec::Hevc => choices
-                        .hevc
-                        .as_ref()
-                        .context("Host sent HEVC without a hardware decoder")?,
-                };
-                decoder = Some(Decoder::open(
-                    window,
-                    choice,
-                    config,
-                    frame.codec,
-                    state.counters.clone(),
-                )?);
-                drop(setup);
-                format_dirty = false;
-                prepared = true;
-                // A slow setup can retire this compressed picture. Recheck the
-                // shared queue generation before touching the native input.
-                continue;
             }
-            format_dirty = false;
         }
         prepared = true;
-        if waiting_idr {
+        if frame.picture && waiting_idr {
+            if !frame.idr {
+                let frame = pending.take().unwrap();
+                state
+                    .queue
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .recycle(frame.bytes);
+                continue;
+            }
             waiting_idr = false;
             state
                 .queue
@@ -665,14 +629,13 @@ fn run(state: &State, window: &NativeWindow, choices: Choices) -> Result<()> {
                 .recovered();
         }
         if let Some(d) = decoder.as_mut() {
-            if !d.feed(&prefix, frame)? {
+            if !d.feed(frame)? {
                 thread::park();
                 continue;
             }
         } else if frame.picture {
             anyhow::bail!("Video parameters incomplete; reconnect to request a fresh keyframe");
         }
-        prefix.clear();
         let frame = pending.take().unwrap();
         state
             .queue
