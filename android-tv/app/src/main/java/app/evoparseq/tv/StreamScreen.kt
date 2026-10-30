@@ -82,7 +82,7 @@ internal fun StreamScreen(model: TvModel, host: Host, close: () -> Unit) {
                 if (error.isNotEmpty()) Text("Stage ${network.optString("failure_stage")} · channel ${network.optString("failure_channel")} · ${network.optString("read_error")}\n" +
                     "Control queue ${network.optInt("queued_control_messages")} · max message C/V/A ${network.optJSONArray("max_message_bytes")}", color = Color(0xFFFFB4AB))
             }
-            if (video != null && (error.isNotEmpty() || video.optLong("submitted") == 0L)) {
+            if (video != null && (!video.isNull("error") || video.optLong("submitted") == 0L)) {
                 Text("${video.optString("stage")} · ${video.optString("decoder")}\n" +
                     "Input callbacks ${video.optLong("input_callbacks")} · queued to codec ${video.optLong("inputs")}\n" +
                     "Output callbacks ${video.optLong("output_callbacks")} · released to Surface ${video.optLong("submitted")}\n" +
