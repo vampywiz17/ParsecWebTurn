@@ -1,10 +1,15 @@
 [package]
 name = "evoparseq-tv"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 publish = false
 license = "MIT"
 rust-version = "1.90"
+
+# Shared control.rs also contains Windows-only BUD input. Recognizing that
+# cfg name does not enable BUD or add its dependencies to the Android crate.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("bud"))'] }
 
 [lib]
 crate-type = ["cdylib", "rlib"]
