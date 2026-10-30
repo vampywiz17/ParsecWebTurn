@@ -35,6 +35,7 @@ import androidx.compose.ui.input.key.*
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -136,8 +137,12 @@ private fun TvApp(model: TvModel) {
                 }
             }
         }
-        if (model.busy) Text("Working…", color = Color(0xFFA8BED7))
-        if (model.message.isNotEmpty()) Text(model.message, color = Color(0xFFFFC6A0))
+        // Reserve two text lines even while idle. A message/progress change must
+        // not resize the page and trigger a focused field's bring-into-view scroll.
+        Text(if (model.busy) "Working…" else model.message,
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            minLines = 2, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            color = if (model.busy) Color(0xFFA8BED7) else Color(0xFFFFC6A0))
         Spacer(Modifier.height(12.dp))
         Text("Android TV preview · streaming not yet available", fontSize = 12.sp,
             color = Color(0xFF9CACC0))
@@ -150,26 +155,31 @@ private fun SignIn(model: TvModel, first: FocusRequester, inspect: () -> Unit, s
     // Secrets deliberately do not use rememberSaveable / SavedStateHandle.
     var password by remember { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
-    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(Modifier.fillMaxSize()) {
         Text("Sign in to your Parsec account", style = MaterialTheme.typography.headlineSmall)
-        Text("Independent client · not affiliated with Parsec/Unity.\n" +
-            "Sign-in stays in memory for this preview; no password or token is saved.")
-        AccountField("Email", email, { if (it.length <= 320) email = it },
-            KeyboardType.Email, modifier = Modifier.focusRequester(first))
-        AccountField("Password", password, { if (it.length <= 4096) password = it },
-            KeyboardType.Password, secret = true)
-        AccountField("Two-factor code (if enabled)", code, { if (it.length <= 32) code = it },
-            KeyboardType.NumberPassword, secret = true, done = true)
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Button(onClick = {
-                model.signIn(email, password, code)
-                // Keep the password only in this unsaved form while retrying an
-                // expired 2FA code. Leaving the form/signing in drops the fields.
-                code = ""
-            }, enabled = !model.busy && email.isNotBlank() && password.isNotEmpty()) { Text("Sign in") }
-            Button(onClick = inspect, enabled = !model.busy) { Text("Device capabilities") }
-            Button(onClick = settings, enabled = !model.busy) { Text("Settings") }
+        Spacer(Modifier.height(12.dp))
+        // The heading stays above the scroll viewport. D-pad/IME focus may move
+        // the form, but cannot leave a half-clipped heading below the app header.
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Independent client · not affiliated with Parsec/Unity.\n" +
+                "Sign-in stays in memory for this preview; no password or token is saved.")
+            AccountField("Email", email, { if (it.length <= 320) email = it },
+                KeyboardType.Email, modifier = Modifier.focusRequester(first))
+            AccountField("Password", password, { if (it.length <= 4096) password = it },
+                KeyboardType.Password, secret = true)
+            AccountField("Two-factor code (if enabled)", code, { if (it.length <= 32) code = it },
+                KeyboardType.NumberPassword, secret = true, done = true)
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Button(onClick = {
+                    model.signIn(email, password, code)
+                    // Keep the password only in this unsaved form while retrying an
+                    // expired 2FA code. Leaving the form/signing in drops the fields.
+                    code = ""
+                }, enabled = !model.busy && email.isNotBlank() && password.isNotEmpty()) { Text("Sign in") }
+                Button(onClick = inspect, enabled = !model.busy) { Text("Device capabilities") }
+                Button(onClick = settings, enabled = !model.busy) { Text("Settings") }
+            }
         }
     }
 }
