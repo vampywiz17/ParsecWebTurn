@@ -11,16 +11,30 @@ use webrtc::{
 use zeroize::Zeroize;
 
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct Network {
+    #[serde(default = "default_provider")]
     pub provider: String,
+    #[serde(default = "default_stun")]
     pub stun_urls: Vec<String>,
+    #[serde(default)]
     pub turn_urls: Vec<String>,
+    #[serde(default)]
     pub username: String,
+    #[serde(default)]
     pub password: String,
+    #[serde(default)]
     pub key_id: String,
+    #[serde(default)]
     pub token: String,
+    #[serde(default)]
     pub force_relay: bool,
+}
+fn default_provider() -> String {
+    "direct".into()
+}
+fn default_stun() -> Vec<String> {
+    vec!["stun:stun.parsec.gg:3478".into()]
 }
 impl Default for Network {
     fn default() -> Self {
@@ -149,9 +163,33 @@ pub fn current() -> std::sync::Arc<Network> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn forced_custom_turn_keeps_relay_only_policy_and_survives_storage() {
+        use crate::rtc_configuration::NetworkSettings;
+        let n=Network::parse(br#"{"provider":"custom","turn_urls":["turns:relay.example:443?transport=tcp"],"username":"fixture","password":"secret-fixture","force_relay":true}"#).unwrap();
+        let restored = Network::parse(&serde_json::to_vec(&n).unwrap()).unwrap();
+        let rtc = restored.resolve().await.unwrap();
+        assert_eq!(rtc.ice_transport_policy, RTCIceTransportPolicy::Relay);
+        assert!(rtc
+            .ice_servers
+            .iter()
+            .any(|s| s.urls.iter().any(|u| u.starts_with("turns:"))));
+        assert!(restored.force_relay);
+        assert!(!restored.summary().to_string().contains("secret-fixture"));
+        assert_eq!(
+            Network::default()
+                .resolve()
+                .await
+                .unwrap()
+                .ice_transport_policy,
+            RTCIceTransportPolicy::All
+        );
+    }
+
     #[test]
     fn reject_unsafe_urls_incomplete_tokens_and_keep_summary_secret_free() {
         let mut n = Network::default();
+        assert!(n.validate().is_ok());
         n.force_relay = true;
         assert!(n.validate().is_err());
         n.provider = "cloudflare".into();

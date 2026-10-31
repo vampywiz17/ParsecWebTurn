@@ -136,16 +136,17 @@ mod tests {
     fn legacy_pacing_defaults_to_dynamic_and_fixed_is_a_host_request() {
         let legacy = r#"{"transport":0,"video":0,"resolution":0,"fps":0,"bandwidth":0}"#;
         let mut prefs = Preferences::parse(legacy).unwrap();
-        assert!(!prefs.host_request().unwrap().constant_fps);
+        assert_eq!(prefs.host_request().unwrap().constant_fps, Some(false));
         prefs.select("pacing", 1).unwrap();
-        assert!(prefs.host_request().unwrap().constant_fps);
+        assert_eq!(prefs.host_request().unwrap().constant_fps, Some(true));
         assert!(prefs.select("pacing", 2).is_err());
-        assert!(
+        assert_eq!(
             Preferences::parse(&serde_json::to_string(&prefs).unwrap())
                 .unwrap()
                 .host_request()
                 .unwrap()
-                .constant_fps
+                .constant_fps,
+            Some(true)
         );
     }
 
