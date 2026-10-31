@@ -14,7 +14,7 @@ internal class ControllerInput(context: Context) : InputManager.InputDeviceListe
     private val input = context.getSystemService(Context.INPUT_SERVICE) as InputManager
     private val main = Handler(Looper.getMainLooper())
     private val mappings = mutableMapOf<Int, Mapping>()
-    private val vibrating = mutableSetOf<Int>()
+    private val vibrating = mutableMapOf<Int, android.os.Vibrator>()
     private var closed = false
     var enabled = false
         set(value) {
@@ -73,28 +73,31 @@ internal class ControllerInput(context: Context) : InputManager.InputDeviceListe
     fun rumble(id: Int, low: Int, high: Int) {
         main.post {
             if (closed) return@post
-            val vibrator = input.getInputDevice(id)?.vibrator ?: return@post
             if (!enabled || (low == 0 && high == 0)) {
-                if (vibrating.remove(id)) vibrator.cancel()
-            } else if (vibrator.hasVibrator()) {
-                // Android does not promise low/high motor identities. Apply the
-                // combined amplitude to this controller only, never the TV/phone.
-                vibrator.vibrate(VibrationEffect.createWaveform(longArrayOf(0,1000), intArrayOf(0,maxOf(low,high).coerceIn(1,255)),0))
-                vibrating.add(id)
+                vibrating.remove(id)?.let { runCatching { it.cancel() } }
+                return@post
+            }
+            val vibrator = vibrating[id] ?: input.getInputDevice(id)?.vibrator ?: return@post
+            if (vibrator.hasVibrator()) {
+                // Keep this exact OS handle through hotplug/focus loss so its
+                // cancellation token remains the one that started the effect.
+                // Android does not promise low/high motor identities.
+                val amplitude = if (vibrator.hasAmplitudeControl()) maxOf(low,high).coerceIn(1,255) else VibrationEffect.DEFAULT_AMPLITUDE
+                if (runCatching { vibrator.vibrate(VibrationEffect.createWaveform(longArrayOf(0,1000), intArrayOf(0,amplitude),0)) }.isSuccess)
+                    vibrating[id] = vibrator
             }
         }
     }
     @Suppress("DEPRECATION")
     private fun stopMotors() {
-        vibrating.forEach { input.getInputDevice(it)?.vibrator?.cancel() }
+        vibrating.values.forEach { runCatching { it.cancel() } }
         vibrating.clear()
     }
     override fun onInputDeviceAdded(id: Int) = Unit // First face button claims the shared slot.
     override fun onInputDeviceChanged(id: Int) { onInputDeviceRemoved(id) }
     @Suppress("DEPRECATION")
     override fun onInputDeviceRemoved(id: Int) {
-        input.getInputDevice(id)?.vibrator?.cancel()
-        vibrating.remove(id)
+        vibrating.remove(id)?.let { runCatching { it.cancel() } }
         mappings.remove(id)
         NativeCore.controllerRemoved(id)
     }
