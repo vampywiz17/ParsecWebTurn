@@ -243,16 +243,7 @@ impl Shared {
         );
     }
 }
-/// Remote prflx cannot establish whether a remote TURN allocation is hidden.
-pub fn route(local: &str, remote: &str) -> &'static str {
-    if local == "relay" || remote == "relay" {
-        "Relay — TURN in use"
-    } else if matches!(local, "host" | "srflx" | "prflx") && matches!(remote, "host" | "srflx") {
-        "Direct — no TURN"
-    } else {
-        "Unverified"
-    }
-}
+use crate::rtc_configuration::route;
 pub async fn network(peer: &RTCPeerConnection) -> Sample {
     let dtls = peer.sctp().transport();
     let mut sample = Sample {

@@ -322,7 +322,7 @@ impl Transport {
             Self::WebRtc(a) => a.network_diagnostics(),
             Self::Bud(b) => {
                 let s = b.session.snapshot();
-                json!({"transport":if s.connected { format!("BUD / {}",s.relay_transport.unwrap_or("udp").to_uppercase()) } else { "BUD / connecting".into() }, "state":if s.connected {"Connected"} else {"Connecting"}, "received_bytes":[s.udp_received], "rtt_ms":s.rtt_ms})
+                json!({"transport":if s.connected { format!("BUD / {}",s.relay_transport.unwrap_or("udp").to_uppercase()) } else { "BUD / connecting".into() }, "state":if s.connected {"Connected"} else {"Connecting"}, "received_bytes":[s.udp_received], "rtt_ms":s.rtt_ms,"route":if !s.connected { "Unverified" } else if s.relay { "Relay — TURN in use" } else { "Direct — no TURN" }})
             }
         }
     }

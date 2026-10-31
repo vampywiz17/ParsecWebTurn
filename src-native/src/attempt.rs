@@ -112,6 +112,8 @@ struct Progress {
     empty_channel_messages: [u64; 3],
     #[cfg(any(target_os = "android", test))]
     rtt_ms: Option<f64>,
+    #[cfg(any(target_os = "android", test))]
+    route: Option<&'static str>,
     failure_channel: Option<u16>,
     read_error: Option<&'static str>,
     failure_elapsed_ms: Option<u64>,
@@ -226,6 +228,7 @@ impl Completion {
             "received_bytes":p.channel_bytes_received,"received_messages":p.channel_messages_received,
             "max_message_bytes":p.channel_max_message_bytes,
             "empty_messages":p.empty_channel_messages,"rtt_ms":p.rtt_ms,
+            "route":p.route.unwrap_or("Unverified"),
             "queued_control_messages":self.messages.len(),"queued_control_bytes":self.message_bytes,
         })
     }
@@ -954,11 +957,9 @@ fn worker(
                     }
                 }
                 if !crate::overlay::REQUESTED.load(Ordering::Relaxed) {
-                    state
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .progress
-                        .rtt_ms = None;
+                    let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
+                    s.progress.rtt_ms = None;
+                    s.progress.route = None;
                     continue;
                 }
                 let Some(peer) = weak.upgrade() else { break };
@@ -973,21 +974,25 @@ fn worker(
                     {
                         return None;
                     }
-                    crate::rtc_configuration::selected_rtt(
-                        &report,
-                        &pair.local().stats_id,
-                        &pair.remote().stats_id,
-                    )
+                    Some((
+                        crate::rtc_configuration::selected_rtt(
+                            &report,
+                            &pair.local().stats_id,
+                            &pair.remote().stats_id,
+                        ),
+                        crate::rtc_configuration::route(
+                            &pair.local().typ.to_string(),
+                            &pair.remote().typ.to_string(),
+                        ),
+                    ))
                 };
-                let rtt = tokio::time::timeout(Duration::from_millis(750), sample)
+                let sample = tokio::time::timeout(Duration::from_millis(750), sample)
                     .await
                     .ok()
                     .flatten();
-                state
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .progress
-                    .rtt_ms = rtt;
+                let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
+                s.progress.rtt_ms = sample.and_then(|(rtt, _)| rtt);
+                s.progress.route = sample.map(|(_, route)| route);
             }
         });
     }

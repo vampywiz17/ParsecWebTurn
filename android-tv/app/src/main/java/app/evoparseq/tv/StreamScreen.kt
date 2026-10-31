@@ -116,7 +116,7 @@ internal fun StreamScreen(model: TvModel, host: Host, close: () -> Unit) {
             }
             if (metrics != null) Text(metrics.optString("format"), color = Color(0xFFA8BED7))
             val network = status?.optJSONObject("network")
-            Text(network?.optString("transport", "WebRTC") ?: "Connecting", color = Color(0xFFA8BED7))
+            Text("${network?.optString("transport", "WebRTC") ?: "Connecting"} | ${network?.optString("route", "Unverified") ?: "Unverified"}", color = Color(0xFFA8BED7))
             if (focusGranted == false) Text("Android did not grant audio focus", color = Color(0xFFFFB4AB))
             Text("Hides after 5 seconds. Press OK, Menu or Back to show controls.", color = Color(0xFFA8BED7))
         }

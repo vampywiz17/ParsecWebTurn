@@ -38,3 +38,27 @@ pub fn selected_rtt(report: &webrtc::stats::StatsReport, local: &str, remote: &s
         _ => None,
     })
 }
+
+/// Remote prflx cannot establish whether a remote TURN allocation is hidden.
+pub fn route(local: &str, remote: &str) -> &'static str {
+    if local == "relay" || remote == "relay" {
+        "Relay — TURN in use"
+    } else if matches!(local, "host" | "srflx" | "prflx") && matches!(remote, "host" | "srflx") {
+        "Direct — no TURN"
+    } else {
+        "Unverified"
+    }
+}
+
+#[cfg(test)]
+mod route_tests {
+    use super::route;
+    #[test]
+    fn selected_pair_requires_positive_route_evidence() {
+        assert_eq!(route("relay", "prflx"), "Relay — TURN in use");
+        assert_eq!(route("host", "relay"), "Relay — TURN in use");
+        assert_eq!(route("srflx", "host"), "Direct — no TURN");
+        assert_eq!(route("host", "prflx"), "Unverified");
+        assert_eq!(route("", ""), "Unverified");
+    }
+}
