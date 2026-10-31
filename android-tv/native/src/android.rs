@@ -8,7 +8,8 @@ use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use zeroize::Zeroizing;
 
-// JNI calls run on the view model's single worker, never Android's UI thread.
+// Account/stream JNI commands run on the view model worker. Controller calls
+// only enqueue bounded input or register the platform output callback.
 // Only one foreground account is supported. Tokens cross JNI only as transient
 // byte arrays for the Android Keystore adapter, never UI strings or diagnostics.
 static SESSION: Mutex<Option<Arc<Session>>> = Mutex::new(None);
@@ -368,4 +369,67 @@ pub extern "system" fn Java_app_evoparseq_tv_NativeCore_setOverlayVisible(
     visible: jni::sys::jboolean,
 ) {
     crate::overlay::REQUESTED.store(visible != 0, std::sync::atomic::Ordering::Relaxed);
+}
+
+#[no_mangle]
+pub extern "system" fn Java_app_evoparseq_tv_NativeCore_controllerAdapter(
+    mut env: JNIEnv,
+    _object: JObject,
+    adapter: JObject,
+) {
+    if crate::gamepad_android::bind(&env, adapter).is_err() {
+        let _ = env.exception_clear();
+    }
+}
+#[no_mangle]
+pub extern "system" fn Java_app_evoparseq_tv_NativeCore_controllerFocus(
+    _env: JNIEnv,
+    _object: JObject,
+    active: jni::sys::jboolean,
+) {
+    crate::gamepad_android::focus(active != 0);
+}
+#[no_mangle]
+pub extern "system" fn Java_app_evoparseq_tv_NativeCore_controllerButton(
+    _env: JNIEnv,
+    _object: JObject,
+    id: i32,
+    code: i32,
+    down: jni::sys::jboolean,
+) {
+    crate::gamepad_android::button(id, code, down != 0);
+}
+#[no_mangle]
+pub extern "system" fn Java_app_evoparseq_tv_NativeCore_controllerRemoved(
+    _env: JNIEnv,
+    _object: JObject,
+    id: i32,
+) {
+    crate::stream::controller_event(crate::gamepad::Event::Remove(id));
+}
+#[no_mangle]
+pub extern "system" fn Java_app_evoparseq_tv_NativeCore_controllerAxes(
+    _env: JNIEnv,
+    _object: JObject,
+    id: i32,
+    x: f32,
+    y: f32,
+    rx: f32,
+    ry: f32,
+    lt: f32,
+    rt: f32,
+    hx: f32,
+    hy: f32,
+    fx: f32,
+    fy: f32,
+    frx: f32,
+    fry: f32,
+    flt: f32,
+    frt: f32,
+) {
+    crate::gamepad_android::axes(
+        id,
+        [x, y, rx, ry, lt, rt, hx, hy],
+        [fx, fy, frx, fry, flt, frt],
+    );
 }

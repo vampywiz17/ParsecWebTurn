@@ -34,6 +34,8 @@ pub(super) trait Runtime: Desktop {
         manager: Arc<crate::connection_settings::Manager>,
         policy: transport::Policy,
     ) -> Result<transport::Attempt>;
+    fn controllers(&self) -> impl crate::gamepad::polling::Devices;
+    fn controller_input_allowed(&self) -> bool;
     fn register_consumer(&self);
     fn take_events(&self, batch: &mut VecDeque<Event>);
     fn receive_pointer(&self, pointer: &mut pointer::Pointer, frame: &[u8]) -> Result<()>;
@@ -225,6 +227,9 @@ pub(super) fn run(
     let mut batch = VecDeque::new();
     let mut pointer = pointer::Pointer::default();
     let mut input = input::Input::default();
+    let mut pads = crate::gamepad::Manager::default();
+    let mut controllers = platform.controllers();
+    let mut pad_poller = crate::gamepad::polling::Poller::default();
     let mut output: Option<Arc<crate::audio_windows::Playback>> = None;
     let mut established = false;
     let mut audio_source = None;
@@ -293,6 +298,9 @@ pub(super) fn run(
                 continue;
             }
             match crate::control::decode(&frame)? {
+                crate::control::Message::Rumble { pad, low, high } => {
+                    pads.feedback(pad, low, high, &mut controllers)
+                }
                 crate::control::Message::Buffer {
                     event,
                     payload: Some(range),
@@ -495,12 +503,20 @@ pub(super) fn run(
                 platform.send_input(&mut input, &attempt, &event)?;
             }
         }
+        let controller_wait = pad_poller.tick(
+            &mut pads,
+            &mut controllers,
+            established && platform.controller_input_allowed(),
+            Instant::now(),
+            |frame| attempt.send(frame),
+        )?;
         local.retry_clipboard(platform, Instant::now());
         // Existing FIFO wakes immediately for input; media decoding and presentation
         // stay on their original workers. This interval only services control/audio.
-        std::thread::park_timeout(Duration::from_millis(100));
+        std::thread::park_timeout(Duration::from_millis(100).min(controller_wait));
     }
     if established {
+        let _ = pads.focus(false, &mut controllers, |frame| attempt.send(frame));
         let _ = attempt.send(&crate::control::header(24, 0, 0, 0));
     }
     drop(attempt);

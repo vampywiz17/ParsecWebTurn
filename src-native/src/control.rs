@@ -85,6 +85,11 @@ pub fn text(kind: u8, id: i32, value: &str) -> Result<Bytes> {
 
 pub enum Message {
     Status(i32),
+    Rumble {
+        pad: u32,
+        low: u8,
+        high: u8,
+    },
     Buffer {
         event: Value,
         payload: Option<std::ops::Range<usize>>,
@@ -127,7 +132,17 @@ pub fn decode(bytes: &[u8]) -> Result<Message> {
         10 => Message::Status(a),
         // Timing is collected by the transport. The native session does not
         // consume the former web-core gamepad, host-mode or guest callbacks.
-        16 | 20 | 21 | 28 => Message::Ignored,
+        16 | 21 | 28 => Message::Ignored,
+        20 => {
+            if bytes.len() != 13 {
+                bail!("invalid controller feedback size");
+            }
+            Message::Rumble {
+                pad: a as u32,
+                low: b as u8,
+                high: number(8) as u8,
+            }
+        }
         25 => {
             let size = usize::try_from(a).context("negative guest list length")?;
             if size == 0 || size != bytes.len() - 13 || bytes.last() != Some(&0) {
@@ -177,6 +192,21 @@ impl std::error::Error for AbsoluteMouseUnavailable {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn controller_feedback_is_bounded_and_preserves_motor_byte_order() {
+        assert!(matches!(
+            decode(&header(20, 2, 17, 255)).unwrap(),
+            Message::Rumble {
+                pad: 2,
+                low: 17,
+                high: 255
+            }
+        ));
+        let mut oversized = header(20, 0, 0, 0).to_vec();
+        oversized.push(0);
+        assert!(decode(&oversized).is_err());
+        assert!(decode(&header(20, 0, 0, 0)[..12]).is_err());
+    }
     #[test]
     fn full_chroma_main10_request_is_preserved_on_refresh() {
         let mut config = Config {

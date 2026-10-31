@@ -101,3 +101,7 @@ fn main() {
     #[cfg(not(windows))]
     eprintln!("EvoParseq currently requires Windows.");
 }
+
+mod gamepad;
+#[cfg(windows)]
+mod gamepad_windows;

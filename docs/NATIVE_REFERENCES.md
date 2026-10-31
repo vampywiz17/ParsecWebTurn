@@ -94,3 +94,29 @@ this preserves an existing value without allowing entry of a new custom preset.
 Parsec's [Windows documentation](https://support.parsec.app/hc/en-us/articles/32381199341716-Parsec-App-for-Windows)
 also explains that resolution requests depend on Windows display support, and
 that requesting an FPS does not establish support for that display refresh rate.
+
+## Shared controller support
+
+The 16-button full-state framing follows lowlat main revision
+`b69a338db855ec6503090f5015e4f8019724e0d1`,
+[protocol section 11.1](https://github.com/nomi-san/lowlat/blob/b69a338db855ec6503090f5015e4f8019724e0d1/docs/01-protocol.md#111-control-messages)
+and `crates/client/src/input.rs`: opcode 23 names the pad in argument 0,
+then three initialized padding bytes, big-endian button bits/four signed sticks,
+and two byte triggers; vertical whole-state axes point up. Opcode 6 unplugs the
+pad in argument 2; opcode 20 returns pad/low/high motor bytes. EvoParseq owns
+its shared state, bounded event handoff, lifecycle and platform adapters; no
+lowlat SDL/demo/SDK input implementation or extra controller dependency is added.
+
+Parsec's [Setup Gamepad](https://support.parsec.app/hc/en-us/articles/32381705301908-Setup-Gamepad)
+documents client face-button activation and host-side virtual controllers.
+Read-only inspection of the stock Windows DLL with the hash above found an
+`XInputSetState` symbol; that is a research clue, not proof of every input API
+or of our wire compatibility. No stock binary code is copied or patched.
+The official Android app is closed source; its documented controller behavior,
+not unverified implementation details, is the comparison point.
+
+Platform adapters use Microsoft's documented
+[XInput](https://learn.microsoft.com/en-us/windows/win32/xinput/getting-started-with-xinput)
+and Android's documented
+[controller events](https://developer.android.com/games/sdk/game-controller/controller-input).
+Synthetic wire/lifecycle tests do not establish stock-host live compatibility.

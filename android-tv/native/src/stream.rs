@@ -22,6 +22,7 @@ struct Running {
     stop: Arc<AtomicBool>,
     thread: thread::Thread,
     status: Arc<Mutex<Value>>,
+    controllers: Arc<crate::gamepad::Inbox>,
 }
 static RUNNING: Mutex<Option<Running>> = Mutex::new(None);
 struct Request {
@@ -31,6 +32,7 @@ struct Request {
     window: NativeWindow,
     choices: Choices,
     size: (u32, u32),
+    controllers: Arc<crate::gamepad::Inbox>,
 }
 
 pub fn start(
@@ -65,6 +67,8 @@ pub fn start(
     }
     let stop = Arc::new(AtomicBool::new(false));
     let status = Arc::new(Mutex::new(json!({"state":"Connecting…","ended":false})));
+    let controllers = Arc::new(crate::gamepad::Inbox::default());
+    let worker_controllers = controllers.clone();
     let worker_stop = stop.clone();
     let worker_status = status.clone();
     let handle = thread::Builder::new()
@@ -78,6 +82,7 @@ pub fn start(
                     window,
                     choices,
                     size,
+                    controllers: worker_controllers,
                 },
                 &worker_stop,
                 &worker_status,
@@ -97,8 +102,16 @@ pub fn start(
         stop,
         thread: handle.thread().clone(),
         status,
+        controllers,
     });
     Ok(())
+}
+pub fn controller_event(event: crate::gamepad::Event) {
+    let slot = RUNNING.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(r) = slot.as_ref().filter(|r| !r.stop.load(Ordering::Acquire)) {
+        r.controllers.push(event);
+        r.thread.unpark();
+    }
 }
 pub fn active() -> bool {
     RUNNING
@@ -155,6 +168,7 @@ fn run(request: Request, stop: &AtomicBool, status: &Mutex<Value>) -> Result<()>
         window,
         choices,
         size,
+        controllers,
     } = request;
     if stop.load(Ordering::Acquire) {
         return Ok(());
@@ -200,6 +214,9 @@ fn run(request: Request, stop: &AtomicBool, status: &Mutex<Value>) -> Result<()>
         .audio_receiver()
         .context("Audio pipeline unavailable")?;
     let audio = audio_android::Output::open(receiver.clone())?;
+    let mut pads = crate::gamepad::Manager::default();
+    let mut motors = crate::gamepad_android::Output::default();
+    let mut controller_batch = std::collections::VecDeque::new();
     let mut configured = false;
     let mut queried = false;
     let mut host_config = crate::host_video::Config::default();
@@ -238,6 +255,9 @@ fn run(request: Request, stop: &AtomicBool, status: &Mutex<Value>) -> Result<()>
             };
             ensure!(channel == 0 && !text, "Invalid session control channel");
             match crate::control::decode(&frame)? {
+                crate::control::Message::Rumble { pad, low, high } => {
+                    pads.feedback(pad, low, high, &mut motors)
+                }
                 crate::control::Message::Status(code) if code != 0 => {
                     anyhow::bail!("The host ended the stream (status {code}). Check the host encoder and requested video format.");
                 }
@@ -299,6 +319,23 @@ fn run(request: Request, stop: &AtomicBool, status: &Mutex<Value>) -> Result<()>
         if configured && connection.video.take_keyframe_request() {
             connection.attempt.keyframe(&config)?;
         }
+        if connection.attempt.control_ready() {
+            if let Err(error) = controllers.take(&mut controller_batch) {
+                let _ = pads.focus(false, &mut motors, |f| {
+                    connection
+                        .attempt
+                        .send_binary(0, bytes::Bytes::copy_from_slice(f))
+                });
+                return Err(error);
+            }
+            for event in controller_batch.drain(..) {
+                pads.event(event, &mut motors, |f| {
+                    connection
+                        .attempt
+                        .send_binary(0, bytes::Bytes::copy_from_slice(f))
+                })?;
+            }
+        }
         audio.check()?;
         if update.elapsed() >= Duration::from_millis(500) {
             let snapshot = connection.video.snapshot();
@@ -340,5 +377,10 @@ fn run(request: Request, stop: &AtomicBool, status: &Mutex<Value>) -> Result<()>
         }
         thread::park_timeout(Duration::from_millis(25));
     }
+    let _ = pads.focus(false, &mut motors, |f| {
+        connection
+            .attempt
+            .send_binary(0, bytes::Bytes::copy_from_slice(f))
+    });
     Ok(())
 }

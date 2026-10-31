@@ -59,3 +59,8 @@ pub mod network;
 pub mod overlay;
 #[path = "../../../src-native/src/turn_configuration.rs"]
 mod turn_configuration;
+
+#[path = "../../../src-native/src/gamepad.rs"]
+pub mod gamepad;
+#[cfg(target_os = "android")]
+mod gamepad_android;

@@ -28,6 +28,8 @@ import androidx.tv.material3.Text
 @Composable
 internal fun StreamScreen(model: TvModel, host: Host, close: () -> Unit) {
     val context = LocalContext.current
+    val activity = context as MainActivity
+    val controllers = activity.controllerInput
     val first = remember { FocusRequester() }
     var focusGranted by remember { mutableStateOf<Boolean?>(null) }
     val status = model.streamStatus
@@ -42,6 +44,9 @@ internal fun StreamScreen(model: TvModel, host: Host, close: () -> Unit) {
     val error = status?.optString("error").orEmpty()
     val streaming = status?.optString("state") == "Streaming"
     BackHandler { if (!visible) { visible = true; interaction++ } else exit() }
+    LaunchedEffect(visible, streaming, error, activity.controllerWindowFocused) {
+        controllers.enabled = !visible && streaming && error.isEmpty() && activity.controllerWindowFocused
+    }
     LaunchedEffect(visible) {
         NativeCore.setOverlayVisible(visible)
         if (visible) first.requestFocus() else root.requestFocus()
@@ -63,7 +68,7 @@ internal fun StreamScreen(model: TvModel, host: Host, close: () -> Unit) {
             }.build()
         val granted = audio.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
         focusGranted = granted
-        onDispose { model.stopStream(); if (granted) audio.abandonAudioFocusRequest(request) }
+        onDispose { controllers.enabled = false; model.stopStream(); if (granted) audio.abandonAudioFocusRequest(request) }
     }
     BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)
         .focusRequester(root).onPreviewKeyEvent { event ->

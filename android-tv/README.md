@@ -31,7 +31,14 @@ D-pad navigation, two-factor sign-in and shared Rust account/session logic.
   payload bitrate and actual codec/depth. It hides after five idle seconds;
   OK/Menu/Back restores it, with Hide and Disconnect buttons. RTT queries pause
   while hidden; no GPU timing or pixel readback is introduced.
-- View/audio preview only: controller forwarding is the next separate milestone.
+- Shared Rust controller state/lifecycle and full-state protocol on BUD and WebRTC.
+  Android reads standard gamepad/joystick events; Windows uses native XInput.
+  Up to four pads; press a face button after hiding the overlay to join the host.
+  Local menus/focus loss release controllers; removal sends an explicit unplug.
+  Xbox-style buttons, D-pad, sticks and triggers are supported. Sony raw touch,
+  gyro and adaptive-trigger passthrough are not implemented. Device compatibility
+  and vibration require live testing. Android vibration uses the controller's
+  own vibrator, if exposed, without assuming separate motor identities.
   No HDR, 4:4:4, AI upscaling or rotated BUD output is advertised.
 
 Live video is confirmed on the Xiaomi box for H.264 and HEVC 8-bit, and HEVC
@@ -104,3 +111,16 @@ References: [TV design](https://developer.android.com/design/ui/tv),
 
 EvoParseq is an independent community project, not affiliated with or endorsed by
 Parsec/Unity, Xiaomi, Google or lowlat. Parsec account/service terms still apply.
+
+## Controller preview validation
+
+Pair an Android-recognized USB/Bluetooth gamepad with the TV, connect, wait for
+(or hide) the overlay, then press A/B/X/Y. Use the TV remote to reopen controls;
+controller buttons are forwarded only while the overlay is hidden. After focus
+loss, release held buttons before joining again. On Windows, use an XInput
+controller and focus the stream with local menus closed. DirectInput-only pads
+need a separate future Windows adapter; no remapping driver is installed here.
+The unchanged official host needs its normal gamepad driver and guest permission.
+Test both transports, button chords, sticks/triggers, unplug/reconnect, focus
+loss, local menu isolation and device-supported rumble. Synthetic tests/builds
+are not evidence of live controller compatibility.

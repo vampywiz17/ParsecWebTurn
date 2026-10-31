@@ -87,6 +87,12 @@ impl Runtime for Windows {
     ) -> Result<transport::Attempt> {
         transport::Attempt::spawn_native(id, peer, writer, self.window.clone(), manager, policy)
     }
+    fn controllers(&self) -> impl crate::gamepad::polling::Devices {
+        crate::gamepad_windows::Devices::default()
+    }
+    fn controller_input_allowed(&self) -> bool {
+        self.window.native_input_allowed()
+    }
     fn register_consumer(&self) {
         self.window.events.set_consumer(std::thread::current());
     }

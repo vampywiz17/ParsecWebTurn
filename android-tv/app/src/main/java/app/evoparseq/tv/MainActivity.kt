@@ -46,14 +46,29 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.tv.material3.*
 
 class MainActivity : ComponentActivity() {
+    internal var controllerWindowFocused by mutableStateOf(true)
+        private set
+    internal lateinit var controllerInput: ControllerInput
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean =
+        (if (::controllerInput.isInitialized) controllerInput.key(event) else false) || super.dispatchKeyEvent(event)
+    override fun dispatchGenericMotionEvent(event: android.view.MotionEvent): Boolean =
+        (if (::controllerInput.isInitialized) controllerInput.motion(event) else false) || super.dispatchGenericMotionEvent(event)
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        controllerWindowFocused = hasFocus
+        if (!hasFocus && ::controllerInput.isInitialized) controllerInput.enabled = false
+    }
+    override fun onDestroy() { controllerInput.close(); super.onDestroy() }
+
     private val model: TvModel get() = androidx.lifecycle.ViewModelProvider(this)[TvModel::class.java]
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        controllerInput = ControllerInput(this)
         setContent {
             TvTheme { TvApp(model) }
         }
     }
-    override fun onStop() { model.closeLocalSetup(); model.stopStream(); super.onStop() }
+    override fun onStop() { controllerInput.enabled = false; model.closeLocalSetup(); model.stopStream(); super.onStop() }
 }
 
 @Composable
@@ -121,7 +136,7 @@ private fun TvApp(model: TvModel) {
         val feedback = when {
             model.busy -> "Working…"
             model.message.isNotEmpty() -> model.message
-            else -> "Android TV streaming preview · controller input is not connected yet"
+            else -> "Android TV streaming preview · press a controller face button to join"
         }
         Text(feedback,
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
