@@ -962,7 +962,8 @@ fn worker(
                     continue;
                 }
                 let Some(peer) = weak.upgrade() else { break };
-                let ice = peer.sctp().transport().ice_transport();
+                let dtls = peer.sctp().transport();
+                let ice = dtls.ice_transport();
                 let sample = async {
                     let pair = ice.get_selected_candidate_pair().await?;
                     let report = peer.get_stats().await;
