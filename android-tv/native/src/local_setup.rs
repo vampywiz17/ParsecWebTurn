@@ -189,8 +189,8 @@ fn request(input: &mut impl Read) -> Result<Request> {
             raw.len() < LIMIT && started.elapsed() < Duration::from_secs(5),
             "Request exceeds limits"
         );
-        let mut buf = [0; 2048];
-        let count = input.read(&mut buf)?;
+        let mut buf = Zeroizing::new([0; 2048]);
+        let count = input.read(&mut buf[..])?;
         ensure!(count > 0, "Incomplete request");
         raw.extend_from_slice(&buf[..count]);
         let mut headers = [httparse::EMPTY_HEADER; 32];
@@ -244,7 +244,7 @@ fn request(input: &mut impl Read) -> Result<Request> {
             started.elapsed() < Duration::from_secs(5),
             "Request expired"
         );
-        let mut buf = [0; 2048];
+        let mut buf = Zeroizing::new([0; 2048]);
         let want = (head + length - raw.len()).min(buf.len());
         let n = input.read(&mut buf[..want])?;
         ensure!(n > 0, "Incomplete body");
@@ -259,7 +259,7 @@ fn request(input: &mut impl Read) -> Result<Request> {
         content_type,
     })
 }
-fn fields(body: &[u8]) -> Result<BTreeMap<String, String>> {
+fn fields(body: &[u8]) -> Result<BTreeMap<String, Zeroizing<String>>> {
     ensure!(body.len() <= LIMIT, "Form exceeds limit");
     let mut values = BTreeMap::new();
     for (key, value) in url::form_urlencoded::parse(body) {
@@ -280,7 +280,7 @@ fn fields(body: &[u8]) -> Result<BTreeMap<String, String>> {
         );
         ensure!(
             values
-                .insert(key.into_owned(), value.into_owned())
+                .insert(key.into_owned(), Zeroizing::new(value.into_owned()))
                 .is_none(),
             "Duplicate field"
         );
@@ -297,14 +297,14 @@ fn form(body: &[u8], pin: &str) -> Result<Network> {
         "Incorrect pairing code"
     );
     let mut take = |name: &str| fields.remove(name).unwrap_or_default();
-    let provider = take("provider");
-    let urls = |s: String| s.split_whitespace().map(str::to_owned).collect();
+    let provider = take("provider").to_string();
+    let urls = |s: Zeroizing<String>| s.split_whitespace().map(str::to_owned).collect();
     let mut n = Network {
         provider,
         stun_urls: urls(take("stun")),
         turn_urls: urls(take("turn")),
-        username: take("username"),
-        password: take("password"),
+        username: take("username").to_string(),
+        password: take("password").to_string(),
         key_id: take("key_id").trim().to_owned(),
         token: take("token").trim().to_owned(),
         force_relay: take("force_relay") == "on",
@@ -483,6 +483,67 @@ mod tests {
                 .unwrap()
                 .force_relay
         );
+    }
+
+    #[test]
+    fn wrong_host_cross_origin_and_expiry_cannot_stage_credentials() {
+        struct Duplex {
+            input: std::io::Cursor<Vec<u8>>,
+            output: Vec<u8>,
+        }
+        impl Read for Duplex {
+            fn read(&mut self, b: &mut [u8]) -> std::io::Result<usize> {
+                self.input.read(b)
+            }
+        }
+        impl Write for Duplex {
+            fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+                self.output.extend_from_slice(b);
+                Ok(b.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let state = State {
+            stop: AtomicBool::new(false),
+            expires: Instant::now() + LIFETIME,
+            view: Mutex::new(View {
+                url: String::new(),
+                fingerprint: String::new(),
+                qr: vec![],
+                pin: "123456".into(),
+                pending: None,
+                closed: false,
+            }),
+            active: Mutex::new(None),
+        };
+        for (host, origin) in [
+            ("wrong:444", "https://192.168.1.2:444"),
+            ("192.168.1.2:444", "https://other.invalid"),
+        ] {
+            let body = "pin=123456&provider=cloudflare&key_id=fixture&token=secret-fixture";
+            let input=format!("POST /pair/apply HTTP/1.1\r\nHost: {host}\r\nOrigin: {origin}\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\n\r\n{body}",body.len());
+            let mut duplex = Duplex {
+                input: std::io::Cursor::new(input.into_bytes()),
+                output: vec![],
+            };
+            serve_request(&mut duplex, &state, "/pair", "192.168.1.2:444", &mut 0).unwrap();
+            assert!(duplex.output.starts_with(b"HTTP/1.1 403"));
+            assert!(!String::from_utf8(duplex.output)
+                .unwrap()
+                .contains("secret-fixture"));
+            assert!(state.view.lock().unwrap().pending.is_none());
+        }
+        let mut expired = state;
+        expired.expires = Instant::now() - Duration::from_secs(1);
+        let input = b"GET /pair HTTP/1.1\r\nHost: 192.168.1.2:444\r\n\r\n";
+        let mut duplex = Duplex {
+            input: std::io::Cursor::new(input.to_vec()),
+            output: vec![],
+        };
+        serve_request(&mut duplex, &expired, "/pair", "192.168.1.2:444", &mut 0).unwrap();
+        assert!(duplex.output.starts_with(b"HTTP/1.1 403"));
     }
 
     #[test]
