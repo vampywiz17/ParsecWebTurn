@@ -333,7 +333,10 @@ fn form(body: &[u8], pin: &str) -> Result<Network> {
     Ok(n)
 }
 fn respond(stream: &mut impl Write, status: &str, body: &str) -> Result<()> {
-    write!(stream,"HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nContent-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'\r\n\r\n{body}",body.len())?;
+    // HTML form POSTs under no-referrer can carry Origin: null (Fetch Standard).
+    // Keep the real origin for our same-origin form, without leaking the secret
+    // pairing path in cross-origin Referer headers. Continue rejecting null Origin.
+    write!(stream,"HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\nReferrer-Policy: same-origin\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nContent-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'\r\n\r\n{body}",body.len())?;
     stream.flush()?;
     Ok(())
 }
@@ -392,6 +395,17 @@ fn serve_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn form_response_preserves_same_origin_post_without_cross_origin_referrers() {
+        let mut response = Vec::new();
+        respond(&mut response, "200 OK", include_str!("setup.html")).unwrap();
+        let response = String::from_utf8(response).unwrap();
+        assert!(response.contains("\r\nReferrer-Policy: same-origin\r\n"));
+        assert!(!response.contains("Referrer-Policy: no-referrer"));
+        assert!(response.contains("form-action 'self'"));
+        assert!(response.contains("<form method=\"post\""));
+    }
+
     #[test]
     fn form_requires_pin_and_refuses_duplicate_or_unsafe_fields() {
         let good = b"pin=123456&provider=direct&stun=stun%3Astun.parsec.gg%3A3478";
@@ -521,9 +535,16 @@ mod tests {
         for (host, origin) in [
             ("wrong:444", "https://192.168.1.2:444"),
             ("192.168.1.2:444", "https://other.invalid"),
+            ("192.168.1.2:444", "null"),
+            ("192.168.1.2:444", ""),
         ] {
             let body = "pin=123456&provider=cloudflare&key_id=fixture&token=secret-fixture";
-            let input=format!("POST /pair/apply HTTP/1.1\r\nHost: {host}\r\nOrigin: {origin}\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\n\r\n{body}",body.len());
+            let origin_header = if origin.is_empty() {
+                String::new()
+            } else {
+                format!("Origin: {origin}\r\n")
+            };
+            let input=format!("POST /pair/apply HTTP/1.1\r\nHost: {host}\r\n{origin_header}Content-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\n\r\n{body}",body.len());
             let mut duplex = Duplex {
                 input: std::io::Cursor::new(input.into_bytes()),
                 output: vec![],
