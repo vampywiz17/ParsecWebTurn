@@ -58,18 +58,17 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun TvApp(model: TvModel) {
-    var diagnostics by rememberSaveable { mutableStateOf(false) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Host?>(null) }
     if (selected != null) {
         StreamScreen(model, selected!!) { selected = null }
         return
     }
-    BackHandler(diagnostics || settingsOpen || selected != null) {
-        diagnostics = false; settingsOpen = false; selected = null
+    BackHandler(settingsOpen || selected != null) {
+        settingsOpen = false; selected = null
     }
     val first = remember { FocusRequester() }
-    LaunchedEffect(model.signedIn, diagnostics, settingsOpen, selected?.peer) { first.requestFocus() }
+    LaunchedEffect(model.signedIn, settingsOpen, selected?.peer) { first.requestFocus() }
     LaunchedEffect(model.signedIn) { if (model.signedIn) model.refresh() }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).imePadding()
@@ -86,27 +85,13 @@ private fun TvApp(model: TvModel) {
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
                 settingsOpen -> TvSettings(model, first) { settingsOpen = false }
-                diagnostics -> {
-                    Column(Modifier.fillMaxSize()) {
-                        Button(onClick = { diagnostics = false }, modifier = Modifier.focusRequester(first)) {
-                            Text("Back")
-                        }
-                        Spacer(Modifier.height(16.dp))
-                        Text(model.inventory.ifEmpty { "Reading decoder capabilities…" },
-                        modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
-                        style = MaterialTheme.typography.bodyLarge)
-                    }
-                }
                 !model.signedIn -> SignIn(model, first,
-                inspect = { diagnostics = true; model.inspectDecoders() },
                 settings = { settingsOpen = true })
                 else -> {
                     Column(Modifier.fillMaxSize()) {
                         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                             Button(onClick = model::refresh, enabled = !model.busy,
                             modifier = Modifier.focusRequester(first)) { Text("Refresh computers") }
-                            Button(onClick = { diagnostics = true; model.inspectDecoders() },
-                            enabled = !model.busy) { Text("Device capabilities") }
                             Button(onClick = { settingsOpen = true }, enabled = !model.busy) { Text("Settings") }
                             Button(onClick = model::signOut, enabled = !model.busy) { Text("Sign out") }
                         }
@@ -151,7 +136,7 @@ private fun TvApp(model: TvModel) {
 }
 
 @Composable
-private fun SignIn(model: TvModel, first: FocusRequester, inspect: () -> Unit, settings: () -> Unit) {
+private fun SignIn(model: TvModel, first: FocusRequester, settings: () -> Unit) {
     var email by rememberSaveable { mutableStateOf("") }
     // Secrets deliberately do not use rememberSaveable / SavedStateHandle.
     var password by remember { mutableStateOf("") }
@@ -178,7 +163,6 @@ private fun SignIn(model: TvModel, first: FocusRequester, inspect: () -> Unit, s
                     // expired 2FA code. Leaving the form/signing in drops the fields.
                     code = ""
                 }, enabled = !model.busy && email.isNotBlank() && password.isNotEmpty()) { Text("Sign in") }
-                Button(onClick = inspect, enabled = !model.busy) { Text("Device capabilities") }
                 Button(onClick = settings, enabled = !model.busy) { Text("Settings") }
             }
         }
@@ -242,45 +226,54 @@ private fun TvSettings(model: TvModel, first: FocusRequester, back: () -> Unit) 
         Column(Modifier.width(180.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Button(onClick = back, modifier = Modifier.focusRequester(first).fillMaxWidth()) { Text("Back") }
             Text("SETTINGS", style = MaterialTheme.typography.titleMedium, color = Color(0xFF71BCFF))
-            listOf("Network", "Video").forEach { name ->
-                Button(onClick = { category = name; choosing = null; restoreKey = "" }, modifier = Modifier.fillMaxWidth()) {
+            listOf("Network", "Video", "Device").forEach { name ->
+                Button(onClick = {
+                    category = name; choosing = null; restoreKey = ""
+                    if (name == "Device") model.inspectDecoders()
+                }, modifier = Modifier.fillMaxWidth()) {
                     Text((if (category == name) "> " else "") + name)
                 }
             }
         }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Text(choice?.getString("label") ?: category, style = MaterialTheme.typography.headlineSmall)
-            Text("Requests apply to your next connection. The host chooses the actual video format.", color = Color(0xFFA8BED7))
-            if (model.settings == null) Button(onClick = model::readSettings, enabled = !model.busy) { Text("Reload settings") }
-            if (choice == null) {
-                values.filter { it.optString("group") == category }.forEach { row ->
-                    val key = row.getString("key")
-                    val choices = row.getJSONArray("choices")
-                    Button(onClick = { restoreKey = key; choosing = key }, enabled = !model.busy,
-                        modifier = Modifier.fillMaxWidth().then(if (key == restoreKey) Modifier.focusRequester(rowFocus) else Modifier)) {
-                        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(row.getString("label"), style = MaterialTheme.typography.labelMedium)
-                            Text(choices.getString(row.getInt("selected")))
+            if (category == "Device") {
+                Text("Device capabilities", style = MaterialTheme.typography.headlineSmall)
+                Text(model.inventory.ifEmpty { "Reading decoder capabilities…" },
+                    style = MaterialTheme.typography.bodyLarge)
+            } else {
+                Text(choice?.getString("label") ?: category, style = MaterialTheme.typography.headlineSmall)
+                Text("Requests apply to your next connection. The host chooses the actual video format.", color = Color(0xFFA8BED7))
+                if (model.settings == null) Button(onClick = model::readSettings, enabled = !model.busy) { Text("Reload settings") }
+                if (choice == null) {
+                    values.filter { it.optString("group") == category }.forEach { row ->
+                        val key = row.getString("key")
+                        val choices = row.getJSONArray("choices")
+                        Button(onClick = { restoreKey = key; choosing = key }, enabled = !model.busy,
+                            modifier = Modifier.fillMaxWidth().then(if (key == restoreKey) Modifier.focusRequester(rowFocus) else Modifier)) {
+                            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(row.getString("label"), style = MaterialTheme.typography.labelMedium)
+                                Text(choices.getString(row.getInt("selected")))
+                            }
                         }
                     }
-                }
-                if (category == "Network") {
-                    Spacer(Modifier.height(8.dp))
-                    Text("STUN / TURN relay", style = MaterialTheme.typography.titleLarge)
-                    Text("Provider: ${model.networkSummary.optString("provider", "direct")} | Force relay: ${model.networkSummary.optBoolean("force_relay")}")
-                    Button(onClick = model::openLocalSetup, enabled = !model.busy, modifier = Modifier.fillMaxWidth()) { Text("Set up from phone or computer") }
-                    Button(onClick = model::resetNetwork, enabled = !model.busy, modifier = Modifier.fillMaxWidth()) { Text("Remove saved relay settings") }
-                    Text("Local HTTPS pairing only. Credentials are encrypted on this TV.", color = Color(0xFFA8BED7))
+                    if (category == "Network") {
+                        Spacer(Modifier.height(8.dp))
+                        Text("STUN / TURN relay", style = MaterialTheme.typography.titleLarge)
+                        Text("Provider: ${model.networkSummary.optString("provider", "direct")} | Force relay: ${model.networkSummary.optBoolean("force_relay")}")
+                        Button(onClick = model::openLocalSetup, enabled = !model.busy, modifier = Modifier.fillMaxWidth()) { Text("Set up from phone or computer") }
+                        Button(onClick = model::resetNetwork, enabled = !model.busy, modifier = Modifier.fillMaxWidth()) { Text("Remove saved relay settings") }
+                        Text("Local HTTPS pairing only. Credentials are encrypted on this TV.", color = Color(0xFFA8BED7))
+                    } else {
+                        Text("Dynamic FPS reduces traffic for still images. Fixed FPS requests continuous frames; it does not duplicate frames on the TV.", color = Color(0xFFA8BED7))
+                    }
                 } else {
-                    Text("Dynamic FPS reduces traffic for still images. Fixed FPS requests continuous frames; it does not duplicate frames on the TV.", color = Color(0xFFA8BED7))
-                }
-            } else {
-                val choices = choice.getJSONArray("choices")
-                val selected = choice.getInt("selected")
-                repeat(choices.length()) { index ->
-                    Button(onClick = { model.selectSetting(choice.getString("key"), index); choosing = null }, enabled = !model.busy,
-                        modifier = Modifier.fillMaxWidth().then(if (index == selected) Modifier.focusRequester(optionFocus) else Modifier)) {
-                        Text((if (index == selected) "> " else "") + choices.getString(index))
+                    val choices = choice.getJSONArray("choices")
+                    val selected = choice.getInt("selected")
+                    repeat(choices.length()) { index ->
+                        Button(onClick = { model.selectSetting(choice.getString("key"), index); choosing = null }, enabled = !model.busy,
+                            modifier = Modifier.fillMaxWidth().then(if (index == selected) Modifier.focusRequester(optionFocus) else Modifier)) {
+                            Text((if (index == selected) "> " else "") + choices.getString(index))
+                        }
                     }
                 }
             }
