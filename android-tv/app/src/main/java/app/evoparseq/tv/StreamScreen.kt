@@ -72,6 +72,7 @@ internal fun StreamScreen(model: TvModel, host: Host, close: () -> Unit) {
     }
     BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)
         .focusRequester(root).onPreviewKeyEvent { event ->
+            if (controllers.key(event.nativeKeyEvent)) return@onPreviewKeyEvent true
             val key = event.nativeKeyEvent
             val center = key.keyCode == android.view.KeyEvent.KEYCODE_DPAD_CENTER || key.keyCode == android.view.KeyEvent.KEYCODE_ENTER
             when {

@@ -49,8 +49,6 @@ class MainActivity : ComponentActivity() {
     internal var controllerWindowFocused by mutableStateOf(true)
         private set
     internal lateinit var controllerInput: ControllerInput
-    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean =
-        (if (::controllerInput.isInitialized) controllerInput.key(event) else false) || super.dispatchKeyEvent(event)
     override fun dispatchGenericMotionEvent(event: android.view.MotionEvent): Boolean =
         (if (::controllerInput.isInitialized) controllerInput.motion(event) else false) || super.dispatchGenericMotionEvent(event)
     override fun onWindowFocusChanged(hasFocus: Boolean) {
