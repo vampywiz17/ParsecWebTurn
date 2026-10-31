@@ -307,7 +307,7 @@ fn form(body: &[u8], pin: &str) -> Result<Network> {
         password: take("password").to_string(),
         key_id: take("key_id").trim().to_owned(),
         token: take("token").trim().to_owned(),
-        force_relay: take("force_relay") == "on",
+        force_relay: take("force_relay").as_str() == "on",
     };
     use zeroize::Zeroize;
     match n.provider.as_str() {
