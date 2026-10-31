@@ -1,4 +1,7 @@
 //! Explicit BUD lifecycle. RTC attempts never enter this adapter.
+#[cfg(test)]
+use crate::bud_routes::relay_carrier;
+use crate::bud_routes::turn_relays;
 use anyhow::{ensure, Context, Result};
 use evoparseq_bud::{
     bud::{Event, Outcome, Route, Session},
@@ -453,69 +456,6 @@ async fn relay_route(
         return Ok(VecDeque::new());
     }
     turn_relays(manager.resolve_bud_relay(settings).await?).await
-}
-
-fn relay_carrier(url: &webrtc::ice::url::Url) -> Option<evoparseq_bud::bud::RelayTransport> {
-    use evoparseq_bud::bud::RelayTransport;
-    use webrtc::ice::url::{ProtoType, SchemeType};
-    match (url.scheme, url.proto) {
-        (SchemeType::Turn, ProtoType::Udp) => Some(RelayTransport::Udp),
-        (SchemeType::Turn, ProtoType::Tcp) => Some(RelayTransport::Tcp),
-        (SchemeType::Turns, ProtoType::Tcp) => Some(RelayTransport::Tls {
-            server_name: url.host.clone(),
-        }),
-        _ => None,
-    }
-}
-
-async fn turn_relays(
-    servers: Vec<webrtc::ice_transport::ice_server::RTCIceServer>,
-) -> Result<VecDeque<Route>> {
-    let mut urls = Vec::new();
-    for server in &servers {
-        for raw in &server.urls {
-            let url = webrtc::ice::url::Url::parse_url(raw)?;
-            if let Some(carrier) = relay_carrier(&url) {
-                let priority = match carrier {
-                    evoparseq_bud::bud::RelayTransport::Udp => 0,
-                    evoparseq_bud::bud::RelayTransport::Tls { .. } => 1,
-                    _ if url.port == 80 => 2,
-                    _ => 3,
-                };
-                urls.push((priority, url, carrier, server));
-            }
-        }
-    }
-    urls.sort_by_key(|entry| entry.0);
-    // Resolve concurrently so an unavailable DNS entry does not serially hold
-    // up other routes. join_all preserves the explicitly sorted URL priority.
-    let routes: VecDeque<_> = futures_util::future::join_all(urls.into_iter().take(32).map(
-        |(_, url, carrier, server)| async move {
-            let addresses = tokio::time::timeout(
-                Duration::from_secs(3),
-                tokio::net::lookup_host((url.host.as_str(), url.port)),
-            )
-            .await
-            .ok()?
-            .ok()?;
-            let addr = addresses.into_iter().find(|a| a.is_ipv4())?;
-            Some(Route::turn(
-                addr,
-                &server.username,
-                &server.credential,
-                carrier,
-            ))
-        },
-    ))
-    .await
-    .into_iter()
-    .flatten()
-    .collect();
-    ensure!(
-        !routes.is_empty(),
-        "BUD requires a reachable UDP, TLS or TCP TURN URL"
-    );
-    Ok(routes)
 }
 
 fn log_route_attempt(route: &Route) {

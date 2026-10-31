@@ -12,9 +12,10 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /** Platform storage only. Rust owns token validation and session lifetime. */
-internal class SessionVault(context: Context) {
-    private val file = AtomicFile(File(context.noBackupFilesDir, "account-session.bin"))
-    private val alias = "evoparseq-account-v1"
+internal class SessionVault(context: Context, purpose: String = "account") {
+    init { require(purpose == "account" || purpose == "network") }
+    private val file = AtomicFile(File(context.noBackupFilesDir, if (purpose == "account") "account-session.bin" else "network-settings.bin"))
+    private val alias = "evoparseq-$purpose-v1"
     private fun key(create: Boolean): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         (store.getKey(alias, null) as? SecretKey)?.let { return it }
@@ -29,7 +30,7 @@ internal class SessionVault(context: Context) {
     // Called once after successful login, never from a media callback.
     fun save(token: ByteArray) {
         try {
-            require(token.size in 1..4096)
+            require(token.size in 1..32768)
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.ENCRYPT_MODE, key(true))
             cipher.updateAAD(alias.toByteArray(Charsets.UTF_8))
@@ -45,14 +46,14 @@ internal class SessionVault(context: Context) {
     fun load(): ByteArray? {
         if (!file.baseFile.exists() && !File(file.baseFile.path + ".bak").exists()) return null
         val bytes = file.openRead().use { input ->
-            val buffer = ByteArray(4126)
+            val buffer = ByteArray(32798)
             var count = 0
             while (count < buffer.size) {
                 val read = input.read(buffer, count, buffer.size - count)
                 if (read < 0) break
                 count += read
             }
-            require(count in 30..4125 && buffer[0] == 1.toByte())
+            require(count in 30..32797 && buffer[0] == 1.toByte())
             buffer.copyOf(count)
         }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")

@@ -100,6 +100,13 @@ pub fn start(
     });
     Ok(())
 }
+pub fn active() -> bool {
+    RUNNING
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .is_some_and(|r| !r.stop.load(Ordering::Acquire))
+}
 pub fn stop() {
     if let Ok(slot) = RUNNING.lock() {
         if let Some(r) = slot.as_ref() {
@@ -128,7 +135,13 @@ struct Connection {
 impl Drop for Connection {
     fn drop(&mut self) {
         (self.socket.writer)(
-            native_wire::envelope("offer_cancel", &self.peer, &self.id, json!({})).to_string(),
+            native_wire::envelope(
+                "offer_cancel",
+                &self.peer,
+                self.attempt.wire_id(&self.id),
+                json!({}),
+            )
+            .to_string(),
         );
         self.attempt.disconnect();
         self.video.stop();
@@ -173,6 +186,7 @@ fn run(request: Request, stop: &AtomicBool, status: &Mutex<Value>) -> Result<()>
         &config,
         prefs.transport == 1,
         video.clone(),
+        crate::network::current(),
     )?;
     let mut connection = Connection {
         attempt,
@@ -196,6 +210,7 @@ fn run(request: Request, stop: &AtomicBool, status: &Mutex<Value>) -> Result<()>
     let mut update = Instant::now();
     let mut previous_received_bytes = 0u64;
     let mut received_mbps = 0.;
+    let mut previous_submitted = 0u64;
     while !stop.load(Ordering::Acquire) {
         if !signaling_closed {
             for _ in 0..64 {
@@ -297,8 +312,23 @@ fn run(request: Request, stop: &AtomicBool, status: &Mutex<Value>) -> Result<()>
                 / 1_000_000.;
             previous_received_bytes = bytes;
             network["received_mbps"] = received_mbps.into();
+            let fps = (snapshot.submitted >= previous_submitted).then_some(
+                snapshot.submitted.saturating_sub(previous_submitted) as f64
+                    / update.elapsed().as_secs_f64(),
+            );
+            previous_submitted = snapshot.submitted;
+            let overlay = crate::overlay::metrics(
+                fps,
+                network["rtt_ms"].as_f64(),
+                received_mbps,
+                snapshot.codec,
+                snapshot.width,
+                snapshot.height,
+                snapshot.depth,
+            );
+
             *status.lock().unwrap_or_else(|e| e.into_inner()) = json!({"state":if snapshot.submitted>0 {"Streaming"} else {"Connecting…"},"ended":false,"video":snapshot,"settings_confirmed":settings_confirmed,
-                "audio":receiver.snapshot(),"audio_output":audio.snapshot(),"network":network});
+                "audio":receiver.snapshot(),"audio_output":audio.snapshot(),"network":network,"overlay":overlay});
             if let Some(error) = snapshot.error.as_ref() {
                 anyhow::bail!("{error}");
             }

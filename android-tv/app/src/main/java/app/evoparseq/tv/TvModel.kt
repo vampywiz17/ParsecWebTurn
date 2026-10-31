@@ -30,6 +30,11 @@ internal class TvModel(application: Application) : AndroidViewModel(application)
         private set
     var streamStatus by mutableStateOf<JSONObject?>(null)
         private set
+    var networkSummary by mutableStateOf(JSONObject().put("provider", "direct"))
+        private set
+    var localSetup by mutableStateOf<JSONObject?>(null)
+        private set
+    private var setupGeneration = 0
     private var streamGeneration = 0
     private val preferences = application.getSharedPreferences("tv-requests", Context.MODE_PRIVATE)
     private val worker = Executors.newSingleThreadExecutor()
@@ -37,6 +42,7 @@ internal class TvModel(application: Application) : AndroidViewModel(application)
     private val disposed = AtomicBoolean(false)
 
     private val vault = SessionVault(application)
+    private val networkVault = SessionVault(application, "network")
     init {
         request {
             val saved = preferences.getString("requests", "") ?: ""
@@ -54,7 +60,20 @@ internal class TvModel(application: Application) : AndroidViewModel(application)
                 runCatching { vault.clear() }
                 feedback = "Saved sign-in could not be restored. Sign in again."
             }
-            return@request { if (reply.optBoolean("ok")) settings = reply; signedIn = restored; message = feedback }
+            var network = JSONObject().put("provider", "direct")
+            try {
+                val raw = networkVault.load()
+                if (raw != null) {
+                    val savedNetwork = try { JSONObject(NativeCore.restoreNetwork(raw)) } finally { raw.fill(0) }
+                    if (savedNetwork.optBoolean("ok")) network = savedNetwork.getJSONObject("network")
+                    else { networkVault.clear(); feedback = savedNetwork.optString("error") }
+                }
+            } catch (_: Exception) {
+                runCatching { networkVault.clear() }
+                feedback = "Saved relay settings could not be restored. Configure the relay again."
+            }
+            val restoredNetwork = network
+            return@request { if (reply.optBoolean("ok")) settings = reply; signedIn = restored; networkSummary = restoredNetwork; message = feedback }
         }
     }
 
@@ -131,6 +150,51 @@ internal class TvModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun openLocalSetup() = request {
+        val context = getApplication<Application>()
+        val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        val ip = manager.getLinkProperties(manager.activeNetwork)?.linkAddresses
+            ?.map { it.address }?.filterIsInstance<java.net.Inet4Address>()
+            ?.firstOrNull { it.isSiteLocalAddress }?.hostAddress
+        val reply = if (ip == null) JSONObject().put("error", "No private LAN address. Check Wi-Fi or Ethernet.")
+            else JSONObject(NativeCore.startLocalSetup(ip))
+        return@request {
+            if (reply.optBoolean("ok")) { localSetup = reply; pollSetup(++setupGeneration) }
+            else message = reply.optString("error")
+        }
+    }
+    private fun pollSetup(generation: Int) {
+        if (generation != setupGeneration || disposed.get()) return
+        worker.execute {
+            val reply = runCatching { JSONObject(NativeCore.localSetupStatus()) }
+                .getOrElse { JSONObject().put("closed", true).put("error", "Local setup unavailable") }
+            main.post {
+                if (generation == setupGeneration && !disposed.get()) {
+                    localSetup = reply
+                    if (!reply.optBoolean("closed")) main.postDelayed({ pollSetup(generation) }, 500)
+                }
+            }
+        }
+    }
+    fun confirmLocalSetup() = request {
+        val reply = JSONObject(NativeCore.confirmLocalSetup(networkVault))
+        return@request {
+            if (reply.optBoolean("ok")) {
+                networkSummary = reply.getJSONObject("network"); ++setupGeneration; localSetup = null
+                message = "Relay settings saved securely. Applies to the next connection."
+            } else message = reply.optString("error")
+        }
+    }
+    fun closeLocalSetup() {
+        ++setupGeneration; localSetup = null
+        worker.execute { runCatching { NativeCore.stopLocalSetup() } }
+    }
+    fun resetNetwork() = request {
+        networkVault.clear()
+        val reply = JSONObject(NativeCore.resetNetwork())
+        return@request { networkSummary = reply.getJSONObject("network"); message = "Relay settings removed. Direct/STUN restored." }
+    }
+
     fun startStream(surface: android.view.Surface, host: Host, width: Int, height: Int) {
         val current = settings?.getJSONObject("settings")?.toString() ?: return
         val generation = ++streamGeneration
@@ -171,6 +235,7 @@ internal class TvModel(application: Application) : AndroidViewModel(application)
     }
 
     override fun onCleared() {
+        ++setupGeneration
         disposed.set(true)
         // Saved sign-in survives normal Activity/process shutdown; only explicit logout revokes it.
         worker.execute { runCatching { NativeCore.releaseSession() } }

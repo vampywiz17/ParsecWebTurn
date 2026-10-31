@@ -8,8 +8,10 @@ D-pad navigation, two-factor sign-in and shared Rust account/session logic.
 
 - Connect to an unmodified official Parsec host using **WebRTC direct/STUN**
   (default) or **BUD direct UDP** (new, awaiting live Android validation).
-  Configurable TURN relays are not yet connected on Android; neither transport
-  silently falls back to the other. No browser, WASM or stock SDK is bundled.
+  Configure Cloudflare or custom STUN/TURN in Network settings. WebRTC uses its
+  existing ICE selection; BUD tries direct UDP and configured TURN carriers in
+  UDP/TLS/TCP order (or TURN only when forced). Neither transport silently falls
+  back to the other. No browser, WASM or stock SDK is bundled.
 - Hardware **MediaCodec to SurfaceView Surface**, using asynchronous NDK callbacks.
   Decoded video never crosses JNI, becomes a Bitmap, or is read back to CPU memory.
   This does not prove driver/compositor zero copy or direct scanout.
@@ -23,6 +25,12 @@ D-pad navigation, two-factor sign-in and shared Rust account/session logic.
   requests server-side revocation. Invalid/expired credentials require sign-in.
 - Back/Disconnect, backgrounding, audio focus loss and Surface destruction stop
   the stream. Reconnect explicitly when a new Surface is created.
+- Network/Video settings are grouped for D-pad use. Fixed FPS requests host
+  `fullFPS`; dynamic FPS allows the host to reduce frame production when idle.
+- The overlay shows sampled Surface submission FPS, selected-pair RTT, received
+  payload bitrate and actual codec/depth. It hides after five idle seconds;
+  OK/Menu/Back restores it, with Hide and Disconnect buttons. RTT queries pause
+  while hidden; no GPU timing or pixel readback is introduced.
 - View/audio preview only: controller forwarding is the next separate milestone.
   No HDR, 4:4:4, AI upscaling or rotated BUD output is advertised.
 
@@ -40,6 +48,32 @@ Decoded-output catch-up still releases every codec index exactly once and never
 skips compressed reference pictures. Empty WebRTC messages remain distinct from
 stream EOF, as required by RFC 8831. Test both transports, audio, reconnect and
 remembered sign-in on the actual device; builds alone do not validate hardware.
+
+## Local relay setup
+
+Open **Settings > Network > Set up from phone or computer**. The TV and browser
+must be on the same private LAN. Scan the QR code or enter the displayed HTTPS
+address. This is an expiring server on the TV, not an Internet setup service.
+
+The certificate is generated locally for this setup session and is not publicly
+trusted. Before entering any credentials, inspect its SHA-256 fingerprint in the
+browser's certificate details and compare it with the TV. Only trust this exact
+local certificate after verifying the fingerprint; do not disable browser TLS
+checking globally. If your browser cannot show the certificate details, use a
+browser/device that can. A pairing code alone does not authenticate the HTTPS
+page against an active intermediary.
+
+Enter the TV's six-digit code, choose direct/STUN, Cloudflare (TURN key ID and API
+token), or custom TURN (URLs, username/password), then send. **Approve and save
+on the TV** before anything is applied. Credentials are encrypted separately
+from account sign-in using Android Keystore, excluded from backup and never
+included in status/log output. Network settings take effect on the next stream.
+Closing setup, leaving the app, starting a stream, or the five-minute deadline
+stops the server. No port forwarding, public binding or remote setup is provided.
+
+This new pairing and relay integration still needs live device validation.
+HTTPS, origin/Host checks, bounds, wrong-code rejection and pending approval have
+isolated tests; they do not replace real browser/TV and TURN tests.
 
 ## Shared architecture
 

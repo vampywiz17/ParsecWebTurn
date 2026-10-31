@@ -33,3 +33,9 @@ The user requires continuing the incremental separation established on the nativ
 - Kotlin/Compose for TV is a thin TV presentation and Android API adapter only. Keep UI/request boundaries outside the video hot path. MediaCodec/Surface, platform audio/input, Android lifecycle and Keystore are legitimate target-specific operations.
 - Follow Google Android TV / Google TV design and D-pad navigation, including usable 2FA/IME and settings focus restoration; no Xiaomi-specific skin. First live target: Xiaomi TV Box S (3rd Gen) EU on Android 14. Controller session input is a separate later milestone.
 - Decoder Surface output must not be advertised as verified zero copy or direct scanout. Preserve the strict project definition and distinguish documented app behavior from unverified driver/compositor work.
+
+- Android TV relay provisioning is strictly local-network-only, including future
+  development. No external setup website/service or public listener is wanted.
+  Keep setup opt-in, expiring, authenticated, encrypted in transit and at rest,
+  with explicit TV approval. Do not treat a PIN as a substitute for authenticating
+  the local TLS certificate; preserve the displayed out-of-band fingerprint.

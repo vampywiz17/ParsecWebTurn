@@ -127,6 +127,7 @@ pub extern "system" fn Java_app_evoparseq_tv_NativeCore_hosts(
 
 #[no_mangle]
 pub extern "system" fn Java_app_evoparseq_tv_NativeCore_signOut(_env: JNIEnv, _object: JObject) {
+    stop_setup();
     crate::stream::stop();
     if let Ok(mut slot) = SESSION.lock() {
         // Explicit logout revokes remembered sessions too; process exit does not.
@@ -148,6 +149,7 @@ pub extern "system" fn Java_app_evoparseq_tv_NativeCore_startStream(
     height: jni::sys::jint,
 ) -> jstring {
     let result = (|| -> anyhow::Result<Value> {
+        stop_setup();
         let session = SESSION
             .lock()
             .map_err(|_| anyhow::anyhow!("Account unavailable"))?
@@ -187,6 +189,7 @@ pub extern "system" fn Java_app_evoparseq_tv_NativeCore_startStream(
 
 #[no_mangle]
 pub extern "system" fn Java_app_evoparseq_tv_NativeCore_stopStream(_env: JNIEnv, _object: JObject) {
+    stop_setup();
     crate::stream::stop();
 }
 
@@ -231,8 +234,138 @@ pub extern "system" fn Java_app_evoparseq_tv_NativeCore_releaseSession(
     _env: JNIEnv,
     _object: JObject,
 ) {
+    stop_setup();
     crate::stream::stop();
     if let Ok(mut slot) = SESSION.lock() {
         drop(slot.take());
     }
+}
+
+static LOCAL_SETUP: Mutex<Option<crate::local_setup::Setup>> = Mutex::new(None);
+fn stop_setup() {
+    if let Some(mut setup) = LOCAL_SETUP.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        setup.stop();
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_app_evoparseq_tv_NativeCore_startLocalSetup(
+    mut env: JNIEnv,
+    _object: JObject,
+    ip: JString,
+) -> jstring {
+    let result = (|| -> anyhow::Result<Value> {
+        anyhow::ensure!(
+            !crate::stream::active(),
+            "Disconnect the stream before local setup"
+        );
+        stop_setup();
+        let setup = crate::local_setup::Setup::start(text(&mut env, &ip)?.parse()?)?;
+        let report = setup.snapshot();
+        *LOCAL_SETUP.lock().unwrap_or_else(|e| e.into_inner()) = Some(setup);
+        Ok(report)
+    })();
+    reply(&mut env,result.unwrap_or_else(|_|json!({"error":"Could not start local HTTPS setup. Connect the TV to a private LAN and try again."})))
+}
+#[no_mangle]
+pub extern "system" fn Java_app_evoparseq_tv_NativeCore_localSetupStatus(
+    mut env: JNIEnv,
+    _object: JObject,
+) -> jstring {
+    let report = LOCAL_SETUP
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .map(|s| s.snapshot())
+        .unwrap_or_else(|| json!({"closed":true}));
+    reply(&mut env, report)
+}
+#[no_mangle]
+pub extern "system" fn Java_app_evoparseq_tv_NativeCore_stopLocalSetup(
+    _env: JNIEnv,
+    _object: JObject,
+) {
+    stop_setup();
+}
+#[no_mangle]
+pub extern "system" fn Java_app_evoparseq_tv_NativeCore_confirmLocalSetup(
+    mut env: JNIEnv,
+    _object: JObject,
+    vault: JObject,
+) -> jstring {
+    let result = (|| -> anyhow::Result<Value> {
+        let network = LOCAL_SETUP
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .and_then(|s| s.pending())
+            .ok_or_else(|| anyhow::anyhow!("No pending network settings"))?;
+        let raw = Zeroizing::new(serde_json::to_vec(&network)?);
+        let bytes = env.byte_array_from_slice(&raw)?;
+        env.call_method(&vault, "save", "([B)V", &[JValue::Object(bytes.as_ref())])?;
+        let report = json!({"ok":true,"network":network.summary()});
+        *crate::network::CURRENT
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(network));
+        stop_setup();
+        Ok(report)
+    })();
+    if env.exception_check().unwrap_or(false) {
+        let _ = env.exception_clear();
+    }
+    reply(
+        &mut env,
+        result.unwrap_or_else(
+            |_| json!({"error":"Could not securely save network settings. Nothing was applied."}),
+        ),
+    )
+}
+#[no_mangle]
+pub extern "system" fn Java_app_evoparseq_tv_NativeCore_restoreNetwork(
+    mut env: JNIEnv,
+    _object: JObject,
+    bytes: JByteArray,
+) -> jstring {
+    let result = (|| -> anyhow::Result<Value> {
+        anyhow::ensure!(
+            env.get_array_length(&bytes)? <= 32768,
+            "Network settings exceed limit"
+        );
+        let raw = Zeroizing::new(env.convert_byte_array(&bytes)?);
+        let n = crate::network::Network::parse(&raw)?;
+        let report = json!({"ok":true,"network":n.summary()});
+        *crate::network::CURRENT
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(n));
+        Ok(report)
+    })();
+    reply(
+        &mut env,
+        result.unwrap_or_else(
+            |_| json!({"error":"Saved network settings unavailable. Configure the relay again."}),
+        ),
+    )
+}
+#[no_mangle]
+pub extern "system" fn Java_app_evoparseq_tv_NativeCore_resetNetwork(
+    mut env: JNIEnv,
+    _object: JObject,
+) -> jstring {
+    stop_setup();
+    *crate::network::CURRENT
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = None;
+    reply(
+        &mut env,
+        json!({"ok":true,"network":crate::network::current().summary()}),
+    )
+}
+
+#[no_mangle]
+pub extern "system" fn Java_app_evoparseq_tv_NativeCore_setOverlayVisible(
+    _env: JNIEnv,
+    _object: JObject,
+    visible: jni::sys::jboolean,
+) {
+    crate::overlay::REQUESTED.store(visible != 0, std::sync::atomic::Ordering::Relaxed);
 }

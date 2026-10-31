@@ -27,6 +27,14 @@ tokio-tungstenite = { version = "0.30", default-features = false, features = ["c
 webrtc = "=0.14.0"
 libopus_sys = { version = "=0.3.3", features = ["bundled", "static"] }
 rtrb = "=0.4.1"
+# Temporary local HTTPS setup, isolated from the streaming path.
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+rcgen = { version = "=0.14.10", default-features = false, features = ["crypto", "ring"] }
+httparse = "1"
+subtle = "2"
+url = "2"
+sha2 = "0.10"
+qrcode = { version = "0.14", default-features = false }
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni = { version = "0.21.1", default-features = false }

@@ -19,6 +19,8 @@ mod branding;
 mod bud_attempt;
 #[cfg(all(windows, feature = "bud"))]
 mod bud_media;
+#[cfg(feature = "bud")]
+mod bud_routes;
 mod connection_settings;
 #[cfg(windows)]
 mod connection_settings_ui;
@@ -75,6 +77,7 @@ mod stats_ui;
 #[cfg(windows)]
 mod stats_view;
 mod transport;
+mod turn_configuration;
 mod updater;
 #[cfg(windows)]
 mod updater_ui;

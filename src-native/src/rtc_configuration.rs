@@ -22,3 +22,19 @@ impl NetworkSettings for crate::connection_settings::Manager {
         self.view().0.video_gpu
     }
 }
+
+/// RTT only from the selected pair after a response, never from stale candidates.
+pub fn selected_rtt(report: &webrtc::stats::StatsReport, local: &str, remote: &str) -> Option<f64> {
+    let id = format!("{local}-{remote}");
+    report.reports.values().find_map(|s| match s {
+        webrtc::stats::StatsReportType::CandidatePair(p)
+            if p.id == id
+                && p.responses_received > 0
+                && p.current_round_trip_time.is_finite()
+                && p.current_round_trip_time >= 0. =>
+        {
+            Some(p.current_round_trip_time * 1000.)
+        }
+        _ => None,
+    })
+}

@@ -110,6 +110,8 @@ struct Progress {
     channel_bytes_received: [u64; 3],
     channel_max_message_bytes: [usize; 3],
     empty_channel_messages: [u64; 3],
+    #[cfg(any(target_os = "android", test))]
+    rtt_ms: Option<f64>,
     failure_channel: Option<u16>,
     read_error: Option<&'static str>,
     failure_elapsed_ms: Option<u64>,
@@ -223,7 +225,7 @@ impl Completion {
             "failure_elapsed_ms":p.failure_elapsed_ms,"states":states,
             "received_bytes":p.channel_bytes_received,"received_messages":p.channel_messages_received,
             "max_message_bytes":p.channel_max_message_bytes,
-            "empty_messages":p.empty_channel_messages,
+            "empty_messages":p.empty_channel_messages,"rtt_ms":p.rtt_ms,
             "queued_control_messages":self.messages.len(),"queued_control_bytes":self.message_bytes,
         })
     }
@@ -938,6 +940,56 @@ fn worker(
     let peer = Arc::new(runtime.block_on(async {
         tokio::time::timeout(Duration::from_secs(5), api.new_peer_connection(ice)).await
     })??);
+    #[cfg(target_os = "android")]
+    {
+        let state = shared.clone();
+        let weak = Arc::downgrade(&peer);
+        runtime.spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                {
+                    let s = state.lock().unwrap_or_else(|e| e.into_inner());
+                    if s.cancelled || s.closing {
+                        break;
+                    }
+                }
+                if !crate::overlay::REQUESTED.load(Ordering::Relaxed) {
+                    state
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .progress
+                        .rtt_ms = None;
+                    continue;
+                }
+                let Some(peer) = weak.upgrade() else { break };
+                let ice = peer.sctp().transport().ice_transport();
+                let sample = async {
+                    let pair = ice.get_selected_candidate_pair().await?;
+                    let report = peer.get_stats().await;
+                    let active = ice.get_selected_candidate_pair().await?;
+                    if active.local().stats_id != pair.local().stats_id
+                        || active.remote().stats_id != pair.remote().stats_id
+                    {
+                        return None;
+                    }
+                    crate::rtc_configuration::selected_rtt(
+                        &report,
+                        &pair.local().stats_id,
+                        &pair.remote().stats_id,
+                    )
+                };
+                let rtt = tokio::time::timeout(Duration::from_millis(750), sample)
+                    .await
+                    .ok()
+                    .flatten();
+                state
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .progress
+                    .rtt_ms = rtt;
+            }
+        });
+    }
     let callback_state = shared.clone();
     #[cfg(windows)]
     {

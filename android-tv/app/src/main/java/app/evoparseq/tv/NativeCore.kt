@@ -6,6 +6,12 @@ internal object NativeCore {
     external fun signIn(email: String, password: String, tfa: String): String
     external fun rememberSession(vault: SessionVault): String
     external fun restoreSession(token: ByteArray): String
+    external fun startLocalSetup(ip: String): String
+    external fun localSetupStatus(): String
+    external fun confirmLocalSetup(vault: SessionVault): String
+    external fun stopLocalSetup()
+    external fun restoreNetwork(bytes: ByteArray): String
+    external fun resetNetwork(): String
     external fun hosts(): String
     external fun signOut()
     external fun releaseSession()
@@ -14,4 +20,5 @@ internal object NativeCore {
         decoders: String, width: Int, height: Int): String
     external fun stopStream()
     external fun streamStatus(): String
+    external fun setOverlayVisible(visible: Boolean)
 }

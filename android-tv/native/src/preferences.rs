@@ -13,9 +13,12 @@ pub struct Preferences {
     pub resolution: usize,
     pub fps: usize,
     pub bandwidth: usize,
+    #[serde(default)]
+    pub pacing: usize,
 }
 
 const TRANSPORT: &[&str] = &["WebRTC", "BUD"];
+const PACING: &[&str] = &["Dynamic FPS", "Fixed FPS"];
 const VIDEO: &[&str] = &["H.264 · 8-bit SDR", "HEVC · 8-bit SDR", "HEVC · 10-bit SDR"];
 type ChoiceField = (&'static str, &'static str, &'static [&'static str], usize);
 
@@ -23,6 +26,7 @@ impl Default for Preferences {
     fn default() -> Self {
         Self {
             transport: 0,
+            pacing: 0,
             video: 0,
             resolution: 0,
             fps: FPS_CHOICES.iter().position(|s| *s == "60").unwrap(),
@@ -32,7 +36,7 @@ impl Default for Preferences {
 }
 
 impl Preferences {
-    fn fields(&self) -> [ChoiceField; 5] {
+    fn fields(&self) -> [ChoiceField; 6] {
         [
             ("transport", "Transport", TRANSPORT, self.transport),
             ("video", "Video request", VIDEO, self.video),
@@ -43,6 +47,7 @@ impl Preferences {
                 self.resolution,
             ),
             ("fps", "Frame rate request (FPS)", FPS_CHOICES, self.fps),
+            ("pacing", "Frame pacing", PACING, self.pacing),
             (
                 "bandwidth",
                 "Bandwidth limit request (Mbps)",
@@ -77,6 +82,7 @@ impl Preferences {
             "resolution" => self.resolution = index,
             "fps" => self.fps = index,
             "bandwidth" => self.bandwidth = index,
+            "pacing" => self.pacing = index,
             _ => unreachable!(),
         }
         Ok(())
@@ -84,7 +90,7 @@ impl Preferences {
 
     pub fn view(&self) -> Value {
         json!({"ok":true, "settings":self, "rows":self.fields().map(|(key,label,choices,selected)|
-            json!({"key":key,"label":label,"choices":choices,"selected":selected}))})
+            json!({"key":key,"label":label,"choices":choices,"selected":selected,"group":if key=="transport" || key=="bandwidth" {"Network"} else {"Video"}}))})
     }
 
     pub fn host_request(&self) -> Result<crate::session_preferences::Video> {
@@ -98,7 +104,7 @@ impl Preferences {
             fps: FPS_CHOICES
                 .get(self.fps)
                 .ok_or_else(|| anyhow::anyhow!("Invalid frame rate."))?,
-            constant_fps: false,
+            constant_fps: self.pacing == 1,
             rotated: false,
             immersive: 0,
             fullscreen: true,
@@ -124,6 +130,23 @@ mod tests {
         assert_eq!(restored.host_request().unwrap().fps, Some(60));
         assert_eq!(restored.host_request().unwrap().bandwidth_mbps, Some(20));
         assert!(!text.contains("token"));
+    }
+
+    #[test]
+    fn legacy_pacing_defaults_to_dynamic_and_fixed_is_a_host_request() {
+        let legacy = r#"{"transport":0,"video":0,"resolution":0,"fps":0,"bandwidth":0}"#;
+        let mut prefs = Preferences::parse(legacy).unwrap();
+        assert!(!prefs.host_request().unwrap().constant_fps);
+        prefs.select("pacing", 1).unwrap();
+        assert!(prefs.host_request().unwrap().constant_fps);
+        assert!(prefs.select("pacing", 2).is_err());
+        assert!(
+            Preferences::parse(&serde_json::to_string(&prefs).unwrap())
+                .unwrap()
+                .host_request()
+                .unwrap()
+                .constant_fps
+        );
     }
 
     #[test]

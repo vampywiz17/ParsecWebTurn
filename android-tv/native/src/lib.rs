@@ -50,3 +50,12 @@ pub mod video_android;
 
 #[cfg(target_os = "android")]
 mod android;
+
+#[cfg(target_os = "android")]
+#[path = "../../../src-native/src/bud_routes.rs"]
+mod bud_routes;
+pub mod local_setup;
+pub mod network;
+pub mod overlay;
+#[path = "../../../src-native/src/turn_configuration.rs"]
+mod turn_configuration;
