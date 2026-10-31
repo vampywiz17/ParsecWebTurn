@@ -516,7 +516,7 @@ pub(super) fn run(
         std::thread::park_timeout(Duration::from_millis(100).min(controller_wait));
     }
     if established {
-        let _ = pads.focus(false, &mut controllers, |frame| attempt.send(frame));
+        let _ = pads.disconnect(&mut controllers, |frame| attempt.send(frame));
         let _ = attempt.send(&crate::control::header(24, 0, 0, 0));
     }
     drop(attempt);

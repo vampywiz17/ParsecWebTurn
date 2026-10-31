@@ -377,7 +377,7 @@ fn run(request: Request, stop: &AtomicBool, status: &Mutex<Value>) -> Result<()>
         }
         thread::park_timeout(Duration::from_millis(25));
     }
-    let _ = pads.focus(false, &mut motors, |f| {
+    let _ = pads.disconnect(&mut motors, |f| {
         connection
             .attempt
             .send_binary(0, bytes::Bytes::copy_from_slice(f))

@@ -93,9 +93,12 @@ impl Manager {
                 if let Some(id) = slot.device {
                     motors.rumble(id, 0, 0);
                 }
-                if slot.sent.take().is_some() {
-                    send(&report(pad, State::default()))?;
-                    send(&crate::control::header(6, 0, 0, pad as i32))?;
+                if let Some(previous) = slot.sent {
+                    if previous != State::default() {
+                        send(&report(pad, State::default()))?;
+                    }
+                    // Keep the host device: opening a local menu is not hot-unplug.
+                    slot.sent = Some(State::default());
                 }
                 slot.state = State::default();
                 slot.digital_triggers = 0;
@@ -180,6 +183,17 @@ impl Manager {
         self.slots[p] = Slot::default();
         Ok(())
     }
+    pub fn disconnect(
+        &mut self,
+        motors: &mut impl Motors,
+        mut send: impl FnMut(&[u8]) -> Result<()>,
+    ) -> Result<()> {
+        for id in self.slots.map(|s| s.device).into_iter().flatten() {
+            self.remove(id, motors, &mut send)?;
+        }
+        self.active = false;
+        Ok(())
+    }
     pub fn feedback(&self, pad: u32, low: u8, high: u8, motors: &mut impl Motors) {
         if let Some(s) = self
             .slots
@@ -261,6 +275,11 @@ mod events {
             match event {
                 Event::Button(_, mask, down) => {
                     if down {
+                        // A non-repeated physical edge is fresh input, unlike a
+                        // polled snapshot of a button held across focus loss.
+                        if self.active {
+                            slot.blocked = false;
+                        }
                         slot.state.buttons |= mask;
                     } else {
                         slot.state.buttons &= !mask;
@@ -268,6 +287,9 @@ mod events {
                 }
                 Event::TriggerButton(_, mask, down) => {
                     if down {
+                        if self.active {
+                            slot.blocked = false;
+                        }
                         slot.digital_triggers |= mask;
                     } else {
                         slot.digital_triggers &= !mask;
@@ -399,6 +421,30 @@ mod tests {
         );
     }
     #[test]
+    fn local_menu_keeps_host_pad_and_accepts_first_fresh_button_after_return() {
+        let mut m = Manager::default();
+        let mut motors = Output::default();
+        let mut frames = Vec::new();
+        let mut send = |f: &[u8]| {
+            frames.push(f.to_vec());
+            Ok(())
+        };
+        for e in [
+            Event::Focus(true),
+            Event::Button(1, 0x1000, true),
+            Event::Focus(false),
+            Event::Focus(true),
+            Event::Button(1, 0x2000, true),
+        ] {
+            m.event(e, &mut motors, &mut send).unwrap();
+        }
+        m.disconnect(&mut motors, &mut send).unwrap();
+        assert_eq!(frames.len(), 5);
+        assert_eq!(&frames[2][16..18], &0x2000u16.to_be_bytes());
+        assert!(frames[..4].iter().all(|f| f[12] == 23));
+        assert_eq!(frames[4][12], 6);
+    }
+    #[test]
     fn disconnected_slots_are_not_polled_at_input_rate() {
         struct Devices {
             reads: usize,
@@ -509,13 +555,13 @@ mod tests {
         m.update(99, a, &mut send).unwrap();
         m.remove(99, &mut motors, &mut send).unwrap();
         m.update(101, a, &mut send).unwrap();
-        assert_eq!(frames.len(), 8);
+        assert_eq!(frames.len(), 7);
         assert_eq!(&frames[1][16..18], &0x3000u16.to_be_bytes());
         assert_eq!(
-            frames[3].as_slice(),
+            frames[5].as_slice(),
             &crate::control::header(6, 0, 0, 0)[..]
         );
-        assert_eq!(&frames[7][..4], &0i32.to_be_bytes());
+        assert_eq!(&frames[6][..4], &0i32.to_be_bytes());
     }
     #[test]
     fn axis_bursts_keep_button_and_trigger_edges_and_bound_memory() {
