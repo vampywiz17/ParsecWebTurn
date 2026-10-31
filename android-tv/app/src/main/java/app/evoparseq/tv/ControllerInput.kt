@@ -13,7 +13,6 @@ import android.view.MotionEvent
 internal class ControllerInput(context: Context) : InputManager.InputDeviceListener {
     private val input = context.getSystemService(Context.INPUT_SERVICE) as InputManager
     private val main = Handler(Looper.getMainLooper())
-    private val supportedKeys = setOf(19,20,21,22,96,97,99,100,102,103,104,105,106,107,108,109)
     private val mappings = mutableMapOf<Int, Mapping>()
     private val vibrating = mutableSetOf<Int>()
     private var closed = false
@@ -34,12 +33,21 @@ internal class ControllerInput(context: Context) : InputManager.InputDeviceListe
             (it.sources and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK)
     }
     fun key(event: KeyEvent): Boolean {
-        if (!enabled || controller(event.deviceId) == null) return false
-        if (event.keyCode !in supportedKeys) return false
-        if (event.isCanceled) NativeCore.controllerRemoved(event.deviceId)
-        else if (event.repeatCount == 0 && (event.action == KeyEvent.ACTION_DOWN || event.action == KeyEvent.ACTION_UP))
-            NativeCore.controllerButton(event.deviceId, event.keyCode, event.action == KeyEvent.ACTION_DOWN)
-        return true
+        if (!enabled) return false
+        val device = controller(event.deviceId) ?: return false
+        val code = event.keyCode
+        if (!KeyEvent.isGamepadButton(code) && code !in KeyEvent.KEYCODE_DPAD_UP..KeyEvent.KEYCODE_DPAD_RIGHT) return false
+        if (code == KeyEvent.KEYCODE_BUTTON_MODE) return false // Android-owned Guide/Home.
+        if (event.isCanceled) { NativeCore.controllerRemoved(device.id); return true }
+        if (event.repeatCount != 0) return true
+        val m = mappings.getOrPut(device.id) { Mapping(device) }
+        // Some devices emit BOTH an analog trigger and a digital key. Only use
+        // the key as fallback when the device declares no corresponding axis.
+        if ((code == KeyEvent.KEYCODE_BUTTON_L2 && m.has(m.lt)) ||
+            (code == KeyEvent.KEYCODE_BUTTON_R2 && m.has(m.rt))) return true
+        return if (event.action == KeyEvent.ACTION_DOWN || event.action == KeyEvent.ACTION_UP)
+            NativeCore.controllerButton(device.id, code, event.action == KeyEvent.ACTION_DOWN)
+        else false
     }
     private class Mapping(private val device: InputDevice) {
         fun has(axis: Int) = device.getMotionRange(axis, InputDevice.SOURCE_JOYSTICK) != null

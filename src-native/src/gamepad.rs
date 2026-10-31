@@ -153,6 +153,13 @@ impl Manager {
             return Ok(());
         }
         send(&report(p, state))?;
+        if slot.sent.is_none() {
+            crate::event_log::record(
+                "INFO",
+                "controller_forwarding_started",
+                serde_json::json!({"slot":p}),
+            );
+        }
         slot.sent = Some(state);
         Ok(())
     }

@@ -22,7 +22,7 @@ internal object NativeCore {
     external fun streamStatus(): String
     external fun controllerAdapter(adapter: ControllerInput?)
     external fun controllerFocus(active: Boolean)
-    external fun controllerButton(id: Int, code: Int, down: Boolean)
+    external fun controllerButton(id: Int, code: Int, down: Boolean): Boolean
     external fun controllerRemoved(id: Int)
     external fun controllerAxes(id: Int, x: Float, y: Float, rx: Float, ry: Float, lt: Float, rt: Float,
         hx: Float, hy: Float, fx: Float, fy: Float, frx: Float, fry: Float, flt: Float, frt: Float)

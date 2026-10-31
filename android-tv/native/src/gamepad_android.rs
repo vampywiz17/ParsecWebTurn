@@ -30,9 +30,9 @@ pub fn focus(active: bool) {
     ACTIVE.store(active, Ordering::Release);
     crate::stream::controller_event(Event::Focus(active));
 }
-pub fn button(id: i32, code: i32, down: bool) {
+pub fn button(id: i32, code: i32, down: bool) -> bool {
     if !ACTIVE.load(Ordering::Acquire) {
-        return;
+        return false;
     }
     let mask = match code {
         19 => 1,
@@ -56,11 +56,12 @@ pub fn button(id: i32, code: i32, down: bool) {
                 if code == 104 { 1 } else { 2 },
                 down,
             ));
-            return;
+            return true;
         }
-        _ => return,
+        _ => return false,
     };
     crate::stream::controller_event(Event::Button(id, mask, down));
+    true
 }
 pub fn axes(id: i32, values: [f32; 8], flat: [f32; 6]) {
     if !ACTIVE.load(Ordering::Acquire) {

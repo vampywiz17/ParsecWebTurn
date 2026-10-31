@@ -120,7 +120,8 @@ controller buttons are forwarded only while the overlay is hidden. After focus
 loss, release held buttons before joining again. On Windows, use an XInput
 controller and focus the stream with local menus closed. DirectInput-only pads
 need a separate future Windows adapter; no remapping driver is installed here.
-The unchanged official host needs its normal gamepad driver and guest permission.
+Home/Guide remains OS-owned. The unchanged official host needs its normal
+gamepad driver and guest permission.
 Test both transports, button chords, sticks/triggers, unplug/reconnect, focus
 loss, local menu isolation and device-supported rumble. Synthetic tests/builds
 are not evidence of live controller compatibility.

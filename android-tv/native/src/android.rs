@@ -373,7 +373,7 @@ pub extern "system" fn Java_app_evoparseq_tv_NativeCore_setOverlayVisible(
 
 #[no_mangle]
 pub extern "system" fn Java_app_evoparseq_tv_NativeCore_controllerAdapter(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _object: JObject,
     adapter: JObject,
 ) {
@@ -396,8 +396,8 @@ pub extern "system" fn Java_app_evoparseq_tv_NativeCore_controllerButton(
     id: i32,
     code: i32,
     down: jni::sys::jboolean,
-) {
-    crate::gamepad_android::button(id, code, down != 0);
+) -> jni::sys::jboolean {
+    u8::from(crate::gamepad_android::button(id, code, down != 0))
 }
 #[no_mangle]
 pub extern "system" fn Java_app_evoparseq_tv_NativeCore_controllerRemoved(
