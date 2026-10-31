@@ -5,13 +5,7 @@ use crate::turn_configuration::{cloudflare_request, validate_urls};
 use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::BTreeMap,
-    io::Write,
-    path::PathBuf,
-    sync::Mutex,
-    time::{Duration, Instant},
-};
+use std::{collections::BTreeMap, io::Write, path::PathBuf, sync::Mutex, time::Instant};
 
 use std::{io::Read, sync::Arc};
 use webrtc::ice_transport::ice_server::RTCIceServer;
@@ -631,6 +625,7 @@ fn atomic_write(path: &std::path::Path, raw: &[u8]) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
     #[cfg(feature = "bud")]
     #[test]
     fn promoted_settings_accept_old_keys_and_save_current_names() {

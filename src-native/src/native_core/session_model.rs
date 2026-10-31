@@ -2,7 +2,7 @@
 //! Native views own their controls and notifications; media workers stay separate.
 use super::{
     host_displays::Displays,
-    profile::{Resolution, Video, MAX_BANDWIDTH_MBPS, MAX_FPS},
+    profile::{Video, MAX_BANDWIDTH_MBPS, MAX_FPS},
 };
 #[cfg(test)]
 use crate::session_preferences::{number, resolution};
@@ -108,8 +108,8 @@ impl Status {
 }
 
 pub use crate::session_preferences::{
-    current_choice, resolution_text, PanelFields, BANDWIDTH_CHOICES, CLIENT_RESOLUTION,
-    FPS_CHOICES, HOST_RESOLUTION, RESOLUTION_CHOICES,
+    current_choice, resolution_text, PanelFields, BANDWIDTH_CHOICES, FPS_CHOICES, HOST_RESOLUTION,
+    RESOLUTION_CHOICES,
 };
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Notification {

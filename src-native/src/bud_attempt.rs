@@ -1,6 +1,4 @@
 //! Explicit BUD lifecycle. RTC attempts never enter this adapter.
-#[cfg(test)]
-use crate::bud_routes::relay_carrier;
 use crate::bud_routes::turn_relays;
 use anyhow::{ensure, Context, Result};
 use evoparseq_bud::{

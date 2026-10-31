@@ -1,7 +1,7 @@
 //! Session-facing transport selection. Both paths reuse the existing native
 //! decoders and renderer; WebRTC owns ICE/DTLS/SCTP, BUD keeps its HID adapter.
 use crate::{connection_settings::Manager, window::Window};
-use anyhow::{ensure, Context, Result};
+use anyhow::{ensure, Result};
 use serde_json::Value;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
